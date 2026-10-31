@@ -48,7 +48,7 @@ class LedgerCliTest(unittest.TestCase):
 
     def test_invalid_fill_does_not_partially_update_ledger(self):
         self.assertEqual(self.cli("anchor", "--effective-at", "2026-01-02T09:30:00Z",
-                                  "--cash", "100", "--holding", "563360=0",
+                                  "--cash", "0", "--holding", "563360=0",
                                   "--included-through", "2026-01-02T09:29:59Z").returncode, 0)
         before = self.cli("balance").stdout
         bad = self.cli("fill", "--id", "bad-fill", "--at", "2026-01-02T10:00:00Z",

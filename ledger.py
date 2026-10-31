@@ -38,14 +38,15 @@ def timestamp(value):
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def cents(value, name):
+def cents(value, name, allow_zero=False):
     try:
         amount = Decimal(value)
         scaled = amount * 100
     except (InvalidOperation, ValueError):
         raise ValueError(f"{name} must be a positive amount with at most 2 decimals")
-    if not amount.is_finite() or scaled != scaled.to_integral_value() or amount <= 0:
-        raise ValueError(f"{name} must be a positive amount with at most 2 decimals")
+    if not amount.is_finite() or scaled != scaled.to_integral_value() or amount < (0 if allow_zero else 1):
+        qualifier = "non-negative" if allow_zero else "positive"
+        raise ValueError(f"{name} must be a {qualifier} amount with at most 2 decimals")
     return int(scaled)
 
 
@@ -80,7 +81,7 @@ def anchor(args, db):
     included = timestamp(args.included_through)
     if included > effective:
         raise ValueError("included-through cannot be later than anchor effective time")
-    cash = cents(args.cash, "cash")
+    cash = cents(args.cash, "cash", allow_zero=True)
     holdings = [parse_holding(item) for item in args.holding]
     if len({symbol for symbol, _ in holdings}) != len(holdings):
         raise ValueError("each holding symbol may appear only once")
