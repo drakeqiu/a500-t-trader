@@ -21,8 +21,6 @@ dev = [
 target-version = "py314"
 line-length = 88
 
-[tool.uv]
-index-url = "https://pypi.org/simple"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
