@@ -1,4 +1,5 @@
 import argparse
+from datetime import date
 import json
 import sqlite3
 import sys
@@ -19,6 +20,11 @@ CREATE TABLE IF NOT EXISTS broker_snapshots (
     frozen_cash_cents INTEGER NOT NULL,
     frozen_holdings TEXT NOT NULL,
     reconciliation TEXT NOT NULL CHECK (reconciliation IN ('MATCH', 'MISMATCH'))
+);
+CREATE TABLE IF NOT EXISTS risk_stop_days (
+    trade_date TEXT PRIMARY KEY,
+    triggering_pnl_cents INTEGER NOT NULL,
+    triggered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -84,7 +90,7 @@ def status(args, db):
     print(f"openings: {'BLOCKED' if blocked else 'ALLOWED'}")
 
 
-def resources(args, db):
+def resource_projection(db):
     row = latest(db)
     snapshot_id, at, cash, raw_holdings, fills_through, orders_known, raw_covered, frozen_cash, raw_frozen_holdings, reconciliation = row
     holdings = json.loads(raw_holdings)
@@ -100,7 +106,6 @@ def resources(args, db):
             else:
                 cash += quantity * price
                 holdings[symbol] = holdings.get(symbol, 0) - quantity
-        # Fills after the snapshot are not part of its reconciliation but are decision-time facts.
         fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND occurred_at > ? ORDER BY occurred_at, fill_id", (at,)).fetchall()
         for _, symbol, side, quantity, price in fills:
             if side == "buy":
@@ -127,9 +132,16 @@ def resources(args, db):
     cash -= reserved_cash
     for symbol, quantity in reserved_holdings.items():
         holdings[symbol] = holdings.get(symbol, 0) - quantity
-    display_cash = f"{'-' if cash < 0 else ''}{abs(cash) // 100}.{abs(cash) % 100:02d}"
     if min([cash, *holdings.values()]) < 0:
         blocked = True
+    return (snapshot_id, at, reconciliation, blocked, total_cash, cash, total_holdings,
+            frozen_cash, frozen_holdings, reserved_cash, reserved_holdings, holdings)
+
+
+def resources(args, db):
+    (snapshot_id, at, reconciliation, blocked, total_cash, cash, total_holdings,
+     frozen_cash, frozen_holdings, reserved_cash, reserved_holdings, holdings) = resource_projection(db)
+    display_cash = f"{'-' if cash < 0 else ''}{abs(cash) // 100}.{abs(cash) % 100:02d}"
     print(f"snapshot: {snapshot_id} at {at}")
     print(f"reconciliation: {reconciliation if reconciliation != 'MATCH' else 'BLOCKED' if blocked else 'MATCH'}")
     display_total_cash = f"{total_cash // 100}.{total_cash % 100:02d}"
@@ -154,6 +166,39 @@ def resources(args, db):
     print("sellability evidence: unavailable; no confirmed broker sellable snapshot or verified exchange calendar")
     print(f"openings: {'BLOCKED' if blocked else 'ALLOWED'}")
 
+def risk(args, db):
+    candidate_risk = ledger.cents(args.candidate_risk, "candidate risk", allow_zero=True)
+    negative = args.daily_new_pnl.startswith("-")
+    daily_pnl = ledger.cents(args.daily_new_pnl[1:] if negative else args.daily_new_pnl,
+                             "daily new-entry P&L", allow_zero=True) * (-1 if negative else 1)
+    trade_date = date.today().isoformat()
+    if daily_pnl <= -30000:
+        with db:
+            db.execute("INSERT OR IGNORE INTO risk_stop_days (trade_date, triggering_pnl_cents) VALUES (?, ?)",
+                       (trade_date, daily_pnl))
+    stop = db.execute("SELECT triggering_pnl_cents FROM risk_stop_days WHERE trade_date = ?", (trade_date,)).fetchone()
+    blocked = []
+    if stop is not None:
+        blocked.append(f"daily stop remains locked after reaching {'-' if stop[0] < 0 else ''}{abs(stop[0]) // 100}.{abs(stop[0]) % 100:02d} yuan")
+    if candidate_risk > 24000:
+        blocked.append("candidate risk exceeds 240.00 yuan")
+    try:
+        if resource_projection(db)[3]:
+            blocked.append("resource projection is blocked by reconciliation or unavailable resources")
+    except ValueError:
+        blocked.append("resource projection unavailable; capture a reconciled snapshot")
+    entry_allowed = not blocked
+    action_allowed = entry_allowed if args.action == "entry" else True
+    print(f"action: {args.action}")
+    print(f"candidate risk: {candidate_risk // 100}.{candidate_risk % 100:02d} / 240.00")
+    print(f"daily new-entry net P&L: {'-' if daily_pnl < 0 else ''}{abs(daily_pnl) // 100}.{abs(daily_pnl) % 100:02d}; stop at -300.00")
+    print(f"new entry: {'ALLOWED' if entry_allowed else 'BLOCKED'}")
+    print(f"action status: {'AVAILABLE' if action_allowed else 'BLOCKED'}")
+    print("rationale: " + ("; ".join(blocked) if blocked else "candidate within both hard limits and resource projection is reconciled"))
+    if args.action != "entry" and not entry_allowed:
+        print("risk exit and accounting maintenance remain available while new entries are stopped")
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="Record external broker snapshots without changing the real ledger")
@@ -166,6 +211,10 @@ def main():
     create.add_argument("--holding", action="append", default=[], metavar="SYMBOL=QUANTITY")
     create.add_argument("--fills-through", help="inclusive fill coverage boundary; omission means unknown")
     create.add_argument("--orders-scope-known", action="store_true", help="confirm all broker-covered order IDs are identified")
+    decision = commands.add_parser("risk", help="decide whether a new entry is permitted; exits and accounting maintenance remain separate")
+    decision.add_argument("--candidate-risk", required=True, help="prospective risk in yuan, from the risk calculation")
+    decision.add_argument("--daily-new-pnl", required=True, help="today's new-entry net P&L in yuan")
+    decision.add_argument("--action", choices=("entry", "exit", "maintenance"), default="entry")
     create.add_argument("--covered-order", action="append", default=[], help="active order already represented in frozen resources")
     create.add_argument("--frozen-cash", default="0", help="cash frozen by broker, yuan")
     create.add_argument("--frozen-holding", action="append", default=[], metavar="SYMBOL=QUANTITY")
@@ -177,7 +226,7 @@ def main():
         try:
             db.executescript(orders.SCHEMA)
             db.executescript(SCHEMA)
-            {"capture": capture, "status": status, "resources": resources}[args.command](args, db)
+            {"capture": capture, "status": status, "resources": resources, "risk": risk}[args.command](args, db)
         finally:
             db.close()
     except (ValueError, sqlite3.Error) as error:
