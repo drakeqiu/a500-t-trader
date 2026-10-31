@@ -107,7 +107,7 @@ def anchor(args, db):
     print(f"anchor confirmed effective {effective}; included-through {included}")
 
 
-def project(db):
+def project(db, through=None):
     anchor_row = db.execute("SELECT cash_cents FROM anchor WHERE id = 1").fetchone()
     if anchor_row is None:
         raise ValueError("confirm a real account anchor first")
@@ -126,6 +126,8 @@ def project(db):
             "SELECT event_id, occurred_at, event_type, direction, amount_cents, symbol, quantity FROM account_events"
         )
     )
+    if through is not None:
+        events = [event for event in events if event[0] <= through]
     for _, _, _, kind, facts in sorted(events):
         if kind == "fill":
             symbol, side, qty, price = facts
@@ -158,6 +160,7 @@ def project(db):
                     raise ValueError(f"insufficient real holdings for {symbol}")
                 holdings[symbol] = held - qty
     return cash, holdings
+    
 
 
 def fill(args, db):
