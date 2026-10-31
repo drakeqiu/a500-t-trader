@@ -31,6 +31,21 @@ python3 shadow.py --db account.sqlite compare --price 563360=2.60
 ```
 
 `compare` reports real equity minus shadow equity at the supplied prices; it is an absolute net excess in yuan, not an annualized return. Supply a price for every held symbol. Cash flows and external holding adjustments are mirrored as confirmed account facts and shown by `ledger.py balance`. If a mirror would make real or shadow cash/holdings negative, the event is rejected atomically; after reconciling the real account, restart the comparison baseline with `reset --confirm-reset`. Reset intentionally starts net excess at zero. This deliberately mirrors only cash flows and explicitly identified holding transfers—not corporate actions or other unknown broker events.
+
+## Broker snapshots and reconciliation
+
+`snapshots.py` records broker observations separately from confirmed ledger facts. Snapshot cash and holdings are total account balances (not available-to-trade balances). `--fills-through` is an inclusive, evidence-backed boundary for fills already reflected in those balances; omission leaves fill coverage unknown. `--orders-scope-known` explicitly confirms that the list of orders represented in broker-frozen resources is complete; `--covered-order` identifies those order IDs. Frozen broker cash/holdings are deducted once, and active uncovered orders are reserved by stable order ID. Unknown scope, resource shortfalls, or a mismatch block opening.
+
+```sh
+python3 snapshots.py --db account.sqlite capture --id broker-1 \
+  --at 2026-10-31T10:30:00+08:00 --cash 9975 --holding 563360=110 \
+  --fills-through 2026-10-31T10:00:00+08:00 \
+  --orders-scope-known --covered-order buy-1 --frozen-cash 25
+python3 snapshots.py --db account.sqlite status
+python3 snapshots.py --db account.sqlite resources
+```
+
+`capture` reports whether the observation matches the real ledger projection at capture time; it never changes ledger balances. Resource projection starts from the snapshot, adds only fills later than its inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
 ## Actual fees and T groups
 
 Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. This reporting does not alter ledger cash or holdings.
