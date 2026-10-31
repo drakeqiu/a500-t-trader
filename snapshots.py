@@ -58,15 +58,24 @@ def realized_daily_pnl(db):
         FROM fills f LEFT JOIN fill_fees x USING (fill_id)
         WHERE f.applied=1 AND f.effective=1 ORDER BY f.occurred_at, f.fill_id
     """).fetchall()
-    matches, _ = ledger.fifo_matches((row[2], row[3], row) for row in rows)
+    lots = []
     pnl = {}
-    for opener, closer, matched in matches:
-        _, occurred, _, quantity, price, fee = closer
-        day = datetime.fromisoformat(occurred).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
-        gross = matched * (opener[4] - price if opener[2] == "sell" else price - opener[4])
-        opener_fee = opener[5] * matched // opener[3]
-        closer_fee = fee * matched // quantity
-        pnl[day] = pnl.get(day, 0) + gross - opener_fee - closer_fee
+    for fill_id, occurred, side, quantity, price, fee in rows:
+        remaining = quantity
+        while remaining and lots and lots[0][1] != side:
+            prior = lots[0]
+            matched = min(remaining, prior[2])
+            day = datetime.fromisoformat(occurred).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+            gross = matched * (prior[0] - price if prior[1] == "sell" else price - prior[0])
+            opener_fee = prior[3] * matched // prior[4]
+            closer_fee = fee * matched // quantity
+            pnl[day] = pnl.get(day, 0) + gross - opener_fee - closer_fee
+            remaining -= matched
+            prior[2] -= matched
+            if prior[2] == 0:
+                lots.pop(0)
+        if remaining:
+            lots.append([price, side, remaining, fee, quantity])
     return pnl
 
 
@@ -322,16 +331,24 @@ def risk(args, db):
         else:
             grouped.setdefault(group_id, []).append((side, quantity, price, fee))
     for fills in grouped.values():
-        matches, _ = ledger.fifo_matches((side, quantity, (side, price))
-                                         for side, quantity, price, fee in fills)
+        lots = []
         net_quantity = 0
+        realized = 0
         fees = 0
         for side, quantity, price, fee in fills:
             fees += fee
             net_quantity += quantity if side == "buy" else -quantity
-        realized = sum(matched * (opener_price - closer_price if opener_side == "sell"
-                                  else closer_price - opener_price)
-                       for (opener_side, opener_price), (_, closer_price), matched in matches)
+            remaining = quantity
+            while remaining and lots and lots[0][0] != side:
+                lot_side, lot_quantity, lot_price = lots[0]
+                matched = min(remaining, lot_quantity)
+                realized += matched * (lot_price - price if lot_side == "sell" else price - lot_price)
+                remaining -= matched
+                lots[0][1] -= matched
+                if lots[0][1] == 0:
+                    lots.pop(0)
+            if remaining:
+                lots.append([side, remaining, price])
         existing_risk += conservative_risk(abs(net_quantity)) + fees + max(0, -realized)
     pending_risk = 0
     for quantity, in db.execute("SELECT remaining_quantity FROM orders WHERE status IN ('open','partial')"):
@@ -360,38 +377,13 @@ def risk(args, db):
     except ValueError:
         blocked.append("resource projection unavailable; capture a reconciled snapshot")
     entry_allowed = not blocked
-    action_reasons = []
-    if args.action == "entry":
-        action_allowed = entry_allowed
-    elif args.action == "exit":
-        if not args.symbol:
-            action_reasons.append("exit requires a symbol to verify existing holdings")
-        else:
-            try:
-                projection = resource_projection(db)
-                if projection.blocked:
-                    action_reasons.append("resource projection is blocked; broker-confirmed sellable resources are unavailable")
-                elif args.symbol not in projection.sellable_holdings:
-                    action_reasons.append(f"broker-confirmed sellable quantity for {args.symbol} is unavailable")
-                else:
-                    available = projection.sellable_holdings[args.symbol]
-                    print(f"broker-confirmed sellable quantity: {available}")
-                    if available == 0:
-                        action_reasons.append(f"no broker-confirmed sellable quantity for {args.symbol}")
-                    elif candidate_quantity > available:
-                        action_reasons.append(f"exit quantity exceeds broker-confirmed sellable quantity for {args.symbol} ({available})")
-            except ValueError:
-                action_reasons.append("resource projection is unavailable; capture a reconciled snapshot with sellability evidence")
-        action_allowed = not action_reasons
-    else:
-        action_allowed = True
+    action_allowed = entry_allowed if args.action == "entry" else True
     print(f"candidate risk: {candidate_risk // 100}.{candidate_risk % 100:02d} / 240.00")
     daily_pnl = daily_by_day.get(trade_date, 0)
     print(f"daily realized P&L: {'-' if daily_pnl < 0 else ''}{abs(daily_pnl) // 100}.{abs(daily_pnl) % 100:02d}; stop at -300.00")
     print(f"new entry: {'ALLOWED' if entry_allowed else 'BLOCKED'}")
     print(f"action status: {'AVAILABLE' if action_allowed else 'BLOCKED'}")
-    reasons = blocked if args.action == "entry" else action_reasons
-    print("rationale: " + ("; ".join(reasons) if reasons else "candidate within both hard limits and resource projection is reconciled"))
+    print("rationale: " + ("; ".join(blocked) if blocked else "candidate within both hard limits and resource projection is reconciled"))
     if args.action != "entry" and not entry_allowed:
         print("risk exit and accounting maintenance remain available while new entries are stopped")
 
@@ -410,14 +402,13 @@ def main():
     create.add_argument("--t1-restricted-holding", action="append", default=[], metavar="SYMBOL=QUANTITY", help="broker-confirmed T+1 restricted quantity")
     create.add_argument("--fills-through", help="inclusive fill coverage boundary; omission means unknown")
     create.add_argument("--orders-scope-known", action="store_true", help="confirm all broker-covered order IDs are identified")
-    decision = commands.add_parser("risk", help="decide entry and evidence-backed exit availability; accounting maintenance remains separate")
+    decision = commands.add_parser("risk", help="decide whether a new entry is permitted; exits and accounting maintenance remain separate")
     decision.add_argument("--market-price", required=True, help="current explicit trusted market price, yuan")
     decision.add_argument("--candidate-quantity", required=True, help="candidate quantity in shares")
     decision.add_argument("--fee-rate", required=True, help="conservative per-leg fee rate")
     decision.add_argument("--stress-move", default="0.004", help="stress rate; minimum 0.40%%")
     decision.add_argument("--execution-buffer", default="0.001", help="execution buffer; minimum 0.10%%")
     decision.add_argument("--action", choices=("entry", "exit", "maintenance"), default="entry")
-    decision.add_argument("--symbol", help="existing holding symbol required to verify an exit")
     create.add_argument("--covered-order", action="append", default=[], help="active order already represented in frozen resources")
     create.add_argument("--frozen-cash", default="0", help="cash frozen by broker, yuan")
     create.add_argument("--frozen-holding", action="append", default=[], metavar="SYMBOL=QUANTITY")

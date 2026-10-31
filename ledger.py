@@ -38,25 +38,6 @@ CREATE TABLE IF NOT EXISTS anchor_history (
 """
 
 
-def fifo_matches(fills):
-    """Return FIFO matches and open lots for (side, quantity, payload) fills."""
-    lots = []
-    matches = []
-    for side, quantity, payload in fills:
-        remaining = quantity
-        while remaining and lots and lots[0][0] != side:
-            _, prior_quantity, prior_payload = lots[0]
-            matched = min(remaining, prior_quantity)
-            matches.append((prior_payload, payload, matched))
-            remaining -= matched
-            lots[0][1] -= matched
-            if lots[0][1] == 0:
-                lots.pop(0)
-        if remaining:
-            lots.append([side, remaining, payload])
-    return matches, lots
-
-
 def timestamp(value):
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -110,17 +91,14 @@ def connect(path):
     db.commit()
     return db
 
-def validate_symbol(symbol, name="symbol"):
-    if symbol != "563360":
-        raise ValueError(f"{name} must be security 563360 (SSE)")
-
 
 def parse_holding(value):
     try:
         symbol, amount = value.split("=", 1)
     except ValueError:
         raise ValueError("holding must use SYMBOL=QUANTITY")
-    validate_symbol(symbol, "holding symbol")
+    if not symbol or not symbol.isalnum():
+        raise ValueError("holding symbol must be alphanumeric")
     return symbol, quantity(amount, "holding quantity", allow_zero=True)
 
 
@@ -202,7 +180,8 @@ def _fill(args, db, supersedes=None):
     occurred = timestamp(args.at)
     recorded = timestamp(args.recorded_at) if args.recorded_at else now()
     symbol = args.symbol
-    validate_symbol(symbol)
+    if not symbol or not symbol.isalnum():
+        raise ValueError("symbol must be alphanumeric")
     if args.side not in ("buy", "sell"):
         raise ValueError("side must be buy or sell")
     qty, price = quantity(args.quantity, "quantity"), cents(args.price, "price")
@@ -254,16 +233,18 @@ def money(c):
 def rebuild(args, db):
     if not args.confirm_rebuild:
         raise ValueError("rebuild requires --confirm-rebuild")
+    before = project(db)
+    after = project(db)
     with db:
         before = project(db)
-        included = db.execute("SELECT included_through FROM anchor WHERE id = 1").fetchone()
-        if included is None:
-            raise ValueError("confirm a real account anchor first")
-        db.execute("UPDATE fills SET applied=CASE WHEN effective=1 AND occurred_at>? THEN 1 ELSE 0 END",
-                   (included[0],))
+        _, included = db.execute("SELECT effective_at, included_through FROM anchor WHERE id=1").fetchone()
+        db.execute("UPDATE fills SET applied=CASE WHEN occurred_at>? THEN 1 ELSE 0 END WHERE effective=1", (included,))
         after = project(db)
     print(f"before cash: {money(before[0])}")
     print("before holdings: " + ", ".join(f"{s}={q}" for s, q in sorted(before[1].items())))
+    print(f"after cash: {money(after[0])}")
+    print("after holdings: " + ", ".join(f"{s}={q}" for s, q in sorted(after[1].items())))
+    print("rebuild: derived applied-fill state recomputed; anchor and risk-stop latches preserved")
     print(f"after cash: {money(after[0])}")
     print("after holdings: " + ", ".join(f"{s}={q}" for s, q in sorted(after[1].items())))
 

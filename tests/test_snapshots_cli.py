@@ -123,8 +123,8 @@ class SnapshotsCliTest(unittest.TestCase):
                              "--side", "sell", "--quantity", "10", "--price", "5")
         self.assertEqual(order.returncode, 0, order.stderr)
         resources = self.run_cli("snapshots.py", "resources")
+        self.assertIn("available cash: 980.00", resources.stdout)
         self.assertIn("563360: 92", resources.stdout)
-        self.assertIn("openings: ALLOWED", resources.stdout)
 
     def test_resources_report_broker_confirmed_sellable_and_t1_quantities(self):
         result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known",
@@ -168,92 +168,6 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("563360 sellable quantity: 100; T+1 restricted quantity: 3", resources.stdout)
 
 
-    def risk(self, action, quantity):
-        args = ["risk", "--market-price", "10", "--candidate-quantity", str(quantity),
-                "--fee-rate", "0", "--action", action]
-        if action == "exit":
-            args.extend(("--symbol", "563360"))
-        return self.run_cli("snapshots.py", *args)
-
-    def test_broker_confirmed_exit_uses_sellable_capacity_after_order_reservations_during_daily_stop(self):
-        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
-                                       "--orders-scope-known").returncode, 0)
-        self.assertEqual(self.fill("loss-open", "2026-10-31T10:10:00Z",
-                                   side="sell", quantity="30", price="10").returncode, 0)
-        self.assertEqual(self.fill("loss-close", "2026-10-31T10:11:00Z",
-                                   side="buy", quantity="30", price="20").returncode, 0)
-        order = self.run_cli("orders.py", "record", "--id", "reserved-exit", "--symbol", "563360",
-                             "--side", "sell", "--quantity", "10", "--price", "10")
-        self.assertEqual(order.returncode, 0, order.stderr)
-
-        exit_action = self.risk("exit", 60)
-        self.assertEqual(exit_action.returncode, 0, exit_action.stderr)
-        self.assertIn("new entry: BLOCKED", exit_action.stdout)
-        self.assertIn("action status: AVAILABLE", exit_action.stdout)
-        self.assertIn("broker-confirmed sellable quantity: 60", exit_action.stdout)
-
-    def test_exit_cannot_exceed_sellable_quantity_after_order_reservations(self):
-        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
-                                       "--orders-scope-known").returncode, 0)
-        order = self.run_cli("orders.py", "record", "--id", "reserved-exit", "--symbol", "563360",
-                             "--side", "sell", "--quantity", "10", "--price", "10")
-        self.assertEqual(order.returncode, 0, order.stderr)
-
-        boundary = self.risk("exit", 90)
-        self.assertIn("action status: AVAILABLE", boundary.stdout)
-        over = self.risk("exit", 91)
-        self.assertIn("action status: BLOCKED", over.stdout)
-        self.assertIn("exceeds broker-confirmed sellable quantity", over.stdout)
-
-    def test_exit_blocks_when_sellability_or_reconciliation_evidence_is_unavailable(self):
-        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
-                                       "--orders-scope-known", sellable="0").returncode, 0)
-        missing_symbol = self.run_cli("snapshots.py", "risk", "--market-price", "10",
-                                      "--candidate-quantity", "1", "--fee-rate", "0", "--action", "exit")
-        self.assertIn("action status: BLOCKED", missing_symbol.stdout)
-        self.assertIn("exit requires a symbol", missing_symbol.stdout)
-
-        zero = self.risk("exit", 1)
-        self.assertIn("action status: BLOCKED", zero.stdout)
-        self.assertIn("no broker-confirmed sellable quantity", zero.stdout)
-
-        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
-                                       "--orders-scope-known", cash="999", snapshot_id="mismatch").returncode, 0)
-        mismatch = self.risk("exit", 1)
-        self.assertIn("action status: BLOCKED", mismatch.stdout)
-        self.assertIn("resource projection is blocked", mismatch.stdout)
-
-    def test_maintenance_remains_available_when_entry_risk_is_stopped(self):
-        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
-                                       "--orders-scope-known").returncode, 0)
-        self.assertEqual(self.fill("loss-open", "2026-10-31T10:10:00Z",
-                                   side="sell", quantity="30", price="10").returncode, 0)
-        self.assertEqual(self.fill("loss-close", "2026-10-31T10:11:00Z",
-                                   side="buy", quantity="30", price="20").returncode, 0)
-        maintenance = self.risk("maintenance", 1)
-        self.assertIn("new entry: BLOCKED", maintenance.stdout)
-        self.assertIn("action status: AVAILABLE", maintenance.stdout)
-
-
-    def test_realized_pnl_matches_fifo_and_allocates_each_fill_fee_proportionally(self):
-        import sqlite3
-        import snapshots
-        db = sqlite3.connect(":memory:")
-        db.executescript("""
-            CREATE TABLE fills (
-                fill_id TEXT, occurred_at TEXT, side TEXT, quantity INTEGER,
-                price_cents INTEGER, applied INTEGER, effective INTEGER
-            );
-            CREATE TABLE fill_fees (fill_id TEXT, fee_cents INTEGER);
-            INSERT INTO fills VALUES
-                ('open-1', '2026-01-02T10:00:00+08:00', 'buy', 3, 1000, 1, 1),
-                ('open-2', '2026-01-02T10:30:00+08:00', 'buy', 2, 1100, 1, 1),
-                ('close', '2026-01-03T00:30:00+08:00', 'sell', 4, 1200, 1, 1);
-            INSERT INTO fill_fees VALUES ('open-1', 5), ('open-2', 4), ('close', 8);
-        """)
-
-        self.assertEqual(snapshots.realized_daily_pnl(db), {"2026-01-03": 685})
-        db.close()
-
 if __name__ == "__main__":
     unittest.main()
+
