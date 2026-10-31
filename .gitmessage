@@ -1,0 +1,11 @@
+# Conventional Commits: type(scope): description
+# Types: feat, fix, docs, refactor, test, chore, ci (extend as needed)
+# Add ! before ':' for a breaking change, e.g. feat(api)!: change response format
+# Keep the subject concise and imperative.
+
+type(scope): description
+
+# Optional: explain the motivation and relevant context.
+
+# Optional footers: Closes #123 / Refs #123
+# Breaking changes: BREAKING CHANGE: describe impact and migration

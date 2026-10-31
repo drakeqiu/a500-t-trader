@@ -23,6 +23,29 @@ uv run python -m a500_t_trader
 
 The smoke test is run with `uv run pytest`.
 
+## Git commits
+
+This repository uses a repository-local Conventional Commits template. Git loads
+`.gitmessage` when you run `git commit`:
+
+```text
+type(scope): description
+```
+
+Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, and `ci`. The
+scope is optional; a body and footers are optional. Use `!` before the colon or
+a `BREAKING CHANGE:` footer to mark a breaking change. Edit the template as
+needed; lines beginning with `#` are guidance and are omitted from the commit
+message.
+
+To enable it in a fresh clone:
+
+```bash
+git config --local commit.template .gitmessage
+```
+
+The configuration is local to the clone and is not shared through the repository.
+
 ## CI
 
 GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and pull
