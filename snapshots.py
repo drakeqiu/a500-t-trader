@@ -109,6 +109,8 @@ def resources(args, db):
             else:
                 cash += quantity * price
                 holdings[symbol] = holdings.get(symbol, 0) - quantity
+    total_cash = cash
+    total_holdings = holdings.copy()
     cash -= frozen_cash
     for symbol, quantity in frozen_holdings.items():
         holdings[symbol] = holdings.get(symbol, 0) - quantity
@@ -130,10 +132,26 @@ def resources(args, db):
         blocked = True
     print(f"snapshot: {snapshot_id} at {at}")
     print(f"reconciliation: {reconciliation if reconciliation != 'MATCH' else 'BLOCKED' if blocked else 'MATCH'}")
-    print(f"cash: {display_cash}")
+    display_total_cash = f"{total_cash // 100}.{total_cash % 100:02d}"
+    print(f"projected total cash: {display_total_cash}")
+    print(f"available cash: {display_cash}")
     print("holdings:")
+    for symbol, quantity in sorted(total_holdings.items()):
+        print(f"{symbol}: {quantity}")
+    print(f"broker frozen cash: {frozen_cash // 100}.{frozen_cash % 100:02d}")
+    print("broker frozen holdings:")
+    for symbol, quantity in sorted(frozen_holdings.items()):
+        print(f"{symbol}: {quantity}")
+    print("active order reserved cash: " + f"{reserved_cash // 100}.{reserved_cash % 100:02d}")
+    print("active order reserved holdings:")
+    for symbol, quantity in sorted(reserved_holdings.items()):
+        print(f"{symbol}: {quantity}")
+    print("available holdings:")
     for symbol, quantity in sorted(holdings.items()):
         print(f"{symbol}: {quantity}")
+    for symbol in sorted(set(total_holdings) | set(holdings)):
+        print(f"{symbol} sellable quantity: UNAVAILABLE; T+1 restricted quantity: UNAVAILABLE")
+    print("sellability evidence: unavailable; no confirmed broker sellable snapshot or verified exchange calendar")
     print(f"openings: {'BLOCKED' if blocked else 'ALLOWED'}")
 
 
