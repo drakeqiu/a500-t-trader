@@ -38,6 +38,25 @@ CREATE TABLE IF NOT EXISTS anchor_history (
 """
 
 
+def fifo_matches(fills):
+    """Return FIFO matches and open lots for (side, quantity, payload) fills."""
+    lots = []
+    matches = []
+    for side, quantity, payload in fills:
+        remaining = quantity
+        while remaining and lots and lots[0][0] != side:
+            _, prior_quantity, prior_payload = lots[0]
+            matched = min(remaining, prior_quantity)
+            matches.append((prior_payload, payload, matched))
+            remaining -= matched
+            lots[0][1] -= matched
+            if lots[0][1] == 0:
+                lots.pop(0)
+        if remaining:
+            lots.append([side, remaining, payload])
+    return matches, lots
+
+
 def timestamp(value):
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))

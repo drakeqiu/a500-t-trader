@@ -58,24 +58,15 @@ def realized_daily_pnl(db):
         FROM fills f LEFT JOIN fill_fees x USING (fill_id)
         WHERE f.applied=1 AND f.effective=1 ORDER BY f.occurred_at, f.fill_id
     """).fetchall()
-    lots = []
+    matches, _ = ledger.fifo_matches((row[2], row[3], row) for row in rows)
     pnl = {}
-    for fill_id, occurred, side, quantity, price, fee in rows:
-        remaining = quantity
-        while remaining and lots and lots[0][1] != side:
-            prior = lots[0]
-            matched = min(remaining, prior[2])
-            day = datetime.fromisoformat(occurred).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
-            gross = matched * (prior[0] - price if prior[1] == "sell" else price - prior[0])
-            opener_fee = prior[3] * matched // prior[4]
-            closer_fee = fee * matched // quantity
-            pnl[day] = pnl.get(day, 0) + gross - opener_fee - closer_fee
-            remaining -= matched
-            prior[2] -= matched
-            if prior[2] == 0:
-                lots.pop(0)
-        if remaining:
-            lots.append([price, side, remaining, fee, quantity])
+    for opener, closer, matched in matches:
+        _, occurred, _, quantity, price, fee = closer
+        day = datetime.fromisoformat(occurred).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        gross = matched * (opener[4] - price if opener[2] == "sell" else price - opener[4])
+        opener_fee = opener[5] * matched // opener[3]
+        closer_fee = fee * matched // quantity
+        pnl[day] = pnl.get(day, 0) + gross - opener_fee - closer_fee
     return pnl
 
 
@@ -331,24 +322,16 @@ def risk(args, db):
         else:
             grouped.setdefault(group_id, []).append((side, quantity, price, fee))
     for fills in grouped.values():
-        lots = []
+        matches, _ = ledger.fifo_matches((side, quantity, (side, price))
+                                         for side, quantity, price, fee in fills)
         net_quantity = 0
-        realized = 0
         fees = 0
         for side, quantity, price, fee in fills:
             fees += fee
             net_quantity += quantity if side == "buy" else -quantity
-            remaining = quantity
-            while remaining and lots and lots[0][0] != side:
-                lot_side, lot_quantity, lot_price = lots[0]
-                matched = min(remaining, lot_quantity)
-                realized += matched * (lot_price - price if lot_side == "sell" else price - lot_price)
-                remaining -= matched
-                lots[0][1] -= matched
-                if lots[0][1] == 0:
-                    lots.pop(0)
-            if remaining:
-                lots.append([side, remaining, price])
+        realized = sum(matched * (opener_price - closer_price if opener_side == "sell"
+                                  else closer_price - opener_price)
+                       for (opener_side, opener_price), (_, closer_price), matched in matches)
         existing_risk += conservative_risk(abs(net_quantity)) + fees + max(0, -realized)
     pending_risk = 0
     for quantity, in db.execute("SELECT remaining_quantity FROM orders WHERE status IN ('open','partial')"):

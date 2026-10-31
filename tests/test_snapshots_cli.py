@@ -235,5 +235,25 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("action status: AVAILABLE", maintenance.stdout)
 
 
+    def test_realized_pnl_matches_fifo_and_allocates_each_fill_fee_proportionally(self):
+        import sqlite3
+        import snapshots
+        db = sqlite3.connect(":memory:")
+        db.executescript("""
+            CREATE TABLE fills (
+                fill_id TEXT, occurred_at TEXT, side TEXT, quantity INTEGER,
+                price_cents INTEGER, applied INTEGER, effective INTEGER
+            );
+            CREATE TABLE fill_fees (fill_id TEXT, fee_cents INTEGER);
+            INSERT INTO fills VALUES
+                ('open-1', '2026-01-02T10:00:00+08:00', 'buy', 3, 1000, 1, 1),
+                ('open-2', '2026-01-02T10:30:00+08:00', 'buy', 2, 1100, 1, 1),
+                ('close', '2026-01-03T00:30:00+08:00', 'sell', 4, 1200, 1, 1);
+            INSERT INTO fill_fees VALUES ('open-1', 5), ('open-2', 4), ('close', 8);
+        """)
+
+        self.assertEqual(snapshots.realized_daily_pnl(db), {"2026-01-03": 685})
+        db.close()
+
 if __name__ == "__main__":
     unittest.main()

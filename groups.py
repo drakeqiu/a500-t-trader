@@ -66,25 +66,15 @@ def report(args, db):
     if rows and rows[0][2] != expected:
         raise ValueError(f"{direction} group must begin with a {expected} fill")
 
-    lots = []
+    matches, lots = ledger.fifo_matches((row[2], row[3], row) for row in rows)
     matched_by_fill = {}
     gross = 0
     paired_quantity = 0
-    for fill_id, occurred, side, quantity, price, fee in rows:
-        remaining = quantity
-        while remaining and lots and lots[0][1] != side:
-            prior = lots[0]
-            matched = min(remaining, prior[3])
-            gross += matched * (prior[2] - price if prior[1] == "sell" else price - prior[2])
-            paired_quantity += matched
-            matched_by_fill[prior[0]] = matched_by_fill.get(prior[0], 0) + matched
-            matched_by_fill[fill_id] = matched_by_fill.get(fill_id, 0) + matched
-            remaining -= matched
-            prior[3] -= matched
-            if prior[3] == 0:
-                lots.pop(0)
-        if remaining:
-            lots.append([fill_id, side, price, remaining])
+    for opener, closer, matched in matches:
+        gross += matched * (opener[4] - closer[4] if opener[2] == "sell" else closer[4] - opener[4])
+        paired_quantity += matched
+        matched_by_fill[opener[0]] = matched_by_fill.get(opener[0], 0) + matched
+        matched_by_fill[closer[0]] = matched_by_fill.get(closer[0], 0) + matched
 
     paired_fee = 0
     unpaired_fee = 0
@@ -94,9 +84,9 @@ def report(args, db):
         unpaired_fee += fee - allocated
     exposure = {"buy": 0, "sell": 0}
     basis = 0
-    for fill_id, side, price, quantity in lots:
+    for side, quantity, row in lots:
         exposure[side] += quantity
-        basis += price * quantity
+        basis += row[4] * quantity
 
     print(f"group: {group_id}")
     print(f"direction: {direction}")
