@@ -31,3 +31,13 @@ python3 shadow.py --db account.sqlite compare --price 563360=2.60
 ```
 
 `compare` reports real equity minus shadow equity at the supplied prices; it is an absolute net excess in yuan, not an annualized return. Supply a price for every held symbol. Cash flows and external holding adjustments are mirrored as confirmed account facts and shown by `ledger.py balance`. If a mirror would make real or shadow cash/holdings negative, the event is rejected atomically; after reconciling the real account, restart the comparison baseline with `reset --confirm-reset`. Reset intentionally starts net excess at zero. This deliberately mirrors only cash flows and explicitly identified holding transfers—not corporate actions or other unknown broker events.
+## Actual fees and T groups
+
+Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. This reporting does not alter ledger cash or holdings.
+
+```sh
+python3 groups.py --db account.sqlite fee --fill-id broker-fill-123 --amount 0.05
+python3 groups.py --db account.sqlite add --group morning-1 --direction reverse --fill-id broker-fill-123
+python3 groups.py --db account.sqlite add --group morning-1 --direction reverse --fill-id broker-fill-124
+python3 groups.py --db account.sqlite report --group morning-1
+```
