@@ -68,13 +68,19 @@ def capture(args, db):
 
 def status(args, db):
     row = latest(db)
-    snapshot_id, at, _, _, fills_through, orders_known, _, _, _, reconciliation = row
+    snapshot_id, at, _, _, fills_through, orders_known, raw_covered, frozen_cash, raw_frozen_holdings, reconciliation = row
+    covered = json.loads(raw_covered)
+    frozen_holdings = json.loads(raw_frozen_holdings)
     fills_known = fills_through is not None
     blocked = reconciliation != "MATCH" or not fills_known or not orders_known
     print(f"snapshot: {snapshot_id} at {at}")
+    print("covered fields: cash, holdings")
     print(f"reconciliation: {reconciliation if not blocked else 'BLOCKED' if reconciliation == 'MATCH' else reconciliation}")
     print(f"fills coverage: {'THROUGH ' + fills_through if fills_known else 'UNKNOWN'}")
     print(f"orders coverage: {'KNOWN' if orders_known else 'UNKNOWN'}")
+    print(f"covered order IDs: {', '.join(covered) if covered else 'none'}")
+    print(f"broker frozen cash: {frozen_cash // 100}.{frozen_cash % 100:02d}")
+    print("broker frozen holdings: " + (", ".join(f"{symbol}={quantity}" for symbol, quantity in sorted(frozen_holdings.items())) or "none"))
     print(f"openings: {'BLOCKED' if blocked else 'ALLOWED'}")
 
 
