@@ -82,7 +82,7 @@ def report(args, db):
                COALESCE(x.fee_cents, 0)
         FROM group_fills g JOIN fills f USING (fill_id)
         LEFT JOIN fill_fees x USING (fill_id)
-        WHERE g.group_id = ? ORDER BY f.occurred_at, f.fill_id
+        WHERE g.group_id = ? AND f.effective=1 ORDER BY f.occurred_at, f.fill_id
     """, (group_id,)).fetchall()
     expected = "sell" if direction == "positive" else "buy"
     if rows and rows[0][2] != expected:
