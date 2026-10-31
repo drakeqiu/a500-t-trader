@@ -1,5 +1,6 @@
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import sqlite3
 import sys
@@ -64,7 +65,7 @@ def realized_daily_pnl(db):
         while remaining and lots and lots[0][1] != side:
             prior = lots[0]
             matched = min(remaining, prior[2])
-            day = ledger.timestamp(occurred)[:10]
+            day = datetime.fromisoformat(occurred).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
             gross = matched * (prior[0] - price if prior[1] == "sell" else price - prior[0])
             opener_fee = prior[3] * matched // prior[4]
             closer_fee = fee * matched // quantity
@@ -116,8 +117,10 @@ def capture(args, db):
     fills_through = ledger.timestamp(args.fills_through) if args.fills_through else None
     if fills_through and fills_through > at:
         raise ValueError("fill coverage cannot extend beyond snapshot business time")
-    ledger_cash, ledger_holdings = ledger.project(db, through=at)
-    reconciliation = "MATCH" if ledger_cash == ledger.cents(args.cash, "cash", allow_zero=True) and ledger_holdings == {k: v for k, v in holdings.items() if v} else "MISMATCH"
+    ledger_cash, ledger_holdings = ledger.project(db, at)
+    broker_cash = ledger.cents(args.cash, "cash", allow_zero=True)
+    broker_holdings = {key: value for key, value in holdings.items() if value}
+    reconciliation = "MATCH" if ledger_cash == broker_cash and ledger_holdings == broker_holdings else "MISMATCH"
     sellable = pairs(args.sellable_holding, lambda value, name: ledger.quantity(value, name, allow_zero=True), "sellable holding")
     restricted = pairs(args.t1_restricted_holding, lambda value, name: ledger.quantity(value, name, allow_zero=True), "T+1 restricted holding")
     if set(sellable) - set(holdings) or set(restricted) - set(holdings):
@@ -126,13 +129,19 @@ def capture(args, db):
            for symbol, quantity in holdings.items()):
         raise ValueError("sellable and T+1 restricted quantities exceed total holdings")
     db.execute("INSERT INTO broker_snapshots (snapshot_id, business_at, cash_cents, holdings, fills_through, orders_scope_known, covered_orders, frozen_cash_cents, frozen_holdings, reconciliation, sellable_holdings, t1_restricted_holdings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-               (snapshot_id, at, ledger.cents(args.cash, "cash", allow_zero=True), json.dumps(holdings, sort_keys=True),
+               (snapshot_id, at, broker_cash, json.dumps(holdings, sort_keys=True),
                 fills_through, int(args.orders_scope_known), json.dumps(covered), ledger.cents(args.frozen_cash, "frozen cash", allow_zero=True),
                 json.dumps(frozen_holdings, sort_keys=True), reconciliation, json.dumps(sellable, sort_keys=True),
                 json.dumps(restricted, sort_keys=True)))
     db.commit()
     print(f"snapshot {snapshot_id} captured at {at}")
     print(f"reconciliation: {reconciliation}")
+    print(f"cash delta (broker - ledger): {ledger.money(broker_cash - ledger_cash)}")
+    for symbol in sorted(set(holdings) | set(ledger_holdings)):
+        delta = holdings.get(symbol, 0) - ledger_holdings.get(symbol, 0)
+        print(f"{symbol} holdings delta (broker - ledger): {delta}")
+    if reconciliation != "MATCH":
+        print("explicit reconciliation confirmation required before openings can be allowed")
 
 
 def status(args, db):
@@ -157,6 +166,7 @@ def resource_projection(db):
     row = latest(db)
     snapshot_id, at, cash, raw_holdings, fills_through, orders_known, raw_covered, frozen_cash, raw_frozen_holdings, reconciliation, raw_sellable, raw_restricted = row
     holdings = json.loads(raw_holdings)
+    sell_proceeds = 0
     frozen_holdings = json.loads(raw_frozen_holdings)
     sellable = json.loads(raw_sellable)
     restricted = json.loads(raw_restricted)
@@ -164,37 +174,50 @@ def resource_projection(db):
     blocked = (reconciliation != "MATCH" or fills_through is None or not orders_known or
                any(symbol not in sellable or symbol not in restricted for symbol in holdings))
     if fills_through:
-        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND effective=1 AND occurred_at > ? AND occurred_at <= ? ORDER BY occurred_at, fill_id", (fills_through, at)).fetchall()
-        for _, symbol, side, quantity, price in fills:
+        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents, COALESCE(x.fee_cents, 0) FROM fills f LEFT JOIN fill_fees x USING (fill_id) WHERE f.applied=1 AND f.effective=1 AND f.occurred_at > ? AND f.occurred_at <= ? ORDER BY f.occurred_at, f.fill_id", (fills_through, at)).fetchall()
+        for _, symbol, side, quantity, price, fee in fills:
             if side == "buy":
-                cash -= quantity * price
+                cash -= quantity * price + fee
                 holdings[symbol] = holdings.get(symbol, 0) + quantity
                 restricted[symbol] = restricted.get(symbol, 0) + quantity
             else:
-                cash += quantity * price
+                proceeds = quantity * price
+                cash += proceeds - fee
+                sell_proceeds += proceeds
                 holdings[symbol] = holdings.get(symbol, 0) - quantity
                 if symbol not in sellable or sellable[symbol] < quantity:
                     blocked = True
                     sellable[symbol] = 0
                 else:
                     sellable[symbol] -= quantity
-        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND effective=1 AND occurred_at > ? ORDER BY occurred_at, fill_id", (at,)).fetchall()
-        for _, symbol, side, quantity, price in fills:
+        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents, COALESCE(x.fee_cents, 0) FROM fills f LEFT JOIN fill_fees x USING (fill_id) WHERE f.applied=1 AND f.effective=1 AND f.occurred_at > ? ORDER BY f.occurred_at, f.fill_id", (at,)).fetchall()
+        for _, symbol, side, quantity, price, fee in fills:
             if side == "buy":
-                cash -= quantity * price
+                cash -= quantity * price + fee
                 holdings[symbol] = holdings.get(symbol, 0) + quantity
                 restricted[symbol] = restricted.get(symbol, 0) + quantity
             else:
-                cash += quantity * price
+                proceeds = quantity * price
+                cash += proceeds - fee
+                sell_proceeds += proceeds
                 holdings[symbol] = holdings.get(symbol, 0) - quantity
                 if symbol not in sellable or sellable[symbol] < quantity:
                     blocked = True
                     sellable[symbol] = 0
                 else:
                     sellable[symbol] -= quantity
+    account_events = db.execute("SELECT event_type, direction, amount_cents, symbol, quantity FROM account_events WHERE occurred_at > ? ORDER BY occurred_at, event_id", (at,)).fetchall()
+    for event_type, direction, amount, symbol, quantity in account_events:
+        if event_type == "cash_flow":
+            cash += amount if direction == "in" else -amount
+        elif direction == "in":
+            holdings[symbol] = holdings.get(symbol, 0) + quantity
+            restricted[symbol] = restricted.get(symbol, 0) + quantity
+        else:
+            holdings[symbol] = holdings.get(symbol, 0) - quantity
     total_cash = cash
     total_holdings = holdings.copy()
-    cash -= frozen_cash
+    cash -= sell_proceeds + frozen_cash
     for symbol, quantity in frozen_holdings.items():
         holdings[symbol] = holdings.get(symbol, 0) - quantity
     reserved_cash = 0
@@ -295,18 +318,43 @@ def risk(args, db):
     def conservative_risk(quantity):
         return int((Decimal(quantity * market) * risk_rate).to_integral_value(rounding="ROUND_CEILING"))
     candidate_risk = conservative_risk(candidate_quantity)
+    grouped = {}
     existing_risk = 0
-    for (quantity,) in db.execute("""
-        SELECT SUM(CASE f.side WHEN 'buy' THEN f.quantity ELSE -f.quantity END)
-        FROM trade_groups g JOIN group_fills gf USING (group_id)
-        JOIN fills f USING (fill_id) WHERE f.effective=1 GROUP BY g.group_id
+    for fill_id, side, quantity, price, fee, group_id in db.execute("""
+        SELECT f.fill_id, f.side, f.quantity, f.price_cents, COALESCE(x.fee_cents, 0), g.group_id
+        FROM fills f LEFT JOIN fill_fees x USING (fill_id)
+        LEFT JOIN group_fills gf USING (fill_id) LEFT JOIN trade_groups g USING (group_id)
+        WHERE f.effective=1 AND f.applied=1 ORDER BY f.occurred_at, f.fill_id
     """):
-        existing_risk += conservative_risk(abs(quantity or 0))
+        if group_id is None:
+            existing_risk += conservative_risk(quantity) + fee
+        else:
+            grouped.setdefault(group_id, []).append((side, quantity, price, fee))
+    for fills in grouped.values():
+        lots = []
+        net_quantity = 0
+        realized = 0
+        fees = 0
+        for side, quantity, price, fee in fills:
+            fees += fee
+            net_quantity += quantity if side == "buy" else -quantity
+            remaining = quantity
+            while remaining and lots and lots[0][0] != side:
+                lot_side, lot_quantity, lot_price = lots[0]
+                matched = min(remaining, lot_quantity)
+                realized += matched * (lot_price - price if lot_side == "sell" else price - lot_price)
+                remaining -= matched
+                lots[0][1] -= matched
+                if lots[0][1] == 0:
+                    lots.pop(0)
+            if remaining:
+                lots.append([side, remaining, price])
+        existing_risk += conservative_risk(abs(net_quantity)) + fees + max(0, -realized)
     pending_risk = 0
     for quantity, in db.execute("SELECT remaining_quantity FROM orders WHERE status IN ('open','partial')"):
         pending_risk += conservative_risk(quantity)
     candidate_risk += existing_risk + pending_risk
-    trade_date = datetime.now(timezone.utc).date().isoformat()
+    trade_date = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     daily_by_day = realized_daily_pnl(db)
     with db:
         for pnl_date, amount in daily_by_day.items():
@@ -320,8 +368,12 @@ def risk(args, db):
     if candidate_risk > 24000:
         blocked.append("candidate risk exceeds 240.00 yuan")
     try:
-        if resource_projection(db).blocked:
+        projection = resource_projection(db)
+        if projection.blocked:
             blocked.append("resource projection is blocked by reconciliation or unavailable resources")
+        candidate_cash = int((Decimal(candidate_quantity * market) * (1 + fee_rate)).to_integral_value(rounding="ROUND_CEILING"))
+        if projection.cash - candidate_cash < 16000000:
+            blocked.append("entry would breach the required 160000.00 yuan cash reserve")
     except ValueError:
         blocked.append("resource projection unavailable; capture a reconciled snapshot")
     entry_allowed = not blocked
@@ -338,7 +390,7 @@ def risk(args, db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Record external broker snapshots without changing the real ledger")
+    parser = argparse.ArgumentParser(description="OFFLINE broker-observation bookkeeping only; not for trading until broker rules, SDK integration, and live testing are complete")
     parser.add_argument("--db", required=True, help="SQLite account database")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("capture", help="record a broker observation and its evidence scope")

@@ -137,7 +137,7 @@ def report(args, db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Record fill fees and report auditable T groups")
+    parser = argparse.ArgumentParser(description="OFFLINE fee and T-group bookkeeping only; not for trading until broker rules, SDK integration, and live testing are complete")
     parser.add_argument("--db", required=True, help="SQLite ledger file")
     commands = parser.add_subparsers(dest="command", required=True)
     fee = commands.add_parser("fee", help="record actual fee for a broker-confirmed fill")

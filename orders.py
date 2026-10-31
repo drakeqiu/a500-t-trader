@@ -88,9 +88,9 @@ def update_status(args, db):
             raise ValueError("terminal order status requires --broker-confirmed-terminal")
         if args.filled_quantity is None:
             raise ValueError("terminal order status requires --filled-quantity reconciliation")
-        expected_filled = order_quantity - previous_remaining
-        if args.status == "rejected" and args.filled_quantity != expected_filled:
-            raise ValueError("rejected order cumulative fills must reconcile to previously recorded fills")
+        expected_filled = order_quantity if args.status == "filled" else order_quantity - previous_remaining
+        if args.filled_quantity != expected_filled:
+            raise ValueError("terminal order cumulative fills must reconcile exactly")
         if args.status == "filled":
             remaining = 0
     if args.status == "filled":
@@ -146,7 +146,7 @@ def active(args, db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Record manual broker orders and their resource reservations")
+    parser = argparse.ArgumentParser(description="OFFLINE order reservation bookkeeping only; not for trading until broker rules, SDK integration, and live testing are complete")
     parser.add_argument("--db", required=True, help="SQLite ledger file")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("record", help="record an order submitted in the broker client")

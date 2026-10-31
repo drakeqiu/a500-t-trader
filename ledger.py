@@ -134,24 +134,27 @@ def project(db, through=None):
     cash, included = anchor_row
     holdings = dict(db.execute("SELECT symbol, quantity FROM holdings"))
     events = []
-    events.extend((at, 0, event_id, "fill", (symbol, side, qty, price)) for event_id, at, symbol, side, qty, price in db.execute(
-        "SELECT fill_id, occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND effective=1"))
+    events.extend((at, 0, event_id, "fill", (symbol, side, qty, price, fee)) for event_id, at, symbol, side, qty, price, fee in db.execute(
+        "SELECT f.fill_id, f.occurred_at, f.symbol, f.side, f.quantity, f.price_cents, COALESCE(x.fee_cents, 0) FROM fills f LEFT JOIN fill_fees x USING (fill_id) WHERE f.applied=1 AND f.effective=1"))
     events.extend((at, 1, event_id, kind, (direction, amount, symbol, qty)) for event_id, at, kind, direction, amount, symbol, qty in db.execute(
         "SELECT event_id, occurred_at, event_type, direction, amount_cents, symbol, quantity FROM account_events"))
     events = [event for event in events if event[0] > included and (through is None or event[0] <= through)]
     for _, _, _, kind, facts in sorted(events):
         if kind == "fill":
-            symbol, side, qty, price = facts
+            symbol, side, qty, price, fee = facts
             held = holdings.get(symbol, 0)
+            cost = qty * price
             if side == "buy":
-                if cash < qty * price:
+                if cash < cost + fee:
                     raise ValueError("insufficient cash")
-                cash -= qty * price
+                cash -= cost + fee
                 holdings[symbol] = held + qty
             else:
                 if held < qty:
                     raise ValueError("insufficient holdings")
-                cash += qty * price
+                if cash + cost < fee:
+                    raise ValueError("insufficient cash for recorded fee")
+                cash += cost - fee
                 holdings[symbol] = held - qty
         elif kind == "cash_flow":
             direction, amount, _, _ = facts
@@ -291,7 +294,7 @@ def balance(args, db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Local confirmed-account fill ledger")
+    parser = argparse.ArgumentParser(description="OFFLINE ledger only; not for trading until broker rules, SDK integration, and live testing are complete")
     parser.add_argument("--db", required=True, help="SQLite account database")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("anchor", help="record initial real account anchor")

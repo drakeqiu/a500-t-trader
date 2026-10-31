@@ -145,7 +145,7 @@ def compare(args, db):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Confirmed real-vs-shadow account performance")
+    parser = argparse.ArgumentParser(description="OFFLINE shadow comparison only; not for trading until broker rules, SDK integration, and live testing are complete")
     parser.add_argument("--db", required=True, help="SQLite account ledger")
     commands = parser.add_subparsers(dest="command", required=True)
     reset_parser = commands.add_parser("reset", help="copy the confirmed real account into shadow")

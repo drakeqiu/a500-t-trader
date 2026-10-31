@@ -28,6 +28,10 @@ class OrdersCliTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(CLI), "--db", str(self.db), *args],
                               text=True, capture_output=True)
 
+    def run_module(self, module, *args):
+        return subprocess.run([sys.executable, str(ROOT / module), "--db", str(self.db), *args],
+                              text=True, capture_output=True)
+
     def test_only_supported_security_can_be_ordered(self):
         unsupported = self.cli("record", "--id", "other", "--symbol", "510300", "--side", "buy",
                               "--quantity", "100", "--price", "1")
@@ -69,9 +73,14 @@ class OrdersCliTest(unittest.TestCase):
 
         unaudited_terminal = self.cli("status", "--id", "buy-1", "--status", "filled")
         self.assertEqual(unaudited_terminal.returncode, 2)
+        inconsistent_filled = self.cli("status", "--id", "buy-1", "--status", "filled",
+                                       "--broker-confirmed-terminal", "--filled-quantity", "19")
+        self.assertEqual(inconsistent_filled.returncode, 2)
+        self.assertIn("cumulative fills must reconcile", inconsistent_filled.stderr)
         confirmed_terminal = self.cli("status", "--id", "buy-1", "--status", "filled",
                                       "--broker-confirmed-terminal", "--filled-quantity", "20")
         self.assertEqual(confirmed_terminal.returncode, 0, confirmed_terminal.stderr)
+
         self.assertEqual(self.cli("cancel", "--id", "sell-1").returncode, 2)
         canceled = self.cli("cancel", "--id", "sell-1", "--confirmed")
         self.assertEqual(canceled.returncode, 0, canceled.stderr)
@@ -128,17 +137,64 @@ class OrdersCliTest(unittest.TestCase):
                             "--broker-confirmed-terminal", "--filled-quantity", "5")
         self.assertEqual(rejected.returncode, 0, rejected.stderr)
     def test_risk_decision_allows_exact_budget_boundary_with_explanation(self):
-        snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
-                                   "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
-                                   "--cash", "1000", "--holding", "563360=100",
-                                   "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
-                                   "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
-                                  text=True, capture_output=True)
+        self.reanchor_for_risk("250000")
+        snapshot = self.snapshot_for_risk(cash="250000")
         self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
         result = self.risk_cli("240")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("new entry: ALLOWED", result.stdout)
         self.assertIn("candidate risk: 240.00 / 240.00", result.stdout)
+
+    def test_entry_keeps_160000_cash_reserve_after_candidate(self):
+        self.reanchor_for_risk("200000")
+        snapshot = self.snapshot_for_risk(cash="200000")
+        self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
+        result = self.risk_cli("240")
+        self.assertIn("new entry: BLOCKED", result.stdout)
+        self.assertIn("required 160000.00 yuan cash reserve", result.stdout)
+
+    def test_effective_ungrouped_fills_increase_existing_risk_exposure(self):
+        self.reanchor_for_risk("250000")
+        self.assertEqual(self.snapshot_for_risk(cash="250000").returncode, 0)
+        fill = self.run_ledger("fill", "--id", "unpaired", "--at", "2026-10-31T10:15:00Z",
+                               "--symbol", "563360", "--side", "buy", "--quantity", "10", "--price", "10")
+        self.assertEqual(fill.returncode, 0, fill.stderr)
+        result = self.risk_cli("0.05")
+        self.assertIn("candidate risk: 0.55 / 240.00", result.stdout)
+    def test_grouped_loss_and_recorded_fees_remain_in_existing_risk(self):
+        self.reanchor_for_risk("250000")
+        self.assertEqual(self.snapshot_for_risk(cash="250000").returncode, 0)
+        for fill_id, side, price, at in (("group-buy", "buy", "10", "10:10:00"),
+                                         ("group-sell", "sell", "9", "10:20:00")):
+            self.assertEqual(self.run_ledger("fill", "--id", fill_id,
+                                             "--at", f"2026-10-31T{at}Z", "--symbol", "563360",
+                                             "--side", side, "--quantity", "10", "--price", price).returncode, 0)
+        self.assertEqual(self.run_module("groups.py", "fee", "--fill-id", "group-buy", "--amount", "0.10").returncode, 0)
+        self.assertEqual(self.run_module("groups.py", "fee", "--fill-id", "group-sell", "--amount", "0.10").returncode, 0)
+        for fill_id in ("group-buy", "group-sell"):
+            self.assertEqual(self.run_module("groups.py", "add", "--group", "loss",
+                                             "--direction", "reverse", "--fill-id", fill_id).returncode, 0)
+        risk = self.risk_cli("0.05")
+        self.assertIn("candidate risk: 10.25 / 240.00", risk.stdout)
+
+    def test_daily_stop_uses_shanghai_business_date(self):
+        self.db = Path(self.temp.name) / "shanghai.sqlite"
+        anchor = self.run_ledger("anchor", "--effective-at", "2026-10-30T15:00:00Z", "--cash", "1000",
+                                 "--holding", "563360=100", "--included-through", "2026-10-30T14:59:59Z")
+        self.assertEqual(anchor.returncode, 0, anchor.stderr)
+        for fill_id, side, price, at in (("sh-buy", "buy", "40", "16:10:00"),
+                                         ("sh-sell", "sell", "10", "16:20:00")):
+            self.assertEqual(self.run_ledger("fill", "--id", fill_id, "--at", f"2026-10-30T{at}Z",
+                                             "--symbol", "563360", "--side", side,
+                                             "--quantity", "10", "--price", price).returncode, 0)
+        snap = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db), "capture",
+                               "--id", "shanghai", "--at", "2026-10-30T17:00:00Z", "--cash", "700",
+                               "--holding", "563360=100", "--sellable-holding", "563360=100",
+                               "--t1-restricted-holding", "563360=0", "--fills-through", "2026-10-30T17:00:00Z",
+                               "--orders-scope-known"], text=True, capture_output=True)
+        self.assertEqual(snap.returncode, 0, snap.stderr)
+        result = self.risk_cli("0.05")
+        self.assertIn("reaching -300.00 yuan", result.stdout)
     def test_risk_stops_above_budget_and_at_daily_loss_threshold(self):
         self.snapshot_for_risk()
         for candidate_risk in ("240.01",):
@@ -199,14 +255,21 @@ class OrdersCliTest(unittest.TestCase):
                                "--symbol", "563360", "--side", "sell", "--quantity", "10", "--price", "10")
         self.assertEqual(buy.returncode, 0, buy.stderr)
         self.assertEqual(sell.returncode, 0, sell.stderr)
-    def snapshot_for_risk(self):
+    def reanchor_for_risk(self, cash):
+        result = self.run_ledger("reanchor", "--confirm-reanchor",
+                                 "--effective-at", "2026-10-31T09:59:00Z", "--cash", cash,
+                                 "--holding", "563360=100", "--included-through", "2026-10-31T09:59:00Z")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def snapshot_for_risk(self, cash="1000"):
         result = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                  "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
-                                 "--cash", "1000", "--holding", "563360=100",
+                                 "--cash", cash, "--holding", "563360=100",
                                  "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
                                  "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+        return result
 
     def risk_cli(self, candidate_risk, action="entry"):
         cents = int(round(float(candidate_risk) * 100))

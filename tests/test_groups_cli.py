@@ -53,6 +53,8 @@ class GroupsCliTest(unittest.TestCase):
         self.assertIn("unpaired basis: 4.80", report.stdout)
         self.assertIn("unpaired fee: 0.04", report.stdout)
         self.assertEqual(self.cli("report", "--group", "morning").stdout, report.stdout)
+        balance = self.run_ledger("balance")
+        self.assertIn("cash: 9995.96", balance.stdout)
 
     def test_reverse_t_pairs_confirmed_fills_and_reports_unpaired_side(self):
         self.assertEqual(self.fill("buy", "2026-01-02T10:00:00Z", "buy", 8, "2.00").returncode, 0)

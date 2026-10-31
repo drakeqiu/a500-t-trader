@@ -1,5 +1,7 @@
 # a500-t-trader
 
+> **Offline bookkeeping only — not connected to a broker and not for live trading.** Commands record user-confirmed facts and calculate conservative projections; they never submit orders or provide live broker verification. Do not use for trading until broker rules are documented, a broker SDK is integrated, and live behavior is tested and reviewed.
+
 ## Local account ledger
 
 The CLI stores a confirmed account anchor and broker-confirmed fills in a local SQLite database. Times must be ISO-8601 with a timezone; amounts use yuan with at most two decimal places; quantities are whole ETF shares. The anchor's `--included-through` timestamp is inclusive: fills at or before it are retained for traceability but do not change the anchored cash or holdings. Each fill's `--id` must be the broker's stable unique fill identity. `--at` is the business occurrence time; optional `--recorded-at` records when it was entered (defaults to UTC now). A later correction is a new fill ID linked with `correct --supersedes`; the old version remains visible but only the current version is projected.
@@ -56,13 +58,13 @@ python3 snapshots.py --db account.sqlite status
 python3 snapshots.py --db account.sqlite resources
 ```
 
-`capture` reports whether the observation matches the real ledger projection at capture time; it never changes ledger balances. Resource projection starts from the snapshot, adds only fills later than its inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
+`capture` reports broker-minus-ledger cash and per-symbol holding deltas; any mismatch explicitly requires reconciliation before openings can be allowed. It never changes ledger balances. Resource projection starts from the snapshot, applies confirmed account cash/holding events strictly after the snapshot once, adds only fills later than their inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. Post-snapshot sell proceeds remain excluded from entry cash. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
 
 `resources` reports broker-confirmed sellable and T+1-restricted quantities independently from projected balances. Supply both `--sellable-holding` and `--t1-restricted-holding` from broker evidence for every held security. Confirmed buys after the inclusive fill boundary increase T+1-restricted holdings; confirmed sells reduce sellable holdings. Orders cannot sell more than the remaining broker-confirmed sellable amount after frozen resources and reservations. The CLI never infers T+1 rollover from weekdays; missing sellability evidence blocks sells and openings.
 
 ## New-entry risk decision
 
-Risk uses the candidate's market value, existing trade-group exposure, and active-order exposure; it does not accept a caller-supplied P&L scalar. Daily realized P&L is recomputed from effective persisted fills and actual recorded fees (FIFO matching, UTC fill dates). Crossing -300 yuan latches that UTC day in SQLite, including when late/corrected effective fills change its result. Exactly 240 yuan is within the risk limit; exactly -300 yuan stops entry. Missing or invalid market inputs and unreconciled resources conservatively block new entries.
+Risk includes effective grouped and ungrouped fills, group losses and actual fees, active-order exposure, and candidate market value with conservative stress/fee assumptions. The entry gate retains at least ¥160,000 cash after each candidate. Daily realized P&L is recomputed from effective persisted fills and actual recorded fees (FIFO matching, Asia/Shanghai business dates). Crossing -¥300 latches that Shanghai date in SQLite, including when late/corrected effective fills change its result. Exactly ¥240 risk is within the limit; exactly -¥300 realized daily P&L stops entry. Missing or invalid market inputs and unreconciled resources conservatively block new entries.
 
 ```sh
 python3 snapshots.py --db account.sqlite risk \
@@ -73,7 +75,7 @@ The persisted stop remains active after P&L recovers or projections are rebuilt,
 
 ## Actual fees and T groups
 
-Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. This reporting does not alter ledger cash or holdings.
+Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. A confirmed fee reduces projected account cash and holdings availability.
 
 ```sh
 python3 groups.py --db account.sqlite fee --fill-id broker-fill-123 --amount 0.05

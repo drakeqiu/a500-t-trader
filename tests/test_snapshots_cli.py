@@ -39,6 +39,8 @@ class SnapshotsCliTest(unittest.TestCase):
                                  cash="980", holding="563360=102")
         self.assertEqual(captured.returncode, 0, captured.stderr)
         self.assertIn("reconciliation: MATCH", captured.stdout)
+        self.assertIn("cash delta (broker - ledger): 0.00", captured.stdout)
+        self.assertIn("563360 holdings delta (broker - ledger): 0", captured.stdout)
         self.assertEqual(self.run_cli("ledger.py", "balance").stdout, before)
         self.assertEqual(self.fill("later", "2026-10-31T10:30:00Z").returncode, 0)
         resources = self.run_cli("snapshots.py", "resources")
@@ -47,6 +49,40 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("563360: 104", resources.stdout)
         self.assertIn("openings: ALLOWED", resources.stdout)
         self.assertIn("cash: 960.00", self.run_cli("ledger.py", "balance").stdout)
+
+    def test_confirmed_post_snapshot_account_events_update_resource_projection_once(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known").returncode, 0)
+        for args in (
+                ("cash-flow", "--id", "deposit", "--at", "2026-10-31T10:30:00Z",
+                 "--direction", "in", "--amount", "50", "--confirm-adjustment"),
+                ("holding-adjustment", "--id", "transfer", "--at", "2026-10-31T10:31:00Z",
+                 "--symbol", "563360", "--direction", "in", "--quantity", "3", "--confirm-adjustment")):
+            result = self.run_cli("shadow.py", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertEqual(resources.returncode, 0, resources.stderr)
+        self.assertIn("projected total cash: 1050.00", resources.stdout)
+        self.assertIn("563360: 103", resources.stdout)
+        self.assertIn("cash: 1050.00", self.run_cli("ledger.py", "balance").stdout)
+
+    def test_snapshot_mismatch_reports_deltas_and_requires_explicit_reconciliation(self):
+        captured = self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                 "--orders-scope-known", cash="999", holding="563360=98",
+                                 sellable="98", restricted="0")
+        self.assertEqual(captured.returncode, 0, captured.stderr)
+        self.assertIn("cash delta (broker - ledger): -1.00", captured.stdout)
+        self.assertIn("563360 holdings delta (broker - ledger): -2", captured.stdout)
+        self.assertIn("explicit reconciliation confirmation required", captured.stdout)
+    def test_post_snapshot_sell_proceeds_do_not_inflate_entry_cash(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known").returncode, 0)
+        self.assertEqual(self.fill("sale", "2026-10-31T10:30:00Z", side="sell",
+                                   quantity="2", price="10").returncode, 0)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertEqual(resources.returncode, 0, resources.stderr)
+        self.assertIn("projected total cash: 1020.00", resources.stdout)
+        self.assertIn("available cash: 1000.00", resources.stdout)
 
     def test_unknown_scope_blocks_new_open_projection(self):
         order = self.run_cli("orders.py", "record", "--id", "unknown-order", "--symbol", "563360",
