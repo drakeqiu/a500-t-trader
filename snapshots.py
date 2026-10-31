@@ -114,13 +114,14 @@ def resources(args, db):
         holdings[symbol] = holdings.get(symbol, 0) - quantity
     reserved_cash = 0
     reserved_holdings = {}
-    for order_id, symbol, side, quantity, price in db.execute("SELECT order_id, symbol, side, remaining_quantity, price_cents FROM orders WHERE status IN ('open', 'partial')"):
-        if order_id in covered:
-            continue
-        if side == "buy":
-            reserved_cash += quantity * price
-        else:
-            reserved_holdings[symbol] = reserved_holdings.get(symbol, 0) + quantity
+    if orders_known:
+        for order_id, symbol, side, quantity, price in db.execute("SELECT order_id, symbol, side, remaining_quantity, price_cents FROM orders WHERE status IN ('open', 'partial')"):
+            if order_id in covered:
+                continue
+            if side == "buy":
+                reserved_cash += quantity * price
+            else:
+                reserved_holdings[symbol] = reserved_holdings.get(symbol, 0) + quantity
     cash -= reserved_cash
     for symbol, quantity in reserved_holdings.items():
         holdings[symbol] = holdings.get(symbol, 0) - quantity

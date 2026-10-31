@@ -48,6 +48,9 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("cash: 960.00", self.run_cli("ledger.py", "balance").stdout)
 
     def test_unknown_scope_blocks_new_open_projection(self):
+        order = self.run_cli("orders.py", "record", "--id", "unknown-order", "--symbol", "563360",
+                             "--side", "buy", "--quantity", "10", "--price", "5")
+        self.assertEqual(order.returncode, 0, order.stderr)
         result = self.snapshot()
         self.assertEqual(result.returncode, 0, result.stderr)
         status = self.run_cli("snapshots.py", "status")
@@ -55,6 +58,9 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("fills coverage: UNKNOWN", status.stdout)
         self.assertIn("orders coverage: UNKNOWN", status.stdout)
         self.assertIn("openings: BLOCKED", status.stdout)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertIn("cash: 1000.00", resources.stdout)
+        self.assertIn("openings: BLOCKED", resources.stdout)
 
     def test_mismatch_blocks_and_covered_order_is_not_subtracted_twice(self):
         order = self.run_cli("orders.py", "record", "--id", "buy-1", "--symbol", "563360",
