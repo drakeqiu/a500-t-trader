@@ -38,8 +38,16 @@ def validate_available(db, order_id, symbol, side, remaining, price):
     cash_reserved, holdings_reserved = reservations(db, order_id)
     if side == "buy" and projected_cash - cash_reserved < remaining * price:
         raise ValueError("insufficient unreserved cash")
-    if side == "sell" and projected_holdings.get(symbol, 0) - holdings_reserved.get(symbol, 0) < remaining:
-        raise ValueError("insufficient unreserved holdings")
+    if side == "sell":
+        import snapshots
+        resources = snapshots.resource_projection(db)
+        if resources.blocked or symbol not in resources.sellable_holdings:
+            raise ValueError("broker-confirmed sellable quantity is unavailable")
+        current = db.execute("SELECT remaining_quantity FROM orders WHERE order_id = ? AND status IN ('open', 'partial')",
+                             (order_id,)).fetchone()
+        available = resources.sellable_holdings.get(symbol, 0) + (current[0] if current else 0)
+        if available < remaining:
+            raise ValueError("insufficient broker-confirmed sellable quantity")
 
 
 def record(args, db):
@@ -47,8 +55,7 @@ def record(args, db):
     if not order_id:
         raise ValueError("order id is required")
     symbol = args.symbol
-    if not symbol or not symbol.isalnum():
-        raise ValueError("symbol must be alphanumeric")
+    ledger.validate_symbol(symbol)
     remaining = ledger.quantity(args.quantity, "quantity")
     price = ledger.cents(args.price, "price")
     previous = db.execute("SELECT symbol, side, quantity, price_cents FROM orders WHERE order_id = ?", (order_id,)).fetchone()
@@ -66,16 +73,26 @@ def record(args, db):
 
 
 def update_status(args, db):
-    current = db.execute("SELECT symbol, side, remaining_quantity, price_cents, status FROM orders WHERE order_id = ?", (args.id,)).fetchone()
+    current = db.execute("SELECT symbol, side, quantity, remaining_quantity, price_cents, status FROM orders WHERE order_id = ?", (args.id,)).fetchone()
     if current is None:
         raise ValueError(f"unknown order {args.id}")
-    symbol, side, previous_remaining, price, previous_status = current
+    symbol, side, order_quantity, previous_remaining, price, previous_status = current
     if previous_status not in ACTIVE:
         if previous_status == args.status and (args.remaining_quantity is None or args.remaining_quantity == previous_remaining):
             print(f"order {args.id} already {previous_status}")
             return
         raise ValueError("terminal order status cannot be changed")
     remaining = args.remaining_quantity
+    if args.status in ("filled", "rejected"):
+        if not args.broker_confirmed_terminal:
+            raise ValueError("terminal order status requires --broker-confirmed-terminal")
+        if args.filled_quantity is None:
+            raise ValueError("terminal order status requires --filled-quantity reconciliation")
+        expected_filled = order_quantity - previous_remaining
+        if args.status == "rejected" and args.filled_quantity != expected_filled:
+            raise ValueError("rejected order cumulative fills must reconcile to previously recorded fills")
+        if args.status == "filled":
+            remaining = 0
     if args.status == "filled":
         if remaining not in (None, 0):
             raise ValueError("filled order must have zero remaining quantity")
@@ -142,6 +159,8 @@ def main():
     status.add_argument("--id", required=True)
     status.add_argument("--status", required=True, choices=("open", "partial", "filled", "rejected"))
     status.add_argument("--remaining-quantity", type=int)
+    status.add_argument("--broker-confirmed-terminal", action="store_true", help="confirm the broker reported a terminal state")
+    status.add_argument("--filled-quantity", type=int, help="broker-confirmed cumulative filled quantity")
     cancel_parser = commands.add_parser("cancel", help="record a broker-confirmed cancellation")
     cancel_parser.add_argument("--id", required=True)
     cancel_parser.add_argument("--confirmed", action="store_true", help="confirm the broker reported cancellation")

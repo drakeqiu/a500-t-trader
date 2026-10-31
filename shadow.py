@@ -93,8 +93,7 @@ def record_event(args, db, kind):
     else:
         amount = None
         symbol = args.symbol
-        if not symbol or not symbol.isalnum():
-            raise ValueError("symbol must be alphanumeric")
+        ledger.validate_symbol(symbol)
         qty = ledger.quantity(args.quantity, "quantity")
     recorded = ledger.timestamp(args.recorded_at) if args.recorded_at else ledger.now()
     if not args.confirm_adjustment:
@@ -129,8 +128,7 @@ def compare(args, db):
             symbol, value = item.split("=", 1)
         except ValueError:
             raise ValueError("price must use SYMBOL=PRICE")
-        if not symbol or not symbol.isalnum() or symbol in prices:
-            raise ValueError("price symbols must be alphanumeric and unique")
+        ledger.validate_symbol(symbol, "price symbol")
         prices[symbol] = ledger.cents(value, "price")
     symbols = {symbol for symbol, qty in real_holdings.items() if qty} | {
         symbol for symbol, qty in shadow_holdings.items() if qty

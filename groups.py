@@ -1,7 +1,7 @@
 import argparse
 import sqlite3
 import sys
-
+import ledger
 from ledger import cents, connect
 
 
@@ -31,8 +31,10 @@ def record_fee(args, db):
         raise ValueError("fill id is required")
     amount = cents(args.amount, "fee", allow_zero=True)
     with db:
-        if db.execute("SELECT 1 FROM fills WHERE fill_id = ?", (fill_id,)).fetchone() is None:
+        fill = db.execute("SELECT symbol FROM fills WHERE fill_id = ?", (fill_id,)).fetchone()
+        if fill is None:
             raise ValueError("fee requires an existing broker-confirmed fill")
+        ledger.validate_symbol(fill[0], "fee fill symbol")
         previous = db.execute("SELECT fee_cents FROM fill_fees WHERE fill_id = ?", (fill_id,)).fetchone()
         if previous is not None:
             if previous[0] != amount:
@@ -49,8 +51,10 @@ def add_fill(args, db):
     if not group_id or not fill_id:
         raise ValueError("group id and fill id are required")
     with db:
-        if db.execute("SELECT 1 FROM fills WHERE fill_id = ?", (fill_id,)).fetchone() is None:
+        fill = db.execute("SELECT symbol FROM fills WHERE fill_id = ?", (fill_id,)).fetchone()
+        if fill is None:
             raise ValueError("group membership requires an existing broker-confirmed fill")
+        ledger.validate_symbol(fill[0], "group fill symbol")
         group = db.execute("SELECT direction FROM trade_groups WHERE group_id = ?", (group_id,)).fetchone()
         if group is not None and group[0] != args.direction:
             raise ValueError("group already exists with different direction")

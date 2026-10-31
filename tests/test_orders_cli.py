@@ -28,6 +28,11 @@ class OrdersCliTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(CLI), "--db", str(self.db), *args],
                               text=True, capture_output=True)
 
+    def test_only_supported_security_can_be_ordered(self):
+        unsupported = self.cli("record", "--id", "other", "--symbol", "510300", "--side", "buy",
+                              "--quantity", "100", "--price", "1")
+        self.assertEqual(unsupported.returncode, 2)
+        self.assertIn("security 563360", unsupported.stderr)
     def test_late_fill_reduces_order_cash_budget_by_business_time(self):
         result = self.run_ledger("fill", "--id", "late", "--at", "2026-10-31T09:45:00Z",
                                  "--recorded-at", "2026-10-31T11:00:00Z", "--symbol", "563360",
@@ -42,6 +47,13 @@ class OrdersCliTest(unittest.TestCase):
         fill = self.run_ledger("fill", "--id", "fill-1", "--at", "2026-10-31T10:00:00Z",
                                "--symbol", "563360", "--side", "buy", "--quantity", "2", "--price", "10")
         self.assertEqual(fill.returncode, 0, fill.stderr)
+        snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
+                                   "capture", "--id", "before-orders", "--at", "2026-10-31T10:00:00Z",
+                                   "--cash", "980", "--holding", "563360=102",
+                                   "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=2",
+                                   "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
+                                  text=True, capture_output=True)
+        self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
         self.assertEqual(self.cli("record", "--id", "buy-1", "--symbol", "563360",
                                   "--side", "buy", "--quantity", "20", "--price", "10").returncode, 0)
         self.assertEqual(self.cli("record", "--id", "sell-1", "--symbol", "563360",
@@ -55,7 +67,11 @@ class OrdersCliTest(unittest.TestCase):
         self.assertIn("reserved holdings:", active.stdout)
         self.assertIn("563360: 30", active.stdout)
 
-        self.assertEqual(self.cli("status", "--id", "buy-1", "--status", "filled").returncode, 0)
+        unaudited_terminal = self.cli("status", "--id", "buy-1", "--status", "filled")
+        self.assertEqual(unaudited_terminal.returncode, 2)
+        confirmed_terminal = self.cli("status", "--id", "buy-1", "--status", "filled",
+                                      "--broker-confirmed-terminal", "--filled-quantity", "20")
+        self.assertEqual(confirmed_terminal.returncode, 0, confirmed_terminal.stderr)
         self.assertEqual(self.cli("cancel", "--id", "sell-1").returncode, 2)
         canceled = self.cli("cancel", "--id", "sell-1", "--confirmed")
         self.assertEqual(canceled.returncode, 0, canceled.stderr)
@@ -67,11 +83,25 @@ class OrdersCliTest(unittest.TestCase):
         self.assertIn("cash: 980.00", balance.stdout)
         self.assertIn("fill-1", balance.stdout)
 
+    def test_sell_orders_require_and_respect_confirmed_sellability(self):
+        missing = self.cli("record", "--id", "missing-resource", "--symbol", "563360",
+                           "--side", "sell", "--quantity", "1", "--price", "10")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("snapshot", missing.stderr)
+        self.snapshot_for_risk()
+        self.assertEqual(self.cli("record", "--id", "sell-one", "--symbol", "563360", "--side", "sell",
+                                  "--quantity", "10", "--price", "10").returncode, 0)
+        excess = self.cli("record", "--id", "sell-two", "--symbol", "563360", "--side", "sell",
+                          "--quantity", "91", "--price", "10")
+        self.assertEqual(excess.returncode, 2)
+        self.assertIn("insufficient broker-confirmed sellable quantity", excess.stderr)
+
     def test_partial_order_reserves_only_remaining_and_unavailable_resources_are_rejected(self):
         bad = self.cli("record", "--id", "too-much", "--symbol", "563360", "--side", "buy",
                        "--quantity", "101", "--price", "10")
         self.assertEqual(bad.returncode, 2)
         self.assertIn("insufficient unreserved cash", bad.stderr)
+        self.snapshot_for_risk()
         self.assertEqual(self.cli("record", "--id", "partial-1", "--symbol", "563360", "--side", "sell",
                                   "--quantity", "80", "--price", "12").returncode, 0)
         partial = self.cli("status", "--id", "partial-1", "--status", "partial",
@@ -79,34 +109,54 @@ class OrdersCliTest(unittest.TestCase):
         self.assertEqual(partial.returncode, 0, partial.stderr)
         active = self.cli("active")
         self.assertIn("partial-1 partial 563360 sell 25 @ 12.00; reserves holdings 25", active.stdout)
+        unaudited = self.cli("status", "--id", "partial-1", "--status", "filled",
+                             "--remaining-quantity", "0")
+        self.assertEqual(unaudited.returncode, 2)
+        self.assertIn("terminal order status requires", unaudited.stderr)
         done = self.cli("status", "--id", "partial-1", "--status", "filled",
-                        "--remaining-quantity", "0")
+                        "--broker-confirmed-terminal", "--filled-quantity", "80")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertNotIn("partial-1", self.cli("active").stdout)
+        self.assertEqual(self.cli("record", "--id", "partial-reject", "--symbol", "563360",
+                                  "--side", "sell", "--quantity", "10", "--price", "12").returncode, 0)
+        self.assertEqual(self.cli("status", "--id", "partial-reject", "--status", "partial",
+                                  "--remaining-quantity", "5").returncode, 0)
+        inconsistent = self.cli("status", "--id", "partial-reject", "--status", "rejected",
+                                "--broker-confirmed-terminal", "--filled-quantity", "0")
+        self.assertEqual(inconsistent.returncode, 2)
+        rejected = self.cli("status", "--id", "partial-reject", "--status", "rejected",
+                            "--broker-confirmed-terminal", "--filled-quantity", "5")
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
     def test_risk_decision_allows_exact_budget_boundary_with_explanation(self):
         snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                    "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
                                    "--cash", "1000", "--holding", "563360=100",
+                                   "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
                                    "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
                                   text=True, capture_output=True)
         self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
-        result = self.risk_cli("240", "0")
+        result = self.risk_cli("240")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("new entry: ALLOWED", result.stdout)
         self.assertIn("candidate risk: 240.00 / 240.00", result.stdout)
     def test_risk_stops_above_budget_and_at_daily_loss_threshold(self):
         self.snapshot_for_risk()
-        for candidate_risk, daily_pnl in (("240.01", "0"), ("240", "-300")):
-            result = self.risk_cli(candidate_risk, daily_pnl)
-            self.assertEqual(result.returncode, 0, result.stderr)
+        for candidate_risk in ("240.01",):
+            result = self.risk_cli(candidate_risk)
             self.assertIn("new entry: BLOCKED", result.stdout)
             self.assertIn("rationale:", result.stdout)
 
-    def test_daily_loss_just_above_stop_threshold_remains_allowed(self):
+    def test_invalid_market_input_blocks_risk_decisions(self):
         self.snapshot_for_risk()
-        below = self.risk_cli("240", "-299.99")
-        self.assertIn("new entry: ALLOWED", below.stdout)
-
+        invalid = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
+                                  "risk", "--market-price", "NaN", "--candidate-quantity", "1",
+                                  "--fee-rate", "0", "--action", "entry"], text=True, capture_output=True)
+        self.assertNotEqual(invalid.returncode, 0)
+        malformed = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
+                                    "risk", "--market-price", "2", "--candidate-quantity", "1",
+                                    "--fee-rate", "invalid", "--action", "entry"], text=True, capture_output=True)
+        self.assertNotEqual(malformed.returncode, 0)
+        self.assertNotIn("Traceback", malformed.stderr)
     def test_reconciliation_blocks_entries_but_keeps_exit_and_maintenance_available(self):
         snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                    "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
@@ -114,38 +164,56 @@ class OrdersCliTest(unittest.TestCase):
                                    "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
                                   text=True, capture_output=True)
         self.assertIn("MISMATCH", snapshot.stdout)
-        blocked = self.risk_cli("1", "0")
+        blocked = self.risk_cli("1")
         self.assertIn("new entry: BLOCKED", blocked.stdout)
         self.assertIn("resource projection is blocked", blocked.stdout)
         for action in ("exit", "maintenance"):
-            allowed = self.risk_cli("1", "0", action)
+            allowed = self.risk_cli("1", action)
             self.assertIn("new entry: BLOCKED", allowed.stdout)
             self.assertIn("action status: AVAILABLE", allowed.stdout)
             self.assertIn("remain available", allowed.stdout)
 
-    def test_daily_stop_remains_locked_after_pnl_recovers(self):
+    def test_daily_stop_remains_locked_after_late_corrected_fill_and_rebuild(self):
         self.snapshot_for_risk()
-        stopped = self.risk_cli("1", "-300.25")
+        self.record_loss_round_trip()
+        stopped = self.risk_cli("1")
         self.assertIn("new entry: BLOCKED", stopped.stdout)
-        self.assertIn("reaching -300.25 yuan", stopped.stdout)
+        self.assertIn("reaching -300.00 yuan", stopped.stdout)
+        corrected = self.run_ledger("correct", "--id", "loss-sell-corrected",
+                                    "--at", "2026-10-31T10:06:00Z", "--symbol", "563360",
+                                    "--side", "sell", "--quantity", "10", "--price", "40",
+                                    "--supersedes", "loss-sell")
+        self.assertEqual(corrected.returncode, 0, corrected.stderr)
         rebuild = self.run_ledger("rebuild", "--confirm-rebuild")
         self.assertEqual(rebuild.returncode, 0, rebuild.stderr)
-        recovered = self.risk_cli("1", "0")
+        self.assertIn("before cash: 1000.00", rebuild.stdout)
+        self.assertIn("after cash: 1000.00", rebuild.stdout)
+        recovered = self.risk_cli("1")
         self.assertIn("new entry: BLOCKED", recovered.stdout)
         self.assertIn("stop remains locked", recovered.stdout)
 
+    def record_loss_round_trip(self):
+        buy = self.run_ledger("fill", "--id", "loss-buy", "--at", "2026-10-31T10:05:00Z",
+                              "--symbol", "563360", "--side", "buy", "--quantity", "10", "--price", "40")
+        sell = self.run_ledger("fill", "--id", "loss-sell", "--at", "2026-10-31T10:06:00Z",
+                               "--symbol", "563360", "--side", "sell", "--quantity", "10", "--price", "10")
+        self.assertEqual(buy.returncode, 0, buy.stderr)
+        self.assertEqual(sell.returncode, 0, sell.stderr)
     def snapshot_for_risk(self):
         result = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                  "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
                                  "--cash", "1000", "--holding", "563360=100",
+                                 "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
                                  "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def risk_cli(self, candidate_risk, daily_pnl, action="entry"):
+    def risk_cli(self, candidate_risk, action="entry"):
+        cents = int(round(float(candidate_risk) * 100))
+        quantity = (cents + 4) // 5
         return subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
-                               "risk", "--candidate-risk", candidate_risk, "--daily-new-pnl", daily_pnl,
-                               "--action", action], text=True, capture_output=True)
+                               "risk", "--market-price", "10", "--candidate-quantity", str(quantity),
+                               "--fee-rate", "0", "--action", action], text=True, capture_output=True)
 
 
 if __name__ == "__main__":

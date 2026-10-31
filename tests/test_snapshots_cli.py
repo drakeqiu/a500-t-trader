@@ -27,9 +27,10 @@ class SnapshotsCliTest(unittest.TestCase):
                             "--symbol", "563360", "--side", side, "--quantity", quantity,
                             "--price", price)
 
-    def snapshot(self, *scope, cash="1000", holding="563360=100"):
-        return self.run_cli("snapshots.py", "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
-                            "--cash", cash, "--holding", holding, *scope)
+    def snapshot(self, *scope, cash="1000", holding="563360=100", sellable="100", restricted="0", snapshot_id="s1"):
+        return self.run_cli("snapshots.py", "capture", "--id", snapshot_id, "--at", "2026-10-31T10:00:00Z",
+                            "--cash", cash, "--holding", holding, "--sellable-holding", f"563360={sellable}",
+                            "--t1-restricted-holding", f"563360={restricted}", *scope)
 
     def test_known_scope_overlays_only_uncovered_fills_and_keeps_ledger_unchanged(self):
         self.assertEqual(self.fill("covered", "2026-10-31T09:30:00Z").returncode, 0)
@@ -78,20 +79,20 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("available cash: 949.00", resources.stdout)
         self.assertIn("openings: BLOCKED", resources.stdout)
 
-    def test_uncovered_order_is_reserved_once_and_covered_fill_not_reapplied(self):
         self.fill("f1", "2026-10-31T09:30:00Z")
-        self.run_cli("orders.py", "record", "--id", "sell-1", "--symbol", "563360",
-                     "--side", "sell", "--quantity", "10", "--price", "5")
         result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known",
-                               cash="980", holding="563360=102")
+                               cash="980", holding="563360=102", snapshot_id="s2")
         self.assertIn("reconciliation: MATCH", result.stdout)
+        order = self.run_cli("orders.py", "record", "--id", "sell-1", "--symbol", "563360",
+                             "--side", "sell", "--quantity", "10", "--price", "5")
+        self.assertEqual(order.returncode, 0, order.stderr)
         resources = self.run_cli("snapshots.py", "resources")
         self.assertIn("563360: 92", resources.stdout)
         self.assertIn("openings: ALLOWED", resources.stdout)
 
-    def test_resources_report_frozen_resources_and_unavailable_t1_sellability(self):
+    def test_resources_report_broker_confirmed_sellable_and_t1_quantities(self):
         result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known",
-                               "--frozen-cash", "25", "--frozen-holding", "563360=10")
+                               "--frozen-cash", "25", "--frozen-holding", "563360=10", sellable="80", restricted="20")
         self.assertEqual(result.returncode, 0, result.stderr)
         fill = self.fill("same-day-buy", "2026-10-31T10:30:00Z", quantity="5")
         self.assertEqual(fill.returncode, 0, fill.stderr)
@@ -100,11 +101,35 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("available cash: 925.00", resources.stdout)
         self.assertIn("broker frozen cash: 25.00", resources.stdout)
         self.assertIn("563360: 95", resources.stdout)
-        self.assertIn("broker frozen holdings:", resources.stdout)
-        self.assertIn("563360: 10", resources.stdout)
-        self.assertIn("sellable quantity: UNAVAILABLE", resources.stdout)
-        self.assertIn("T+1 restricted quantity: UNAVAILABLE", resources.stdout)
-        self.assertIn("sellability evidence: unavailable; no confirmed broker sellable snapshot or verified exchange calendar", resources.stdout)
+        self.assertIn("563360 sellable quantity: 70; T+1 restricted quantity: 25", resources.stdout)
+        self.assertIn("sellability evidence: broker-confirmed snapshot; T+1 quantities are not inferred from weekday calendars", resources.stdout)
+
+    def test_same_day_sell_reduces_sellable_without_promoting_t1_buys(self):
+        result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                               "--orders-scope-known", sellable="80", restricted="20")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.fill("buy-after-snapshot", "2026-10-31T10:30:00Z",
+                                   quantity="5").returncode, 0)
+        self.assertEqual(self.fill("sell-after-snapshot", "2026-10-31T10:30:00Z",
+                                   side="sell", quantity="5").returncode, 0)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertEqual(resources.returncode, 0, resources.stderr)
+        self.assertIn("563360 sellable quantity: 75; T+1 restricted quantity: 25", resources.stdout)
+
+    def test_resource_overlay_ignores_superseded_fill_versions(self):
+        result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                               "--orders-scope-known")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.fill("late-buy", "2026-10-31T10:30:00Z",
+                                   quantity="2").returncode, 0)
+        correction = self.run_cli("ledger.py", "correct", "--id", "late-buy-v2",
+                                  "--supersedes", "late-buy", "--at", "2026-10-31T10:30:00Z",
+                                  "--symbol", "563360", "--side", "buy", "--quantity", "3", "--price", "10")
+        self.assertEqual(correction.returncode, 0, correction.stderr)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertEqual(resources.returncode, 0, resources.stderr)
+        self.assertIn("563360: 103", resources.stdout)
+        self.assertIn("563360 sellable quantity: 100; T+1 restricted quantity: 3", resources.stdout)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,6 @@ python3 ledger.py --db account.sqlite correct --id broker-fill-123-v2 \
   --supersedes broker-fill-123 --at 2026-10-31T10:00:00+08:00 \
   --recorded-at 2026-10-31T12:00:00+08:00 --symbol 563360 --side buy \
   --quantity 9 --price 2.50
-# Rebuild is read-only and requires explicit confirmation; it displays before/after state.
 python3 ledger.py --db account.sqlite rebuild --confirm-rebuild
 # Re-anchoring replaces the anchor only after explicit confirmation and validates replay.
 python3 ledger.py --db account.sqlite reanchor --confirm-reanchor \
@@ -25,7 +24,7 @@ python3 ledger.py --db account.sqlite reanchor --confirm-reanchor \
   --holding 563360=109 --included-through 2026-10-31T11:59:59+08:00
 ```
 
-A fill that would create negative cash or holdings is rejected without recording the fill. Repeating the same fill identity and facts is idempotent; reusing an identity for different facts is rejected. Late facts and corrections replay effective fills and account events by business occurrence time inside a transaction; invalid replay rolls back. `rebuild --confirm-rebuild` prints projected balances before and after without changing the ledger. `reanchor --confirm-reanchor` is explicit and retains the previous anchor and holdings in the audit history shown by `balance`. Run the black-box CLI scenarios with `python3 -m unittest discover -s tests`.
+`rebuild --confirm-rebuild` transactionally recomputes persisted fill-application flags from the confirmed anchor, then reports the projected account state before and after; the before/after comparison is auditable and base events, snapshots, and risk-stop latches are retained. `reanchor --confirm-reanchor` is explicit and retains the previous anchor and holdings in the audit history shown by `balance`. Run the black-box CLI scenarios with `python3 -m unittest discover -s tests`.
 
 ## Shadow account comparison
 
@@ -50,6 +49,7 @@ python3 shadow.py --db account.sqlite compare --price 563360=2.60
 ```sh
 python3 snapshots.py --db account.sqlite capture --id broker-1 \
   --at 2026-10-31T10:30:00+08:00 --cash 9975 --holding 563360=110 \
+  --sellable-holding 563360=100 --t1-restricted-holding 563360=10 \
   --fills-through 2026-10-31T10:00:00+08:00 \
   --orders-scope-known --covered-order buy-1 --frozen-cash 25
 python3 snapshots.py --db account.sqlite status
@@ -58,20 +58,18 @@ python3 snapshots.py --db account.sqlite resources
 
 `capture` reports whether the observation matches the real ledger projection at capture time; it never changes ledger balances. Resource projection starts from the snapshot, adds only fills later than its inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
 
-`resources` labels projected total cash and holdings separately from available resources after broker freezes and uncovered active orders. Broker frozen cash and holdings and local active-order reservations are shown explicitly. Legal sellable quantities and T+1-restricted quantities are reported as `UNAVAILABLE`: this CLI has no confirmed broker sellable-snapshot input or verified SSE trading calendar, and it does not infer trading days from weekdays or promote same-day buys to sellable inventory. Do not treat the availability projection as a legal sellable quantity.
+`resources` reports broker-confirmed sellable and T+1-restricted quantities independently from projected balances. Supply both `--sellable-holding` and `--t1-restricted-holding` from broker evidence for every held security. Confirmed buys after the inclusive fill boundary increase T+1-restricted holdings; confirmed sells reduce sellable holdings. Orders cannot sell more than the remaining broker-confirmed sellable amount after frozen resources and reservations. The CLI never infers T+1 rollover from weekdays; missing sellability evidence blocks sells and openings.
 
 ## New-entry risk decision
 
-Before considering a new entry, run `snapshots.py risk` with the candidate's prospective risk from the complete risk calculation and today's new-entry net P&L. The command reuses the resource projection, blocks entries when reconciliation/resource evidence is blocked, rejects risk above 240 yuan, and stops at a daily net P&L of -300 yuan. Both boundaries are inclusive for the limits: exactly 240 yuan is permitted; exactly -300 yuan stops entries. Its output explains each decision.
+Risk uses the candidate's market value, existing trade-group exposure, and active-order exposure; it does not accept a caller-supplied P&L scalar. Daily realized P&L is recomputed from effective persisted fills and actual recorded fees (FIFO matching, UTC fill dates). Crossing -300 yuan latches that UTC day in SQLite, including when late/corrected effective fills change its result. Exactly 240 yuan is within the risk limit; exactly -300 yuan stops entry. Missing or invalid market inputs and unreconciled resources conservatively block new entries.
 
 ```sh
 python3 snapshots.py --db account.sqlite risk \
-  --candidate-risk 180 --daily-new-pnl -45.20 --action entry
-python3 snapshots.py --db account.sqlite risk \
-  --candidate-risk 180 --daily-new-pnl -300 --action exit
+  --market-price 2.50 --candidate-quantity 1000 --fee-rate 0.0003 --action entry
 ```
 
-The first decision that reaches -300 yuan stores a stop for the current local date in the account database; later P&L recovery does not unlock entries. Use the same database for subsequent decisions. `exit` and `maintenance` report the new-entry gate separately from the requested action, so risk exits and account reconciliation/maintenance remain available when entries are stopped. This decision command does not submit broker orders; exits must still be checked for legal sellability and available resources. Supply only a risk estimate and daily P&L whose evidence is trustworthy; a missing or unreconciled resource snapshot always blocks entry.
+The persisted stop remains active after P&L recovers or projections are rebuilt, and is separate from exits/maintenance. Market price and fee rate must be current trusted inputs; uncertain or unavailable inputs must block new entries.
 
 ## Actual fees and T groups
 

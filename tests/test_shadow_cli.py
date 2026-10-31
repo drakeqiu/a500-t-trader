@@ -34,22 +34,28 @@ class ShadowCliTest(unittest.TestCase):
                         "--direction", "in", "--amount", "100", "--confirm-adjustment")
         self.assertEqual(flow.returncode, 0, flow.stderr)
         holding = self.cli("holding-adjustment", "--id", "transfer-1", "--at", "2026-01-02T10:01:00Z",
-                           "--symbol", "510300", "--direction", "in", "--quantity", "10", "--confirm-adjustment")
+                           "--symbol", "563360", "--direction", "in", "--quantity", "10", "--confirm-adjustment")
         self.assertEqual(holding.returncode, 0, holding.stderr)
         self.assertEqual(self.ledger("fill", "--id", "real-buy", "--at", "2026-01-02T10:02:00Z",
                                      "--symbol", "563360", "--side", "buy", "--quantity", "10", "--price", "10").returncode, 0)
-        result = self.cli("compare", "--price", "563360=11", "--price", "510300=10")
+        result = self.cli("compare", "--price", "563360=11")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("real equity: 11310.00", result.stdout)
-        self.assertIn("shadow equity: 11300.00", result.stdout)
+        self.assertIn("real equity: 11320.00", result.stdout)
+        self.assertIn("shadow equity: 11310.00", result.stdout)
         self.assertIn("net excess: 10.00", result.stdout)
         balance = self.ledger("balance")
         self.assertEqual(balance.returncode, 0, balance.stderr)
         self.assertIn("deposit-1", balance.stdout)
         self.assertIn("transfer-1", balance.stdout)
         self.assertIn("cash: 10000.00", balance.stdout)
-        self.assertIn("563360: 110", balance.stdout)
-        self.assertIn("510300: 10", balance.stdout)
+        self.assertIn("563360: 120", balance.stdout)
+    def test_shadow_rejects_unsupported_security(self):
+        self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z")
+        result = self.cli("holding-adjustment", "--id", "unsupported", "--at", "2026-01-02T10:00:00Z",
+                          "--symbol", "510300", "--direction", "in", "--quantity", "1",
+                          "--confirm-adjustment")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("security 563360", result.stderr)
     def test_impossible_mirror_is_atomic_and_requires_confirmed_reset(self):
         self.assertEqual(self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z").returncode, 0)
         self.assertEqual(self.ledger("fill", "--id", "real-buy", "--at", "2026-01-02T10:00:00Z",
