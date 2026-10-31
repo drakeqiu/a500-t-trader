@@ -377,13 +377,38 @@ def risk(args, db):
     except ValueError:
         blocked.append("resource projection unavailable; capture a reconciled snapshot")
     entry_allowed = not blocked
-    action_allowed = entry_allowed if args.action == "entry" else True
+    action_reasons = []
+    if args.action == "entry":
+        action_allowed = entry_allowed
+    elif args.action == "exit":
+        if not args.symbol:
+            action_reasons.append("exit requires a symbol to verify existing holdings")
+        else:
+            try:
+                projection = resource_projection(db)
+                if projection.blocked:
+                    action_reasons.append("resource projection is blocked; broker-confirmed sellable resources are unavailable")
+                elif args.symbol not in projection.sellable_holdings:
+                    action_reasons.append(f"broker-confirmed sellable quantity for {args.symbol} is unavailable")
+                else:
+                    available = projection.sellable_holdings[args.symbol]
+                    print(f"broker-confirmed sellable quantity: {available}")
+                    if available == 0:
+                        action_reasons.append(f"no broker-confirmed sellable quantity for {args.symbol}")
+                    elif candidate_quantity > available:
+                        action_reasons.append(f"exit quantity exceeds broker-confirmed sellable quantity for {args.symbol} ({available})")
+            except ValueError:
+                action_reasons.append("resource projection is unavailable; capture a reconciled snapshot with sellability evidence")
+        action_allowed = not action_reasons
+    else:
+        action_allowed = True
     print(f"candidate risk: {candidate_risk // 100}.{candidate_risk % 100:02d} / 240.00")
     daily_pnl = daily_by_day.get(trade_date, 0)
     print(f"daily realized P&L: {'-' if daily_pnl < 0 else ''}{abs(daily_pnl) // 100}.{abs(daily_pnl) % 100:02d}; stop at -300.00")
     print(f"new entry: {'ALLOWED' if entry_allowed else 'BLOCKED'}")
     print(f"action status: {'AVAILABLE' if action_allowed else 'BLOCKED'}")
-    print("rationale: " + ("; ".join(blocked) if blocked else "candidate within both hard limits and resource projection is reconciled"))
+    reasons = blocked if args.action == "entry" else action_reasons
+    print("rationale: " + ("; ".join(reasons) if reasons else "candidate within both hard limits and resource projection is reconciled"))
     if args.action != "entry" and not entry_allowed:
         print("risk exit and accounting maintenance remain available while new entries are stopped")
 
@@ -402,13 +427,14 @@ def main():
     create.add_argument("--t1-restricted-holding", action="append", default=[], metavar="SYMBOL=QUANTITY", help="broker-confirmed T+1 restricted quantity")
     create.add_argument("--fills-through", help="inclusive fill coverage boundary; omission means unknown")
     create.add_argument("--orders-scope-known", action="store_true", help="confirm all broker-covered order IDs are identified")
-    decision = commands.add_parser("risk", help="decide whether a new entry is permitted; exits and accounting maintenance remain separate")
+    decision = commands.add_parser("risk", help="decide entry and evidence-backed exit availability; accounting maintenance remains separate")
     decision.add_argument("--market-price", required=True, help="current explicit trusted market price, yuan")
     decision.add_argument("--candidate-quantity", required=True, help="candidate quantity in shares")
     decision.add_argument("--fee-rate", required=True, help="conservative per-leg fee rate")
     decision.add_argument("--stress-move", default="0.004", help="stress rate; minimum 0.40%%")
     decision.add_argument("--execution-buffer", default="0.001", help="execution buffer; minimum 0.10%%")
     decision.add_argument("--action", choices=("entry", "exit", "maintenance"), default="entry")
+    decision.add_argument("--symbol", help="existing holding symbol required to verify an exit")
     create.add_argument("--covered-order", action="append", default=[], help="active order already represented in frozen resources")
     create.add_argument("--frozen-cash", default="0", help="cash frozen by broker, yuan")
     create.add_argument("--frozen-holding", action="append", default=[], metavar="SYMBOL=QUANTITY")

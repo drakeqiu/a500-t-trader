@@ -2,27 +2,7 @@ import argparse
 import sqlite3
 import sys
 import ledger
-from ledger import cents, connect
-
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS trade_groups (
-    group_id TEXT PRIMARY KEY,
-    direction TEXT NOT NULL CHECK (direction IN ('positive', 'reverse'))
-);
-CREATE TABLE IF NOT EXISTS fill_fees (
-    fill_id TEXT PRIMARY KEY REFERENCES fills(fill_id),
-    fee_cents INTEGER NOT NULL CHECK (fee_cents >= 0)
-);
-CREATE TABLE IF NOT EXISTS group_fills (
-    fill_id TEXT PRIMARY KEY REFERENCES fills(fill_id),
-    group_id TEXT NOT NULL REFERENCES trade_groups(group_id)
-);
-"""
-
-
-def initialize(db):
-    db.executescript(SCHEMA)
+from ledger import cents, connect, money
 
 
 def record_fee(args, db):
@@ -67,12 +47,6 @@ def add_fill(args, db):
             db.execute("INSERT INTO trade_groups VALUES (?, ?)", (group_id, args.direction))
         db.execute("INSERT INTO group_fills VALUES (?, ?)", (fill_id, group_id))
     print(f"added fill {fill_id} to group {group_id}")
-
-
-def money(cents_value):
-    sign = "-" if cents_value < 0 else ""
-    absolute = abs(cents_value)
-    return f"{sign}{absolute // 100}.{absolute % 100:02d}"
 
 
 def report(args, db):
@@ -153,7 +127,6 @@ def main():
     try:
         db = connect(args.db)
         try:
-            initialize(db)
             {"fee": record_fee, "add": add_fill, "report": report}[args.command](args, db)
         finally:
             db.close()

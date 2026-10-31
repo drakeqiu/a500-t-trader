@@ -168,5 +168,72 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("563360 sellable quantity: 100; T+1 restricted quantity: 3", resources.stdout)
 
 
+    def risk(self, action, quantity):
+        args = ["risk", "--market-price", "10", "--candidate-quantity", str(quantity),
+                "--fee-rate", "0", "--action", action]
+        if action == "exit":
+            args.extend(("--symbol", "563360"))
+        return self.run_cli("snapshots.py", *args)
+
+    def test_broker_confirmed_exit_uses_sellable_capacity_after_order_reservations_during_daily_stop(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known").returncode, 0)
+        self.assertEqual(self.fill("loss-open", "2026-10-31T10:10:00Z",
+                                   side="sell", quantity="30", price="10").returncode, 0)
+        self.assertEqual(self.fill("loss-close", "2026-10-31T10:11:00Z",
+                                   side="buy", quantity="30", price="20").returncode, 0)
+        order = self.run_cli("orders.py", "record", "--id", "reserved-exit", "--symbol", "563360",
+                             "--side", "sell", "--quantity", "10", "--price", "10")
+        self.assertEqual(order.returncode, 0, order.stderr)
+
+        exit_action = self.risk("exit", 60)
+        self.assertEqual(exit_action.returncode, 0, exit_action.stderr)
+        self.assertIn("new entry: BLOCKED", exit_action.stdout)
+        self.assertIn("action status: AVAILABLE", exit_action.stdout)
+        self.assertIn("broker-confirmed sellable quantity: 60", exit_action.stdout)
+
+    def test_exit_cannot_exceed_sellable_quantity_after_order_reservations(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known").returncode, 0)
+        order = self.run_cli("orders.py", "record", "--id", "reserved-exit", "--symbol", "563360",
+                             "--side", "sell", "--quantity", "10", "--price", "10")
+        self.assertEqual(order.returncode, 0, order.stderr)
+
+        boundary = self.risk("exit", 90)
+        self.assertIn("action status: AVAILABLE", boundary.stdout)
+        over = self.risk("exit", 91)
+        self.assertIn("action status: BLOCKED", over.stdout)
+        self.assertIn("exceeds broker-confirmed sellable quantity", over.stdout)
+
+    def test_exit_blocks_when_sellability_or_reconciliation_evidence_is_unavailable(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known", sellable="0").returncode, 0)
+        missing_symbol = self.run_cli("snapshots.py", "risk", "--market-price", "10",
+                                      "--candidate-quantity", "1", "--fee-rate", "0", "--action", "exit")
+        self.assertIn("action status: BLOCKED", missing_symbol.stdout)
+        self.assertIn("exit requires a symbol", missing_symbol.stdout)
+
+        zero = self.risk("exit", 1)
+        self.assertIn("action status: BLOCKED", zero.stdout)
+        self.assertIn("no broker-confirmed sellable quantity", zero.stdout)
+
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known", cash="999", snapshot_id="mismatch").returncode, 0)
+        mismatch = self.risk("exit", 1)
+        self.assertIn("action status: BLOCKED", mismatch.stdout)
+        self.assertIn("resource projection is blocked", mismatch.stdout)
+
+    def test_maintenance_remains_available_when_entry_risk_is_stopped(self):
+        self.assertEqual(self.snapshot("--fills-through", "2026-10-31T10:00:00Z",
+                                       "--orders-scope-known").returncode, 0)
+        self.assertEqual(self.fill("loss-open", "2026-10-31T10:10:00Z",
+                                   side="sell", quantity="30", price="10").returncode, 0)
+        self.assertEqual(self.fill("loss-close", "2026-10-31T10:11:00Z",
+                                   side="buy", quantity="30", price="20").returncode, 0)
+        maintenance = self.risk("maintenance", 1)
+        self.assertIn("new entry: BLOCKED", maintenance.stdout)
+        self.assertIn("action status: AVAILABLE", maintenance.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

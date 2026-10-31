@@ -71,7 +71,7 @@ python3 snapshots.py --db account.sqlite risk \
   --market-price 2.50 --candidate-quantity 1000 --fee-rate 0.0003 --action entry
 ```
 
-The persisted stop remains active after P&L recovers or projections are rebuilt, and is separate from exits/maintenance. Market price and fee rate must be current trusted inputs; uncertain or unavailable inputs must block new entries.
+The persisted stop remains active after P&L recovers or projections are rebuilt. Exits and accounting maintenance remain available while entry is stopped, but an exit must specify `--symbol` and is available only when a reconciled resource projection confirms enough sellable holdings after T+1 restrictions, broker freezes, and active order reservations. For example, add `--action exit --symbol 563360` to assess an exit; exit capacity does not use the new-entry cash reserve or risk cap. Market price and fee rate must be current trusted inputs; uncertain or unavailable inputs block new entries.
 
 ## Actual fees and T groups
 

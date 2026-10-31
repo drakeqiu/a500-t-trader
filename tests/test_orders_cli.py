@@ -213,21 +213,25 @@ class OrdersCliTest(unittest.TestCase):
                                     "--fee-rate", "invalid", "--action", "entry"], text=True, capture_output=True)
         self.assertNotEqual(malformed.returncode, 0)
         self.assertNotIn("Traceback", malformed.stderr)
-    def test_reconciliation_blocks_entries_but_keeps_exit_and_maintenance_available(self):
+    def test_reconciliation_blocks_entries_and_exits_but_keeps_maintenance_available(self):
         snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                    "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
                                    "--cash", "999", "--holding", "563360=100",
+                                   "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
                                    "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
                                   text=True, capture_output=True)
         self.assertIn("MISMATCH", snapshot.stdout)
         blocked = self.risk_cli("1")
         self.assertIn("new entry: BLOCKED", blocked.stdout)
         self.assertIn("resource projection is blocked", blocked.stdout)
-        for action in ("exit", "maintenance"):
-            allowed = self.risk_cli("1", action)
-            self.assertIn("new entry: BLOCKED", allowed.stdout)
-            self.assertIn("action status: AVAILABLE", allowed.stdout)
-            self.assertIn("remain available", allowed.stdout)
+        exit_action = self.risk_cli("1", "exit")
+        self.assertIn("new entry: BLOCKED", exit_action.stdout)
+        self.assertIn("action status: BLOCKED", exit_action.stdout)
+        self.assertIn("resource projection is blocked", exit_action.stdout)
+        maintenance = self.risk_cli("1", "maintenance")
+        self.assertIn("new entry: BLOCKED", maintenance.stdout)
+        self.assertIn("action status: AVAILABLE", maintenance.stdout)
+        self.assertIn("remain available", maintenance.stdout)
 
     def test_daily_stop_remains_locked_after_late_corrected_fill_and_rebuild(self):
         self.snapshot_for_risk()
@@ -274,9 +278,12 @@ class OrdersCliTest(unittest.TestCase):
     def risk_cli(self, candidate_risk, action="entry"):
         cents = int(round(float(candidate_risk) * 100))
         quantity = (cents + 4) // 5
+        args = ["risk", "--market-price", "10", "--candidate-quantity", str(quantity),
+                "--fee-rate", "0", "--action", action]
+        if action == "exit":
+            args.extend(("--symbol", "563360"))
         return subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
-                               "risk", "--market-price", "10", "--candidate-quantity", str(quantity),
-                               "--fee-rate", "0", "--action", action], text=True, capture_output=True)
+                               *args], text=True, capture_output=True)
 
 
 if __name__ == "__main__":
