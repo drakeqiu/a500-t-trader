@@ -48,6 +48,20 @@ python3 snapshots.py --db account.sqlite resources
 `capture` reports whether the observation matches the real ledger projection at capture time; it never changes ledger balances. Resource projection starts from the snapshot, adds only fills later than its inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
 
 `resources` labels projected total cash and holdings separately from available resources after broker freezes and uncovered active orders. Broker frozen cash and holdings and local active-order reservations are shown explicitly. Legal sellable quantities and T+1-restricted quantities are reported as `UNAVAILABLE`: this CLI has no confirmed broker sellable-snapshot input or verified SSE trading calendar, and it does not infer trading days from weekdays or promote same-day buys to sellable inventory. Do not treat the availability projection as a legal sellable quantity.
+
+## New-entry risk decision
+
+Before considering a new entry, run `snapshots.py risk` with the candidate's prospective risk from the complete risk calculation and today's new-entry net P&L. The command reuses the resource projection, blocks entries when reconciliation/resource evidence is blocked, rejects risk above 240 yuan, and stops at a daily net P&L of -300 yuan. Both boundaries are inclusive for the limits: exactly 240 yuan is permitted; exactly -300 yuan stops entries. Its output explains each decision.
+
+```sh
+python3 snapshots.py --db account.sqlite risk \
+  --candidate-risk 180 --daily-new-pnl -45.20 --action entry
+python3 snapshots.py --db account.sqlite risk \
+  --candidate-risk 180 --daily-new-pnl -300 --action exit
+```
+
+The first decision that reaches -300 yuan stores a stop for the current local date in the account database; later P&L recovery does not unlock entries. Use the same database for subsequent decisions. `exit` and `maintenance` report the new-entry gate separately from the requested action, so risk exits and account reconciliation/maintenance remain available when entries are stopped. This decision command does not submit broker orders; exits must still be checked for legal sellability and available resources. Supply only a risk estimate and daily P&L whose evidence is trustworthy; a missing or unreconciled resource snapshot always blocks entry.
+
 ## Actual fees and T groups
 
 Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. This reporting does not alter ledger cash or holdings.
