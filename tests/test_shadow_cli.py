@@ -56,6 +56,16 @@ class ShadowCliTest(unittest.TestCase):
                           "--confirm-adjustment")
         self.assertEqual(result.returncode, 2)
         self.assertIn("symbol must be alphanumeric", result.stderr)
+    def test_shadow_rejects_other_security_codes(self):
+        self.assertEqual(self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z").returncode, 0)
+        holding = self.cli("holding-adjustment", "--id", "other-security", "--at", "2026-01-02T10:00:00Z",
+                           "--symbol", "159915", "--direction", "in", "--quantity", "1",
+                           "--confirm-adjustment")
+        self.assertEqual(holding.returncode, 2)
+        self.assertIn("only supports security 563360", holding.stderr)
+        comparison = self.cli("compare", "--price", "563360=10", "--price", "159915=1")
+        self.assertEqual(comparison.returncode, 2)
+        self.assertIn("only supports security 563360", comparison.stderr)
     def test_impossible_mirror_is_atomic_and_requires_confirmed_reset(self):
         self.assertEqual(self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z").returncode, 0)
         self.assertEqual(self.ledger("fill", "--id", "real-buy", "--at", "2026-01-02T10:00:00Z",

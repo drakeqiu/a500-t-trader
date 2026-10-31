@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS shadow_events (
 """
 
 
+def validate_symbol(symbol, label):
+    if not symbol or not symbol.isalnum():
+        raise ValueError(f"{label} must be alphanumeric")
+    if symbol != "563360":
+        raise ValueError("only supports security 563360")
+
 def ensure_shadow(db):
     db.executescript(SHADOW_SCHEMA)
 
@@ -93,8 +99,7 @@ def record_event(args, db, kind):
     else:
         amount = None
         symbol = args.symbol
-        if not symbol or not symbol.isalnum():
-            raise ValueError("symbol must be alphanumeric")
+        validate_symbol(symbol, "symbol")
         qty = ledger.quantity(args.quantity, "quantity")
     recorded = ledger.timestamp(args.recorded_at) if args.recorded_at else ledger.now()
     if not args.confirm_adjustment:
@@ -129,8 +134,7 @@ def compare(args, db):
             symbol, value = item.split("=", 1)
         except ValueError:
             raise ValueError("price must use SYMBOL=PRICE")
-        if not symbol or not symbol.isalnum():
-            raise ValueError("price symbol must be alphanumeric")
+        validate_symbol(symbol, "price symbol")
         prices[symbol] = ledger.cents(value, "price")
     symbols = {symbol for symbol, qty in real_holdings.items() if qty} | {
         symbol for symbol, qty in shadow_holdings.items() if qty
