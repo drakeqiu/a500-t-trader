@@ -28,6 +28,16 @@ class OrdersCliTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(CLI), "--db", str(self.db), *args],
                               text=True, capture_output=True)
 
+    def test_late_fill_reduces_order_cash_budget_by_business_time(self):
+        result = self.run_ledger("fill", "--id", "late", "--at", "2026-10-31T09:45:00Z",
+                                 "--recorded-at", "2026-10-31T11:00:00Z", "--symbol", "563360",
+                                 "--side", "buy", "--quantity", "90", "--price", "10")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        order = self.cli("record", "--id", "over-budget", "--symbol", "563360",
+                         "--side", "buy", "--quantity", "20", "--price", "10")
+        self.assertEqual(order.returncode, 2)
+        self.assertIn("insufficient unreserved cash", order.stderr)
+
     def test_active_orders_reserve_cash_and_holdings_until_terminal(self):
         fill = self.run_ledger("fill", "--id", "fill-1", "--at", "2026-10-31T10:00:00Z",
                                "--symbol", "563360", "--side", "buy", "--quantity", "2", "--price", "10")
@@ -118,6 +128,8 @@ class OrdersCliTest(unittest.TestCase):
         stopped = self.risk_cli("1", "-300.25")
         self.assertIn("new entry: BLOCKED", stopped.stdout)
         self.assertIn("reaching -300.25 yuan", stopped.stdout)
+        rebuild = self.run_ledger("rebuild", "--confirm-rebuild")
+        self.assertEqual(rebuild.returncode, 0, rebuild.stderr)
         recovered = self.risk_cli("1", "0")
         self.assertIn("new entry: BLOCKED", recovered.stdout)
         self.assertIn("stop remains locked", recovered.stdout)

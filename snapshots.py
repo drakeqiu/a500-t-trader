@@ -98,7 +98,7 @@ def resource_projection(db):
     covered = set(json.loads(raw_covered))
     blocked = reconciliation != "MATCH" or fills_through is None or not orders_known
     if fills_through:
-        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND occurred_at > ? AND occurred_at <= ? ORDER BY occurred_at, fill_id", (fills_through, at)).fetchall()
+        fills = db.execute("SELECT occurred_at, symbol, side, quantity, price_cents FROM fills WHERE applied=1 AND effective=1 AND occurred_at > ? AND occurred_at <= ? ORDER BY occurred_at, fill_id", (fills_through, at)).fetchall()
         for _, symbol, side, quantity, price in fills:
             if side == "buy":
                 cash -= quantity * price

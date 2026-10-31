@@ -31,10 +31,10 @@ class ShadowCliTest(unittest.TestCase):
         reset = self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z")
         self.assertEqual(reset.returncode, 0, reset.stderr)
         flow = self.cli("cash-flow", "--id", "deposit-1", "--at", "2026-01-02T10:00:00Z",
-                        "--direction", "in", "--amount", "100")
+                        "--direction", "in", "--amount", "100", "--confirm-adjustment")
         self.assertEqual(flow.returncode, 0, flow.stderr)
         holding = self.cli("holding-adjustment", "--id", "transfer-1", "--at", "2026-01-02T10:01:00Z",
-                           "--symbol", "510300", "--direction", "in", "--quantity", "10")
+                           "--symbol", "510300", "--direction", "in", "--quantity", "10", "--confirm-adjustment")
         self.assertEqual(holding.returncode, 0, holding.stderr)
         self.assertEqual(self.ledger("fill", "--id", "real-buy", "--at", "2026-01-02T10:02:00Z",
                                      "--symbol", "563360", "--side", "buy", "--quantity", "10", "--price", "10").returncode, 0)
@@ -55,11 +55,11 @@ class ShadowCliTest(unittest.TestCase):
         self.assertEqual(self.ledger("fill", "--id", "real-buy", "--at", "2026-01-02T10:00:00Z",
                                      "--symbol", "563360", "--side", "buy", "--quantity", "20", "--price", "10").returncode, 0)
         result = self.cli("holding-adjustment", "--id", "transfer-out", "--at", "2026-01-02T10:01:00Z",
-                          "--symbol", "563360", "--direction", "out", "--quantity", "110")
+                          "--symbol", "563360", "--direction", "out", "--quantity", "110", "--confirm-adjustment")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("confirmed reset", result.stderr)
         duplicate = self.cli("holding-adjustment", "--id", "transfer-out", "--at", "2026-01-02T10:01:00Z",
-                             "--symbol", "563360", "--direction", "out", "--quantity", "110")
+                             "--symbol", "563360", "--direction", "out", "--quantity", "110", "--confirm-adjustment")
         self.assertNotEqual(duplicate.returncode, 0)
         self.assertEqual(self.cli("reset").returncode, 2)
         self.assertEqual(self.cli("reset", "--confirm-reset").returncode, 0)
@@ -68,9 +68,16 @@ class ShadowCliTest(unittest.TestCase):
     def test_cash_out_rejects_negative_real_cash(self):
         self.assertEqual(self.cli("reset", "--confirm-reset", "--at", "2026-01-02T09:30:00Z").returncode, 0)
         result = self.cli("cash-flow", "--id", "withdrawal", "--at", "2026-01-02T10:00:00Z",
-                          "--direction", "out", "--amount", "10001")
+                          "--direction", "out", "--amount", "10001", "--confirm-adjustment")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("insufficient real cash", result.stderr)
+
+    def test_account_adjustment_requires_explicit_confirmation(self):
+        result = self.cli("cash-flow", "--id", "unconfirmed", "--at", "2026-01-02T10:00:00Z",
+                          "--direction", "in", "--amount", "10")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires --confirm-adjustment", result.stderr)
+        self.assertNotIn("unconfirmed", self.ledger("balance").stdout)
 
     def test_reset_requires_a_real_anchor(self):
         empty_db = Path(self.temp.name) / "unanchored.sqlite"

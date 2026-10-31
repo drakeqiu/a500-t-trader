@@ -34,16 +34,12 @@ def reservations(db, exclude=None):
 
 
 def validate_available(db, order_id, symbol, side, remaining, price):
-    anchor = db.execute("SELECT cash_cents FROM anchor WHERE id = 1").fetchone()
-    if anchor is None:
-        raise ValueError("confirm an anchor before recording orders")
+    projected_cash, projected_holdings = ledger.project(db)
     cash_reserved, holdings_reserved = reservations(db, order_id)
-    if side == "buy" and anchor[0] - cash_reserved < remaining * price:
+    if side == "buy" and projected_cash - cash_reserved < remaining * price:
         raise ValueError("insufficient unreserved cash")
-    if side == "sell":
-        held = db.execute("SELECT quantity FROM holdings WHERE symbol = ?", (symbol,)).fetchone()
-        if (held[0] if held else 0) - holdings_reserved.get(symbol, 0) < remaining:
-            raise ValueError("insufficient unreserved holdings")
+    if side == "sell" and projected_holdings.get(symbol, 0) - holdings_reserved.get(symbol, 0) < remaining:
+        raise ValueError("insufficient unreserved holdings")
 
 
 def record(args, db):

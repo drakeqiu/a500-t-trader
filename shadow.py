@@ -96,6 +96,9 @@ def record_event(args, db, kind):
         if not symbol or not symbol.isalnum():
             raise ValueError("symbol must be alphanumeric")
         qty = ledger.quantity(args.quantity, "quantity")
+    recorded = ledger.timestamp(args.recorded_at) if args.recorded_at else ledger.now()
+    if not args.confirm_adjustment:
+        raise ValueError("account adjustment requires --confirm-adjustment")
     facts = (at, kind, args.direction, amount, symbol, qty)
     with db:
         previous = db.execute(
@@ -107,7 +110,7 @@ def record_event(args, db, kind):
                 raise ValueError("event id already exists with different facts")
             print(f"duplicate {kind} {event_id}; no balance change")
             return
-        db.execute("INSERT INTO account_events VALUES (?, ?, ?, ?, ?, ?, ?)", (event_id, *facts))
+        db.execute("INSERT INTO account_events (event_id, occurred_at, event_type, direction, amount_cents, symbol, quantity, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (event_id, *facts, recorded))
         ledger.project(db)
         shadow = db.execute("SELECT 1 FROM shadow_anchor WHERE id = 1").fetchone()
         if shadow:
@@ -155,12 +158,16 @@ def main():
     cash.add_argument("--at", required=True)
     cash.add_argument("--direction", required=True, choices=("in", "out"))
     cash.add_argument("--amount", required=True)
+    cash.add_argument("--recorded-at")
+    cash.add_argument("--confirm-adjustment", action="store_true")
     holding = commands.add_parser("holding-adjustment", help="record and mirror an external ETF holding transfer")
     holding.add_argument("--id", required=True)
     holding.add_argument("--at", required=True)
     holding.add_argument("--symbol", required=True)
     holding.add_argument("--direction", required=True, choices=("in", "out"))
     holding.add_argument("--quantity", required=True)
+    holding.add_argument("--recorded-at")
+    holding.add_argument("--confirm-adjustment", action="store_true")
     compare_parser = commands.add_parser("compare", help="compare account equity at supplied market prices")
     compare_parser.add_argument("--price", action="append", default=[], metavar="SYMBOL=PRICE")
     args = parser.parse_args()
