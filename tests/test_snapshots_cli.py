@@ -42,7 +42,7 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertEqual(self.fill("later", "2026-10-31T10:30:00Z").returncode, 0)
         resources = self.run_cli("snapshots.py", "resources")
         self.assertEqual(resources.returncode, 0, resources.stderr)
-        self.assertIn("cash: 960.00", resources.stdout)
+        self.assertIn("available cash: 960.00", resources.stdout)
         self.assertIn("563360: 104", resources.stdout)
         self.assertIn("openings: ALLOWED", resources.stdout)
         self.assertIn("cash: 960.00", self.run_cli("ledger.py", "balance").stdout)
@@ -59,7 +59,7 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("orders coverage: UNKNOWN", status.stdout)
         self.assertIn("openings: BLOCKED", status.stdout)
         resources = self.run_cli("snapshots.py", "resources")
-        self.assertIn("cash: 1000.00", resources.stdout)
+        self.assertIn("available cash: 1000.00", resources.stdout)
         self.assertIn("openings: BLOCKED", resources.stdout)
 
     def test_mismatch_blocks_and_covered_order_is_not_subtracted_twice(self):
@@ -75,7 +75,7 @@ class SnapshotsCliTest(unittest.TestCase):
         self.assertIn("covered order IDs: buy-1", status.stdout)
         self.assertIn("broker frozen cash: 50.00", status.stdout)
         resources = self.run_cli("snapshots.py", "resources")
-        self.assertIn("cash: 949.00", resources.stdout)
+        self.assertIn("available cash: 949.00", resources.stdout)
         self.assertIn("openings: BLOCKED", resources.stdout)
 
     def test_uncovered_order_is_reserved_once_and_covered_fill_not_reapplied(self):
@@ -88,6 +88,23 @@ class SnapshotsCliTest(unittest.TestCase):
         resources = self.run_cli("snapshots.py", "resources")
         self.assertIn("563360: 92", resources.stdout)
         self.assertIn("openings: ALLOWED", resources.stdout)
+
+    def test_resources_report_frozen_resources_and_unavailable_t1_sellability(self):
+        result = self.snapshot("--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known",
+                               "--frozen-cash", "25", "--frozen-holding", "563360=10")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fill = self.fill("same-day-buy", "2026-10-31T10:30:00Z", quantity="5")
+        self.assertEqual(fill.returncode, 0, fill.stderr)
+        resources = self.run_cli("snapshots.py", "resources")
+        self.assertEqual(resources.returncode, 0, resources.stderr)
+        self.assertIn("available cash: 925.00", resources.stdout)
+        self.assertIn("broker frozen cash: 25.00", resources.stdout)
+        self.assertIn("563360: 95", resources.stdout)
+        self.assertIn("broker frozen holdings:", resources.stdout)
+        self.assertIn("563360: 10", resources.stdout)
+        self.assertIn("sellable quantity: UNAVAILABLE", resources.stdout)
+        self.assertIn("T+1 restricted quantity: UNAVAILABLE", resources.stdout)
+        self.assertIn("sellability evidence: unavailable; no confirmed broker sellable snapshot or verified exchange calendar", resources.stdout)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,8 @@ python3 snapshots.py --db account.sqlite resources
 ```
 
 `capture` reports whether the observation matches the real ledger projection at capture time; it never changes ledger balances. Resource projection starts from the snapshot, adds only fills later than its inclusive coverage boundary, deducts broker-reported frozen resources, and subtracts active orders not identified as already frozen. A mismatch is not auto-corrected: reconcile the broker and ledger explicitly before treating openings as allowed. No snapshot history is used as a substitute for a confirmed ledger fact.
+
+`resources` labels projected total cash and holdings separately from available resources after broker freezes and uncovered active orders. Broker frozen cash and holdings and local active-order reservations are shown explicitly. Legal sellable quantities and T+1-restricted quantities are reported as `UNAVAILABLE`: this CLI has no confirmed broker sellable-snapshot input or verified SSE trading calendar, and it does not infer trading days from weekdays or promote same-day buys to sellable inventory. Do not treat the availability projection as a legal sellable quantity.
 ## Actual fees and T groups
 
 Record the broker's actual fee against its confirmed fill ID, then attach fills to a positive T (sell followed by buy) or reverse T (buy followed by sell) group. Fees are optional; no fee is assumed when one has not been recorded. A fee may be entered once per fill (an identical retry is idempotent), and a fill may belong to only one group. Group reports use fill quantities/prices and recorded fees, show paired net P&L separately from remaining buy/sell exposure, and retain each fill and fee as auditable detail. This reporting does not alter ledger cash or holdings.
