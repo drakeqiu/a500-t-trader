@@ -90,6 +90,11 @@ def connect(path):
     db.execute("UPDATE account_events SET recorded_at = occurred_at WHERE recorded_at = ''")
     db.commit()
     return db
+def validate_symbol(symbol, name="symbol"):
+    if symbol != "563360":
+        raise ValueError(f"{name} must be security 563360 (SSE)")
+
+
 
 
 def parse_holding(value):

@@ -196,19 +196,17 @@ class OrdersCliTest(unittest.TestCase):
         result = self.risk_cli("0.05")
         self.assertIn("reaching -300.00 yuan", result.stdout)
     def test_risk_stops_above_budget_and_at_daily_loss_threshold(self):
-        self.reset_account("300000")
-        snapshot = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
-                                   "capture", "--id", "s1", "--at", "2026-10-31T10:00:00Z",
-                                   "--cash", "300000", "--holding", "563360=100",
-                                   "--sellable-holding", "563360=100", "--t1-restricted-holding", "563360=0",
-                                   "--fills-through", "2026-10-31T10:00:00Z", "--orders-scope-known"],
-                                  text=True, capture_output=True)
-        self.assertEqual(snapshot.returncode, 0, snapshot.stderr)
-        result = self.risk_cli("240")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("new entry: ALLOWED", result.stdout)
-        self.assertIn("candidate risk: 240.00 / 240.00", result.stdout)
-        self.snapshot_for_risk()
+        self.reanchor_for_risk("250000")
+        self.snapshot_for_risk(cash="250000")
+        blocked = self.risk_cli("240.01")
+        self.assertIn("new entry: BLOCKED", blocked.stdout)
+        self.assertIn("rationale:", blocked.stdout)
+
+        self.record_loss_round_trip()
+        stopped = self.risk_cli("1")
+        self.assertIn("new entry: BLOCKED", stopped.stdout)
+        self.assertIn("reaching -300.00 yuan", stopped.stdout)
+
         invalid = subprocess.run([sys.executable, str(ROOT / "snapshots.py"), "--db", str(self.db),
                                   "risk", "--market-price", "NaN", "--candidate-quantity", "1",
                                   "--fee-rate", "0", "--action", "entry"], text=True, capture_output=True)

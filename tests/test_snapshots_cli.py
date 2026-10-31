@@ -123,7 +123,8 @@ class SnapshotsCliTest(unittest.TestCase):
                              "--side", "sell", "--quantity", "10", "--price", "5")
         self.assertEqual(order.returncode, 0, order.stderr)
         resources = self.run_cli("snapshots.py", "resources")
-        self.assertIn("available cash: 980.00", resources.stdout)
+        self.assertIn("available cash: 930.00", resources.stdout)
+        self.assertIn("active order reserved cash: 50.00", resources.stdout)
         self.assertIn("563360: 92", resources.stdout)
 
     def test_resources_report_broker_confirmed_sellable_and_t1_quantities(self):
