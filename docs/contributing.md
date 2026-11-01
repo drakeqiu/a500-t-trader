@@ -32,6 +32,15 @@ uv run pytest
 uv run python -m a500_t_trader
 ```
 
+普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试，fixture 驱动的测试仍会正常运行。
+在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查：
+
+```bash
+uv run pytest -m live
+```
+
+实时测试不会跳过缺失配置、连接失败、权限不足或必要行情数据缺失的情况；这些问题会使测试失败。
+
 运行 `npm run format` 可格式化 JSON、YAML 和 TOML 文件。
 
 ## Git 提交规范
