@@ -52,6 +52,24 @@ python -m a500_t_trader premarket --config strategy.json --account account.json
 
 本 CLI 当前只生成建议。建议、用户录入账户快照、手工成交记录和模拟成交是不同数据；该命令不创建后两种记录，不执行交易。
 
+## 盘后复盘
+
+如需复盘，请在计划生成时将计划和对应账户快照另存为本地 JSON：
+
+```bash
+python -m a500_t_trader premarket \
+  --config strategy.json --account account.json --output plan-2026-10-30.json
+```
+
+使用 `monitor` 时将 `--database` 指向需复用的同一触发证据库。收盘后运行：
+
+```bash
+python -m a500_t_trader postmarket \
+  --date 2026-10-30 --plan plan-2026-10-30.json --database signals.sqlite3
+```
+
+`--date` 必须与保存计划的交易日相同。JSON 复盘单独呈现盘前建议、用户录入且非券商验证的账户快照、监控触发证据、手工录入成交和模拟成交；建议不会转成订单。手工录入成交与模拟成交目前没有由这些 CLI 命令提供的记录输入，因此明确显示为 `not recorded`，而非推断为空成交或已执行。按计划 ETF 查询当日历史 1 分钟线；若数据源没有该能力、没有可用数据、没有对应触发库/记录或保存计划不匹配，`missing_data` 会说明缺项。最后一根历史分钟线不保证是官方收盘价。
+
 ## 用户启动盘中监控
 
 监控只在用户前台启动的进程中运行。提供本地账户快照、规则配置及用于保存触发证据的 SQLite 路径：

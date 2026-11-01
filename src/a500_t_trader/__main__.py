@@ -15,13 +15,14 @@ from .backtest import BacktestMarketData, BacktestRepository, run_backtest
 from .intraday import run_monitor
 from .market_data import CapabilityUnavailableError, MarketDataService, normalize_symbol
 from .premarket import PlanMarketData, generate_plan, load_account, load_config, plan_json
+from .postmarket import ReviewMarketData, generate_review, review_json, save_plan
 from .runtime import create_provider_from_env
 
 
 def main(
     argv: Sequence[str] | None = None,
     *,
-    market_data: PlanMarketData | BacktestMarketData | None = None,
+    market_data: PlanMarketData | BacktestMarketData | ReviewMarketData | None = None,
     as_of: datetime | None = None,
 ) -> int:
     """Run CLI commands; injected data/time form the public CLI-to-app seam."""
@@ -30,6 +31,7 @@ def main(
     premarket = commands.add_parser("premarket", help="generate an advisory pre-market plan")
     premarket.add_argument("--config", required=True, help="local ETF/rule JSON file")
     premarket.add_argument("--account", required=True, help="user-entered account snapshot JSON")
+    premarket.add_argument("--output", help="save the plan and account snapshot as JSON")
     backtest = commands.add_parser("backtest", help="backtest explicit rules on minute history")
     backtest.add_argument("--config", required=True, help="local ETF/rule JSON file")
     backtest.add_argument("--account", required=True, help="initial user-entered account snapshot")
@@ -60,7 +62,27 @@ def main(
         "--poll-seconds", type=float, default=5.0, help="foreground polling interval"
     )
     monitor.add_argument("--once", action="store_true", help="evaluate one pass and exit")
+    review = commands.add_parser("postmarket", help="review a saved plan and daily evidence")
+    review.add_argument("--date", required=True, type=date.fromisoformat, help="reviewed trading date")
+    review.add_argument("--plan", required=True, help="saved pre-market plan JSON")
+    review.add_argument("--database", required=True, help="SQLite trigger-evidence file")
     args = parser.parse_args(argv)
+    if args.command == "postmarket":
+        try:
+            market_data_error = None
+            if market_data is None:
+                try:
+                    market_data = MarketDataService(create_provider_from_env())
+                except Exception as error:
+                    market_data_error = str(error)
+            result = generate_review(
+                args.date, args.plan, args.database, market_data, market_data_error,
+            )
+            print(review_json(result))
+            return 0
+        except Exception as error:
+            print(f"Unable to generate post-market review: {error}", file=sys.stderr)
+            return 2
 
     if args.command == "history-cleanup":
         try:
@@ -172,6 +194,12 @@ def main(
     except Exception as error:
         print(f"Unable to generate plan or backtest: {error}", file=sys.stderr)
         return 2
+    if args.output:
+        try:
+            save_plan(args.output, plan, account)
+        except OSError as error:
+            print(f"Unable to save pre-market plan: {error}", file=sys.stderr)
+            return 2
     print(plan_json(plan))
     return 0
 
