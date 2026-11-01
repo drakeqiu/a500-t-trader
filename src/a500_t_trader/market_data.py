@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -115,6 +116,14 @@ class MarketDataSource(Protocol):
         self, symbol: str, interval_minutes: int
     ) -> tuple[MinuteBar, ...]: ...
 
+    def get_history_bars(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int,
+    ) -> tuple[MinuteBar, ...]: ...
+
     def get_trades(self, symbol: str) -> tuple[Trade, ...]: ...
 
 
@@ -140,6 +149,21 @@ class MarketDataService:
         if interval_minutes not in (1, 5):
             raise ValueError("interval_minutes must be 1 or 5")
         return self._source.get_intraday_bars(self._symbol(symbol), interval_minutes)
+
+    def get_history_bars(
+        self,
+        symbol: str | None,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int = 1,
+    ) -> tuple[MinuteBar, ...]:
+        if interval_minutes not in (1, 5):
+            raise ValueError("interval_minutes must be 1 or 5")
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        return self._source.get_history_bars(
+            self._symbol(symbol), start_date, end_date, interval_minutes
+        )
 
     def get_trades(self, symbol: str | None = None) -> tuple[Trade, ...]:
         return self._source.get_trades(self._symbol(symbol))
