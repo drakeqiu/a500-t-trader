@@ -111,6 +111,30 @@ def test_history_query_maps_supported_period_and_vendor_bars() -> None:
     assert api.calls == [("kline", ["563360.SH"], 20261102, 20261104, 10002)]
 
 
+def test_daily_history_queries_day_period_and_returns_validated_daily_bars() -> None:
+    api = VendorAPI()
+    api.kline_rows = [
+        {
+            "kline_time": pd.Timestamp("2026-11-02"),
+            "open": 1.20,
+            "high": 1.25,
+            "low": 1.18,
+            "close": 1.23,
+            "volume": 1000,
+            "amount": 1230.0,
+        }
+    ]
+    service = MarketDataService(
+        _provider(api, datetime(2026, 11, 5, 12, tzinfo=SHANGHAI))
+    )
+    bars = service.get_daily_history("563360", date(2026, 11, 1), date(2026, 11, 3))
+    assert len(bars) == 1
+    assert bars[0].timestamp == datetime(2026, 11, 2, tzinfo=SHANGHAI)
+    assert bars[0].close == Decimal("1.23")
+    assert bars[0].amount == Decimal("1230.0")
+    assert api.calls == [("kline", ["563360.SH"], 20261101, 20261103, 10008)]
+
+
 def test_bar_query_rejects_timestamps_misaligned_to_interval() -> None:
     api = VendorAPI()
     api.kline_rows = [_row("202611020931", 1.23)]

@@ -10,12 +10,13 @@
 - **推送订阅：** `TgwPushProvider` 适配调用方已初始化的 tgw API，可订阅快照、分钟线和逐笔成交。
 - **统一数据模型：** 查询与推送使用 `Snapshot`、`MinuteBar`、`Trade`；时间戳统一为 `Asia/Shanghai`。
 - **显式能力边界：** 当前 AmazingData provider 不支持按需成交查询；数据可用性取决于连接方式、账号权限和数据源能力。
+- **盘前建议：** CLI 可根据用户维护的 ETF/策略规则、账户快照、规范化行情和交易日历生成风险审核后的做T建议；不连接券商或下单。
 
 ## 使用
 
-详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。
+详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。盘前计划的本地配置格式、账户快照及命令见[盘前计划指南](docs/premarket-plan.md)。
 
-项目要求 Python 3.14；不提供交易策略、下单功能或交互式行情查询 CLI。`python -m a500_t_trader` 仅打印项目名称。
+项目要求 Python 3.14。盘前工作流为建议用途，不连接券商、不验证账户，也不下单。
 
 ## 开发与贡献
 
