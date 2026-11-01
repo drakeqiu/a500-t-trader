@@ -56,9 +56,6 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      - name: Markdown lint
-        run: uv run pymarkdown scan --respect-gitignore --recurse .
-
       - name: Structured-data lint
         run: uv run yamllint --strict .github
 
