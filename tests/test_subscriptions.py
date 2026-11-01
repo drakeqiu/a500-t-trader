@@ -5,12 +5,12 @@ from zoneinfo import ZoneInfo
 
 class FakeTgw:
     class MarketType:
-        kSHSE = 1
+        kSSE = 1
         kSZSE = 2
 
     class MDDatatype:
         kSnapshot = 10
-        kKLine = 11
+        k1KLine = 11
         kTickExecution = 12
 
     class SubscribeItem:

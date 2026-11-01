@@ -185,9 +185,9 @@ class TgwPushProvider:
 
     def _make_item(self, code: str, event_type: str) -> Any:
         item = self._api.SubscribeItem()
-        item.market = self._api.MarketType.kSHSE if code.startswith(("5", "6", "9")) else self._api.MarketType.kSZSE
+        item.market = self._api.MarketType.kSSE if code.startswith(("5", "6", "9")) else self._api.MarketType.kSZSE
         item.security_code = code
-        item.md_data_type = {"snapshot": self._api.MDDatatype.kSnapshot, "bar": self._api.MDDatatype.kKLine, "tick": self._api.MDDatatype.kTickExecution}[event_type]
+        item.category_type = {"snapshot": self._api.MDDatatype.kSnapshot, "bar": self._api.MDDatatype.k1KLine, "tick": self._api.MDDatatype.kTickExecution}[event_type]
         return item
 
     def _remove(self, subscription: Subscription) -> None:
