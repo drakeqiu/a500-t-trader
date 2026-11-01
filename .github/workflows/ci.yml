@@ -17,6 +17,18 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Download wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p wheels
+          gh release download deps-v1 \
+            --repo "${{ github.repository }}" \
+            --pattern "*.whl" \
+            --dir wheels
+
+          ls -lh wheels/
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
