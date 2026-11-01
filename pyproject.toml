@@ -12,7 +12,6 @@ dependencies = ["tgw==1.0.9.2", "AmazingData==1.1.9"]
 
 [dependency-groups]
 dev = [
-  "mdformat>=0.7.22",
   "mypy>=1.15.0",
   "pymarkdownlnt>=0.9.34",
   "pytest>=8.3.5",

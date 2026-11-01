@@ -1,71 +1,22 @@
 # A500 T-Trader
 
-A minimal Python project skeleton for A500 T-Trader. It currently contains only the
-package entry point and development quality checks.
+面向 Python 调用方的行情数据 API：通过 AmazingData 按需查询快照和分钟线，或将调用方已连接的 tgw 推送适配为统一行情模型。
 
-## Development
+![AmazingData 查询和已连接 tgw 推送经过各自 provider，使用 Snapshot、MinuteBar、Trade 统一行情模型](./assets/readme/market-data-flow.svg)
 
-Requires Python 3.14, Node.js 24, and [uv](https://docs.astral.sh/uv/).
+## 能力
 
-```bash
-uv sync --locked
-npm ci
-```
+- **按需查询：** `MarketDataService` 提供快照、当日分钟线和历史分钟线查询；支持 1 分钟与 5 分钟周期。
+- **推送订阅：** `TgwPushProvider` 适配调用方已初始化的 tgw API，可订阅快照、分钟线和逐笔成交。
+- **统一数据模型：** 查询与推送使用 `Snapshot`、`MinuteBar`、`Trade`；时间戳统一为 `Asia/Shanghai`。
+- **显式能力边界：** 当前 AmazingData provider 不支持按需成交查询；数据可用性取决于连接方式、账号权限和数据源能力。
 
-Run all quality checks and the package entry point:
+## 使用
 
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pymarkdown scan --respect-gitignore --recurse .
-uv run mdformat --check README.md CONTEXT.md AGENTS.md docs/adr docs/agents
-uv run yamllint --strict .github
-npm run format:check
-uv run mypy
-uv run pytest
-uv run python -m a500_t_trader
-```
+详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。
 
-Run `npm run format` to apply JSON, YAML, and TOML formatting.
+项目要求 Python 3.14；不提供交易策略、下单功能或交互式行情查询 CLI。`python -m a500_t_trader` 仅打印项目名称。
 
-The smoke test is run with `uv run pytest`.
+## 开发与贡献
 
-## Git commits
-
-This repository uses a repository-local Conventional Commits template. Git loads
-`.gitmessage` when you run `git commit`:
-
-```text
-type(scope): description
-```
-
-Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, and `ci`. The
-scope is optional; a body and footers are optional. Use `!` before the colon or
-a `BREAKING CHANGE:` footer to mark a breaking change. Edit the template as
-needed; lines beginning with `#` are guidance and are omitted from the commit
-message.
-
-To enable it in a fresh clone:
-
-```bash
-git config --local commit.template .gitmessage
-```
-
-The configuration is local to the clone and is not shared through the repository.
-
-## CI
-
-GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and
-pull requests. CI installs the locked environment with `uv sync --locked`.
-
-## Automatic PR merging
-
-Add the `automerge` label to a pull request targeting the default branch to enable
-GitHub auto-merge with squash. Removing the label cancels pending auto-merge.
-Only pull requests from branches in this repository are managed; fork pull requests
-are ignored.
-
-Enable auto-merge in the repository settings, then configure the default branch's
-protection rules or ruleset to require the desired status checks, at least one
-approval, and an up-to-date branch. GitHub auto-merge waits for those rules before
-merging.
+开发环境、质量检查、提交规范和 CI 说明见[开发与贡献指南](docs/contributing.md)。

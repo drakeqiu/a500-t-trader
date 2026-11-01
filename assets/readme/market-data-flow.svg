@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">A500 T-Trader market data flow</title>
+  <desc id="desc">AmazingData provides on-demand snapshot and minute-bar queries through MarketDataService. A caller-initialized tgw API provides push events through TgwPushProvider. Both paths use Snapshot, MinuteBar, and Trade models where supported.</desc>
+  <rect width="1200" height="360" rx="24" fill="#f7f8f6"/>
+  <text x="52" y="54" fill="#64706d" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="2">MARKET DATA · TWO INTEGRATION PATHS</text>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', PingFang SC, sans-serif">
+    <rect x="52" y="88" width="280" height="96" rx="14" fill="#ffffff" stroke="#cdd5d1" stroke-width="2"/>
+    <text x="76" y="126" fill="#17211e" font-size="25" font-weight="650">AmazingData</text>
+    <text x="76" y="157" fill="#64706d" font-size="19">按需查询 · 快照 / 分钟线</text>
+
+    <rect x="52" y="212" width="280" height="96" rx="14" fill="#ffffff" stroke="#cdd5d1" stroke-width="2"/>
+    <text x="76" y="250" fill="#17211e" font-size="25" font-weight="650">已初始化的 tgw API</text>
+    <text x="76" y="281" fill="#64706d" font-size="19">调用方连接 · 推送回调</text>
+
+    <path d="M332 136H420" fill="none" stroke="#187c68" stroke-width="3"/>
+    <path d="M332 260H420" fill="none" stroke="#187c68" stroke-width="3"/>
+    <circle cx="420" cy="136" r="5" fill="#187c68"/>
+    <circle cx="420" cy="260" r="5" fill="#187c68"/>
+
+    <rect x="420" y="88" width="320" height="96" rx="14" fill="#e5f1ed" stroke="#8ab7aa" stroke-width="2"/>
+    <text x="448" y="128" fill="#145b4c" font-size="25" font-weight="650">MarketDataService</text>
+    <text x="448" y="158" fill="#3e665c" font-size="19">查询接口 · 统一模型</text>
+
+    <rect x="420" y="212" width="320" height="96" rx="14" fill="#e5f1ed" stroke="#8ab7aa" stroke-width="2"/>
+    <text x="448" y="252" fill="#145b4c" font-size="25" font-weight="650">TgwPushProvider</text>
+    <text x="448" y="282" fill="#3e665c" font-size="19">有界订阅 · 回调或迭代器</text>
+
+    <path d="M740 136H824V198H866" fill="none" stroke="#187c68" stroke-width="3"/>
+    <path d="M740 260H824V218H866" fill="none" stroke="#187c68" stroke-width="3"/>
+    <circle cx="866" cy="208" r="6" fill="#187c68"/>
+
+    <rect x="866" y="96" width="282" height="224" rx="14" fill="#17211e"/>
+    <text x="894" y="136" fill="#a5cfc2" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="1">NORMALIZED EVENTS</text>
+    <text x="894" y="185" fill="#ffffff" font-size="25" font-weight="650">Snapshot</text>
+    <text x="894" y="226" fill="#ffffff" font-size="25" font-weight="650">MinuteBar</text>
+    <text x="894" y="267" fill="#ffffff" font-size="25" font-weight="650">Trade</text>
+    <text x="894" y="300" fill="#bdc8c4" font-size="17">能力由数据源与权限决定</text>
+  </g>
+</svg>

@@ -44,6 +44,12 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked
 
+      - name: Markdown lint
+        run: npx --yes markdownlint-cli2
+
+      - name: Markdown format check
+        run: npx --yes prettier --check "**/*.md"
+
       - name: Ruff lint
         run: uv run ruff check .
 
