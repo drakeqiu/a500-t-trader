@@ -19,17 +19,11 @@ def live_market_data_service() -> MarketDataService:
     return MarketDataService(create_provider_from_env())
 
 
-def test_live_provider_connects(live_market_data_service: MarketDataService) -> None:
-    """Provider construction performs a real login and must not be skipped."""
-    assert live_market_data_service is not None
-
 
 def test_live_snapshot_for_563360(
     live_market_data_service: MarketDataService,
 ) -> None:
-    service = live_market_data_service
-
-    snapshot = service.get_snapshot("563360")
+    snapshot = live_market_data_service.get_snapshot("563360")
 
     assert snapshot is not None, "AmazingData returned no snapshot for 563360"
     assert snapshot.symbol == "563360"
@@ -40,8 +34,8 @@ def test_live_snapshot_for_563360(
 def test_live_minute_bars_for_563360(
     live_market_data_service: MarketDataService,
 ) -> None:
-    service = live_market_data_service
-    bars = service.get_history_bars(
+    today = datetime.now(SHANGHAI).date()
+    bars = live_market_data_service.get_history_bars(
         "563360", today - timedelta(days=10), today, interval_minutes=1
     )
 
