@@ -16,7 +16,11 @@ ENV/
 .coverage.*
 htmlcov/
 
+# Node dependencies
+node_modules/
+
 # Build artifacts
+
 build/
 dist/
 *.egg-info/

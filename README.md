@@ -5,10 +5,11 @@ package entry point and development quality checks.
 
 ## Development
 
-Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.14, Node.js 24, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --locked
+npm ci
 ```
 
 Run all quality checks and the package entry point:
@@ -16,10 +17,16 @@ Run all quality checks and the package entry point:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
+uv run pymarkdown scan --respect-gitignore --recurse .
+uv run mdformat --check README.md CONTEXT.md AGENTS.md docs/adr docs/agents
+uv run yamllint --strict .github
+npm run format:check
 uv run mypy
 uv run pytest
 uv run python -m a500_t_trader
 ```
+
+Run `npm run format` to apply JSON, YAML, and TOML formatting.
 
 The smoke test is run with `uv run pytest`.
 
@@ -48,8 +55,8 @@ The configuration is local to the clone and is not shared through the repository
 
 ## CI
 
-GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and pull
-requests. CI installs the locked environment with `uv sync --locked`.
+GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and
+pull requests. CI installs the locked environment with `uv sync --locked`.
 
 ## Automatic PR merging
 
