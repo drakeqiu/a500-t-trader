@@ -16,12 +16,12 @@ The existing architecture already separates vendor APIs behind a normalized mark
 
 Organize `a500_t_trader` as one distribution containing these internal subpackages:
 
-| Subpackage | Responsibility |
-| --- | --- |
+| Subpackage    | Responsibility                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------- |
 | `market_data` | Normalized market-data contracts and service, provider implementations, and trading-calendar support. |
-| `strategy` | Pre-market planning, intraday monitoring, and post-market review workflows. |
-| `backtest` | Backtesting logic and its result/history persistence. |
-| `cli` | Command-line behavior and runtime/application assembly. |
+| `strategy`    | Pre-market planning, intraday monitoring, and post-market review workflows.                           |
+| `backtest`    | Backtesting logic and its result/history persistence.                                                 |
+| `cli`         | Command-line behavior and runtime/application assembly.                                               |
 
 Keep account-ledger and workflow-specific persistence with their owning domain; do not introduce a generic storage package solely to centralize persistence. Preserve the existing domain interfaces and vendor-neutral market-data boundary while moving modules.
 
