@@ -119,6 +119,10 @@ def monitor_once(
     if session is SessionState.CLOSED:
         print("Trading session is closed; no conditions evaluated.", file=output)
         return 0
+    account_age = now - account.as_of.astimezone(SHANGHAI)
+    if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
+        print("Account snapshot is stale or future-dated; no conditions evaluated.", file=errors)
+        return 0
 
     saved = 0
     for rule in config.rules:
@@ -152,6 +156,12 @@ def monitor_once(
             continue
         for bar in sorted(latest_by_status.values(), key=lambda item: item.timestamp):
             for trigger in _triggers(rule, bar, now, account.as_of):
+                if not _account_allows(rule, trigger.direction, account):
+                    print(
+                        f"{rule.symbol}: account limits veto the {trigger.direction} trigger.",
+                        file=errors,
+                    )
+                    continue
                 if not evidence.record(trigger, session):
                     continue
                 saved += 1
@@ -195,23 +205,41 @@ def run_monitor(
 def _triggers(
     rule, bar: MinuteBar, now: datetime, account_as_of: datetime
 ) -> tuple[Trigger, ...]:
+    """Emit each advisory trigger whose configured level the bar crossed."""
     found: list[Trigger] = []
     if rule.buy_below is not None and bar.low <= rule.buy_below:
-        level = rule.buy_below
-        found.append(Trigger(
-            bar.symbol, "buy", f"low <= {level} CNY",
+        risk = (
+            f"expires if a later price rises above {rule.buy_below} CNY; user review required"
+            if bar.is_completed else
             "provisional while the minute bar is unfinished; user review required"
-            if not bar.is_completed else
-            f"expires if a later price rises above {level} CNY; user review required",
+        )
+        found.append(Trigger(
+            rule.symbol, "buy", f"low <= {rule.buy_below} CNY", risk,
             bar, now, account_as_of,
         ))
     if rule.sell_above is not None and bar.high >= rule.sell_above:
-        level = rule.sell_above
-        found.append(Trigger(
-            bar.symbol, "sell", f"high >= {level} CNY",
+        risk = (
+            f"expires if a later price falls below {rule.sell_above} CNY; user review required"
+            if bar.is_completed else
             "provisional while the minute bar is unfinished; user review required"
-            if not bar.is_completed else
-            f"expires if a later price falls below {level} CNY; user review required",
+        )
+        found.append(Trigger(
+            rule.symbol, "sell", f"high >= {rule.sell_above} CNY", risk,
             bar, now, account_as_of,
         ))
     return tuple(found)
+
+
+def _account_allows(rule, direction: str, account: AccountSnapshot) -> bool:
+    if direction == "buy":
+        threshold = rule.buy_below
+        cash_limit = min(
+            account.available_cash,
+            rule.max_buy_cash if rule.max_buy_cash is not None else account.available_cash,
+        )
+        return int(cash_limit / threshold / 100) > 0
+    sellable = min(
+        account.sellable.get(rule.symbol, 0),
+        max(0, account.holdings.get(rule.symbol, 0) - rule.minimum_holding),
+    )
+    return sellable // 100 > 0

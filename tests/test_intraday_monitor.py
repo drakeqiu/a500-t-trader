@@ -89,6 +89,22 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
     ]
 
 
+
+def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(tmp_path, capsys):
+    config, account = _inputs(tmp_path)
+    config.write_text(
+        '{"etfs":[{"symbol":"510300","buy_below":"3.80",'
+        '"sell_above":"3.82","max_buy_cash":"4000","minimum_holding":100}]}',
+        encoding="utf-8",
+    )
+    assert main(
+        ["monitor", "--config", str(config), "--account", str(account),
+         "--database", str(tmp_path / "both.sqlite3"), "--once"],
+        market_data=Bars(), as_of=NOW,
+    ) == 0
+    output = capsys.readouterr().out
+    assert output.count("SUGGESTION") == 3
+    assert "buy" in output and "sell" in output
 def test_monitor_requery_does_not_duplicate_a_trigger(tmp_path, capsys):
     config, account = _inputs(tmp_path)
     database = tmp_path / "signals.sqlite3"

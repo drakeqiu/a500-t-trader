@@ -16,6 +16,9 @@ from .intraday import run_monitor
 from .market_data import CapabilityUnavailableError, MarketDataService, normalize_symbol
 from .premarket import PlanMarketData, generate_plan, load_account, load_config, plan_json
 from .postmarket import ReviewMarketData, generate_review, review_json, save_plan
+from .account_ledger import AccountLedger
+from .daily_indicators import calculate_indicators
+
 from .runtime import create_provider_from_env
 
 
@@ -32,7 +35,35 @@ def main(
     premarket.add_argument("--config", required=True, help="local ETF/rule JSON file")
     premarket.add_argument("--account", required=True, help="user-entered account snapshot JSON")
     premarket.add_argument("--output", help="save the plan and account snapshot as JSON")
-    backtest = commands.add_parser("backtest", help="backtest explicit rules on minute history")
+    premarket.add_argument("--database", help="SQLite account ledger")
+    account_record = commands.add_parser("account-snapshot", help="persist a user-entered account snapshot")
+    account_record.add_argument("--account", required=True, help="user-entered account snapshot JSON")
+    account_record.add_argument("--database", required=True, help="SQLite account ledger")
+    fill_record = commands.add_parser("manual-fill", help="record a user-entered manual fill")
+    fill_record.add_argument("--timestamp", required=True, type=datetime.fromisoformat)
+    fill_record.add_argument("--symbol", required=True)
+    fill_record.add_argument("--side", required=True, choices=("buy", "sell"))
+    fill_record.add_argument("--quantity", required=True, type=int)
+    fill_record.add_argument("--price", required=True, type=Decimal)
+    fill_record.add_argument("--notes", default="")
+    fill_record.add_argument("--database", required=True, help="SQLite account ledger")
+    ledger_show = commands.add_parser("account-ledger", help="show saved account snapshots and fills")
+    ledger_show.add_argument("--database", required=True, help="SQLite account ledger")
+    daily = commands.add_parser("daily-history", help="query normalized daily OHLCV history")
+    daily.add_argument("--symbol", required=True)
+    daily.add_argument("--start-date", required=True, type=date.fromisoformat)
+    daily.add_argument("--end-date", required=True, type=date.fromisoformat)
+    daily.add_argument("--database", required=True, help="local SQLite history database")
+    daily.add_argument("--confirm-history-persistence-permitted", action="store_true")
+    indicators = commands.add_parser(
+        "daily-indicators", help="calculate close-based SMA(5), SMA(20), and Wilder RSI(14)"
+    )
+    indicators.add_argument("--symbol", required=True)
+    indicators.add_argument("--start-date", required=True, type=date.fromisoformat)
+    indicators.add_argument("--database", required=True, help="local SQLite history database")
+    indicators.add_argument("--confirm-history-persistence-permitted", action="store_true")
+    indicators.add_argument("--end-date", required=True, type=date.fromisoformat)
+    backtest = commands.add_parser("backtest", help="run an advisory minute-history backtest")
     backtest.add_argument("--config", required=True, help="local ETF/rule JSON file")
     backtest.add_argument("--account", required=True, help="initial user-entered account snapshot")
     backtest.add_argument("--symbol", help="selected configured ETF when multiple ETFs are configured")
@@ -47,7 +78,7 @@ def main(
         "--confirm-history-persistence-permitted", action="store_true",
         help="confirm the data provider permits local history/snapshot persistence",
     )
-    cleanup = commands.add_parser("history-cleanup", help="remove reusable shared minute history")
+    cleanup = commands.add_parser("history-cleanup", help="remove reusable shared daily and minute history")
     cleanup.add_argument("--database", required=True)
     show = commands.add_parser("backtest-show", help="show one run and its exact bar snapshot")
     show.add_argument("--database", required=True)
@@ -67,6 +98,56 @@ def main(
     review.add_argument("--plan", required=True, help="saved pre-market plan JSON")
     review.add_argument("--database", required=True, help="SQLite trigger-evidence file")
     args = parser.parse_args(argv)
+    if args.command == "account-snapshot":
+        try:
+            identifier = AccountLedger(args.database).record_snapshot(load_account(args.account))
+        except Exception as error:
+            print(f"Unable to record account snapshot: {error}", file=sys.stderr)
+            return 2
+        print(json.dumps({"id": identifier, "classification": "user-entered; not broker-verified"}))
+        return 0
+    if args.command == "manual-fill":
+        try:
+            identifier = AccountLedger(args.database).record_fill(
+                args.timestamp, args.symbol, args.side, args.quantity, args.price, args.notes
+            )
+        except Exception as error:
+            print(f"Unable to record manual fill: {error}", file=sys.stderr)
+            return 2
+        print(json.dumps({"id": identifier, "classification": "user-entered manual fill; not broker-verified"}))
+        return 0
+    if args.command == "account-ledger":
+        ledger = AccountLedger(args.database)
+        print(json.dumps(
+            {"snapshots": ledger.snapshots(), "manual_fills": ledger.fills()},
+            ensure_ascii=False, indent=2, default=_json_default,
+        ))
+        return 0
+    if args.command in ("daily-history", "daily-indicators"):
+        try:
+            if args.start_date > args.end_date:
+                raise ValueError("start-date must be on or before end-date")
+            if not args.confirm_history_persistence_permitted:
+                print("Daily-history persistence is not authorized; confirm the provider terms "
+                      "before storing bars.", file=sys.stderr)
+                return 2
+            symbol = normalize_symbol(args.symbol)
+            repository = BacktestRepository(args.database)
+            bars = repository.get_shared_daily_history(symbol, args.start_date, args.end_date)
+            if bars is None:
+                source = market_data or MarketDataService(create_provider_from_env())
+                query = getattr(source, "get_daily_history", None)
+                if query is None:
+                    raise CapabilityUnavailableError("daily-history capability is unavailable")
+                bars = tuple(query(symbol, args.start_date, args.end_date))
+                if bars:
+                    repository.save_daily_history(bars, args.start_date, args.end_date)
+            records = calculate_indicators(bars) if args.command == "daily-indicators" else bars
+        except Exception as error:
+            print(f"Daily-history/indicator capability unavailable or unauthorized: {error}", file=sys.stderr)
+            return 2
+        print(json.dumps([asdict(row) for row in records], ensure_ascii=False, indent=2, default=_json_default))
+        return 0
     if args.command == "postmarket":
         try:
             market_data_error = None
@@ -199,6 +280,13 @@ def main(
             save_plan(args.output, plan, account)
         except OSError as error:
             print(f"Unable to save pre-market plan: {error}", file=sys.stderr)
+            return 2
+    if args.database:
+        try:
+            snapshot_id = AccountLedger(args.database).record_snapshot(account)
+            print(f"Account snapshot saved to SQLite ledger (id {snapshot_id}).", file=sys.stderr)
+        except Exception as error:
+            print(f"Unable to persist account snapshot: {error}", file=sys.stderr)
             return 2
     print(plan_json(plan))
     return 0

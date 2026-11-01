@@ -11,8 +11,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Protocol
 
-from .market_data import MinuteBar
-from .premarket import AccountSnapshot, PlanConfig
+from .market_data import DailyBar, MinuteBar
 
 HUNDRED = Decimal(100)
 
@@ -208,6 +207,14 @@ class BacktestRepository:
                     snapshot_id TEXT NOT NULL REFERENCES minute_snapshots(snapshot_id),
                     result_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS shared_daily_bars (
+                    symbol TEXT NOT NULL, timestamp TEXT NOT NULL, bar_json TEXT NOT NULL,
+                    PRIMARY KEY (symbol, timestamp)
+                );
+                CREATE TABLE IF NOT EXISTS shared_daily_history_ranges (
+                    symbol TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                    PRIMARY KEY (symbol, start_date, end_date)
+                );
             """)
 
     def save(self, bars: tuple[MinuteBar, ...], result: BacktestResult) -> BacktestResult:
@@ -259,11 +266,50 @@ class BacktestRepository:
             ).fetchall()
         return tuple(_bar_from_json(row[0]) for row in rows)
 
+    def save_daily_history(self, bars: tuple[DailyBar, ...], start_date: date,
+                           end_date: date) -> None:
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for bar in bars:
+                db.execute(
+                    "INSERT INTO shared_daily_bars VALUES (?, ?, ?) "
+                    "ON CONFLICT(symbol, timestamp) DO UPDATE SET bar_json=excluded.bar_json",
+                    (bar.symbol, bar.timestamp.isoformat(), _daily_bar_json(bar)),
+                )
+            if bars:
+                db.execute(
+                    "INSERT OR IGNORE INTO shared_daily_history_ranges VALUES (?, ?, ?)",
+                    (bars[0].symbol, start_date.isoformat(), end_date.isoformat()),
+                )
+
+    def get_shared_daily_history(self, symbol: str, start_date: date,
+                                 end_date: date) -> tuple[DailyBar, ...] | None:
+        with self._connect() as db:
+            covered = db.execute(
+                "SELECT 1 FROM shared_daily_history_ranges WHERE symbol=? "
+                "AND start_date=? AND end_date=?",
+                (symbol, start_date.isoformat(), end_date.isoformat()),
+            ).fetchone()
+            if covered is None:
+                return None
+            rows = db.execute(
+                "SELECT bar_json FROM shared_daily_bars WHERE symbol=? "
+                "AND timestamp>=? AND timestamp<? ORDER BY timestamp",
+                (symbol, start_date.isoformat(),
+                 datetime.combine(end_date, datetime.max.time()).isoformat()),
+            ).fetchall()
+        return tuple(_daily_bar_from_json(row[0]) for row in rows)
+
     def cleanup_shared_history(self) -> int:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            count = db.execute("SELECT count(*) FROM shared_bars").fetchone()[0]
+            count = (db.execute("SELECT count(*) FROM shared_bars").fetchone()[0]
+                     + db.execute("SELECT count(*) FROM shared_daily_bars").fetchone()[0])
             db.execute("DELETE FROM shared_bars")
+            db.execute("DELETE FROM shared_daily_bars")
+            db.execute("DELETE FROM shared_daily_history_ranges")
             db.execute("DELETE FROM shared_history_ranges")
         return int(count)
 
@@ -294,6 +340,22 @@ class BacktestRepository:
         return db
 
 
+
+def _daily_bar_json(bar: DailyBar) -> str:
+    return _json({
+        key: str(value) if isinstance(value, Decimal) else
+        value.isoformat() if isinstance(value, datetime) else value
+        for key, value in asdict(bar).items()
+    })
+
+
+def _daily_bar_from_json(content: str) -> DailyBar:
+    value = json.loads(content)
+    for key in ("open", "high", "low", "close", "amount"):
+        if value[key] is not None:
+            value[key] = Decimal(value[key])
+    value["timestamp"] = datetime.fromisoformat(value["timestamp"])
+    return DailyBar(**value)
 def _bar_json(bar: MinuteBar) -> str:
     return _json({key: (str(value) if isinstance(value, Decimal) else
                         value.isoformat() if isinstance(value, datetime) else value)

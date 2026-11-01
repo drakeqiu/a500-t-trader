@@ -104,17 +104,54 @@ def generate_review(
         }
 
     triggers: list[dict[str, object]] = []
+    manual_fills: dict[str, object] = {"status": "not recorded", "records": []}
     try:
         with sqlite3.connect(
             f"file:{Path(evidence_path).resolve()}?mode=ro", uri=True
         ) as db:
             db.row_factory = sqlite3.Row
-            rows = db.execute(
-                "SELECT * FROM trigger_evidence WHERE substr(bar_timestamp, 1, 10) = ? "
-                "ORDER BY bar_timestamp, symbol, direction",
-                (session_date.isoformat(),),
-            )
-            triggers = [dict(row) for row in rows]
+            has_snapshots = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_snapshots'"
+            ).fetchone()
+            if (
+                has_snapshots and account_record.get("source") == "unavailable"
+            ):
+                snapshot_row = db.execute(
+                    "SELECT as_of,record_json,classification FROM account_snapshots "
+                    "WHERE substr(as_of,1,10)=? ORDER BY as_of DESC,id DESC LIMIT 1",
+                    (session_date.isoformat(),),
+                ).fetchone()
+                if snapshot_row is not None:
+                    account_record = json.loads(snapshot_row["record_json"])
+                    account_record["status"] = "recorded"
+                    account_record["source"] = snapshot_row["classification"]
+                    missing = [item for item in missing if "account snapshot unavailable" not in item]
+            has_triggers = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trigger_evidence'"
+            ).fetchone()
+            triggers = []
+            if has_triggers:
+                rows = db.execute(
+                    "SELECT * FROM trigger_evidence WHERE substr(bar_timestamp, 1, 10) = ? "
+                    "ORDER BY bar_timestamp, symbol, direction",
+                    (session_date.isoformat(),),
+                )
+                triggers = [dict(row) for row in rows]
+            has_manual_fills = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='manual_fills'"
+            ).fetchone()
+            if has_manual_fills:
+                fills = db.execute(
+                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = ? "
+                    "ORDER BY timestamp, id",
+                    (session_date.isoformat(),),
+                )
+                records = [dict(row) for row in fills]
+                manual_fills = {
+                    "status": "recorded" if records else "not recorded",
+                    "records": records,
+                    "classification": "user-entered manual fills; not broker-verified",
+                }
         suggestions = recommendations["records"]
         if isinstance(suggestions, list):
             for trigger in triggers:
@@ -187,7 +224,7 @@ def generate_review(
     return PostMarketReview(
         session_date.isoformat(), plan_record, account_record, recommendations,
         tuple(triggers), market,
-        {"status": "not recorded", "records": []},
+        manual_fills,
         {"status": "not recorded", "records": []}, tuple(missing),
     )
 

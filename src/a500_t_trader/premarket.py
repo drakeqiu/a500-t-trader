@@ -26,20 +26,34 @@ class PlanMarketData(Protocol):
 @dataclass(frozen=True, slots=True)
 class EtfRule:
     symbol: str
-    buy_below: Decimal | None
-    sell_above: Decimal | None
-    max_buy_cash: Decimal
-    minimum_holding: int
+    buy_below: Decimal | None = None
+    sell_above: Decimal | None = None
+    max_buy_cash: Decimal | None = None
+    minimum_holding: int = 0
 
     def __post_init__(self) -> None:
         if not self.symbol.isdigit() or len(self.symbol) != 6:
             raise ValueError("ETF symbols must be six-digit codes")
         if self.buy_below is None and self.sell_above is None:
-            raise ValueError(f"{self.symbol} requires a buy_below or sell_above rule")
-        if self.max_buy_cash < 0 or self.minimum_holding < 0:
-            raise ValueError("cash limits and minimum holdings cannot be negative")
-        if any(value is not None and value <= 0 for value in (self.buy_below, self.sell_above)):
-            raise ValueError("rule price levels must be positive")
+            raise ValueError("each ETF rule requires buy_below or sell_above")
+        if self.buy_below is not None and self.buy_below <= 0:
+            raise ValueError("buy_below must be positive")
+        if self.sell_above is not None and self.sell_above <= 0:
+            raise ValueError("sell_above must be positive")
+        if (self.buy_below is not None and self.sell_above is not None
+                and self.buy_below >= self.sell_above):
+            raise ValueError("buy_below must be below sell_above")
+        if self.max_buy_cash is not None and self.max_buy_cash < 0:
+            raise ValueError("max_buy_cash cannot be negative")
+        if self.minimum_holding < 0 or self.minimum_holding % 100:
+            raise ValueError("minimum_holding must be a nonnegative board lot")
+
+    def triggered_direction(self, price: Decimal) -> str:
+        if self.buy_below is not None and price <= self.buy_below:
+            return "buy"
+        if self.sell_above is not None and price >= self.sell_above:
+            return "sell"
+        return "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +63,7 @@ class PlanConfig:
     def __post_init__(self) -> None:
         symbols = [rule.symbol for rule in self.rules]
         if not symbols or len(symbols) != len(set(symbols)):
-            raise ValueError("configuration must contain unique ETF rules")
-
+            raise ValueError("configuration must contain unique ETF symbols")
 
 @dataclass(frozen=True, slots=True)
 class AccountSnapshot:
@@ -102,98 +115,98 @@ def generate_plan(
     plan_time = as_of.astimezone(SHANGHAI)
     try:
         session, calendar_stale = market_data.session_status(plan_time.date())
+        calendar_ok = not calendar_stale and session is SessionState.TRADING
+        calendar_status = "available" if calendar_ok else "unavailable or not trading"
     except CapabilityUnavailableError:
-        session, calendar_stale = SessionState.UNKNOWN, True
-
+        calendar_ok = False
+        calendar_status = "unavailable"
+    account_unavailable = False
     suggestions: list[Suggestion] = []
-    data_missing = calendar_stale or session is SessionState.UNKNOWN
+    market_unavailable = False
     for rule in config.rules:
-        required_account_fields = (account.holdings, account.cost_basis, account.sellable)
-        if any(rule.symbol not in values for values in required_account_fields):
-            data_missing = True
-            suggestions.append(_blocked(rule, "required user-entered account fields unavailable"))
-            continue
         try:
             snapshot = market_data.get_snapshot(rule.symbol)
         except CapabilityUnavailableError:
             snapshot = None
-        if snapshot is None:
-            data_missing = True
-            suggestions.append(_blocked(rule, "market data capability unavailable or unauthorized; no trade quantity"))
-            continue
-
-        market_age = plan_time - snapshot.timestamp.astimezone(SHANGHAI)
+        price = None if snapshot is None else snapshot.last_price
+        reasons: list[str] = []
         account_age = plan_time - account.as_of.astimezone(SHANGHAI)
-        if market_age < timedelta(0) or market_age > MAX_INPUT_AGE or account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
-            data_missing = True
-            why = "stale market data" if market_age < timedelta(0) or market_age > MAX_INPUT_AGE else "stale account snapshot"
-            suggestions.append(_blocked(rule, f"{why}; no tradable quantity may be advised"))
-            continue
-        if calendar_stale or session is SessionState.UNKNOWN:
-            suggestions.append(_blocked(rule, "trading calendar unavailable or stale; risk control veto"))
-            continue
-        if session is SessionState.CLOSED:
-            suggestions.append(_blocked(rule, "not a trading session; risk control veto"))
-            continue
-        if snapshot.last_price is None or snapshot.last_price <= 0:
-            data_missing = True
-            suggestions.append(_blocked(rule, "usable market price unavailable; no trade quantity"))
-            continue
-
-        price = snapshot.last_price
-        if rule.buy_below is not None and price <= rule.buy_below:
-            budget = min(account.available_cash, rule.max_buy_cash)
-            quantity = int((budget / price / 100).to_integral_value(rounding=ROUND_FLOOR)) * 100
-            if quantity == 0:
-                suggestions.append(_blocked(rule, "available cash cannot fund one 100-share lot; risk control veto"))
-                continue
-            suggestions.append(Suggestion(
-                rule.symbol, "buy", f"price <= {rule.buy_below} CNY", quantity,
-                f"last price {price} CNY meets configured buy-below rule {rule.buy_below} CNY",
-                "expires if the price rises above the configured level; subject to user review",
-                None, "No signal score is defined by this configured rule.",
-            ))
-        elif rule.sell_above is not None and price >= rule.sell_above:
-            holdings = account.holdings[rule.symbol]
-            quantity = min(account.sellable[rule.symbol], max(0, holdings - rule.minimum_holding))
-            quantity = quantity // 100 * 100
-            if quantity == 0:
-                suggestions.append(_blocked(rule, "no eligible sellable quantity above minimum holding; risk control veto"))
-                continue
-            suggestions.append(Suggestion(
-                rule.symbol, "sell", f"price >= {rule.sell_above} CNY", quantity,
-                f"last price {price} CNY meets configured sell-above rule {rule.sell_above} CNY",
-                "expires if the price falls below the configured level; retains minimum holding",
-                None, "No signal score is defined by this configured rule.",
-            ))
+        if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
+            account_unavailable = True
+            reasons.append("account snapshot is stale or future-dated")
+        if snapshot is None or price is None or price <= 0:
+            reasons.append("market data unavailable")
+            market_unavailable = True
         else:
-            suggestions.append(Suggestion(
-                rule.symbol, "none", "configured price condition not met", None,
-                f"last price {price} CNY meets neither configured trigger",
-                "No trade suggested; review configured rules and current data.", None,
-                "No signal score is defined by this configured rule.",
-            ))
-
-    status = "unavailable: missing, stale, or unauthorized required input/data" if data_missing else "available"
+            market_age = plan_time - snapshot.timestamp.astimezone(SHANGHAI)
+            if market_age < timedelta(0) or market_age > MAX_INPUT_AGE:
+                reasons.append("stale market data unavailable: future-dated or older than 30 minutes")
+                market_unavailable = True
+        if not calendar_ok:
+            reasons.append("trading calendar unavailable or not an active session")
+        direction = "none" if reasons else rule.triggered_direction(price)
+        quantity: int | None = None
+        condition = "no configured threshold met"
+        reason = "Current price is outside configured thresholds."
+        if direction == "buy":
+            threshold = rule.buy_below
+            condition = f"price <= {threshold} CNY"
+            reason = f"last price {price} CNY meets configured buy-below rule {threshold} CNY"
+            cash_limit = min(account.available_cash, rule.max_buy_cash if rule.max_buy_cash is not None else account.available_cash)
+            quantity = int(cash_limit / price / 100) * 100
+            if rule.symbol not in account.holdings or rule.symbol not in account.sellable:
+                account_unavailable = True
+                direction, quantity = "none", None
+                reasons.append("account fields unavailable: position or sellable quantity is missing")
+            elif quantity == 0:
+                direction, quantity = "none", None
+                reasons.append("available cash is below one board lot or max_buy_cash is zero")
+        elif direction == "sell":
+            threshold = rule.sell_above
+            condition = f"price >= {threshold} CNY"
+            reason = f"last price {price} CNY meets configured sell-above rule {threshold} CNY"
+            permitted = max(0, account.holdings.get(rule.symbol, 0) - rule.minimum_holding)
+            quantity = min(account.sellable.get(rule.symbol, 0), permitted) // 100 * 100
+            if quantity == 0:
+                direction, quantity = "none", None
+                reasons.append("no sellable board lot remains above minimum holding")
+        elif reasons:
+            reason = "; ".join(reasons)
+        risk = "; ".join(reasons) if reasons else (
+            f"Configured price threshold; minimum holding is {rule.minimum_holding} shares; "
+            "review manually before any action."
+        )
+        suggestions.append(Suggestion(
+            rule.symbol, direction, condition, quantity, reason,
+            risk,
+            None, "No signal score is defined; threshold rules are binary, not scored.",
+        ))
+    status = f"{calendar_status}; market data "
+    status += "unavailable: stale/missing" if market_unavailable else "available"
+    status += "; account fields unavailable" if account_unavailable else ""
     return Plan(plan_time, "user-entered; not broker-verified", status, tuple(suggestions))
-
-
-def _blocked(rule: EtfRule, reason: str) -> Suggestion:
-    return Suggestion(rule.symbol, "none", "not evaluated", None, reason, reason, None,
-                      "No signal score is defined by this configured rule.")
 
 
 def load_config(path: str | Path) -> PlanConfig:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if set(data) != {"etfs"} or not isinstance(data["etfs"], list):
         raise ValueError("configuration must contain only an 'etfs' list")
-    return PlanConfig(tuple(EtfRule(
-        symbol=item["symbol"],
-        buy_below=_optional_decimal(item.get("buy_below")),
-        sell_above=_optional_decimal(item.get("sell_above")),
-        max_buy_cash=Decimal(str(item.get("max_buy_cash", 0))),
-        minimum_holding=int(item.get("minimum_holding", 0)),
-    ) for item in data["etfs"]))
+    rules = []
+    fields = {"symbol", "buy_below", "sell_above", "max_buy_cash", "minimum_holding"}
+    for item in data["etfs"]:
+        if not isinstance(item, dict) or "symbol" not in item or set(item) - fields:
+            raise ValueError("ETF entries require symbol and only documented price/limit fields")
+        rules.append(EtfRule(
+            item["symbol"],
+            _optional_decimal(item.get("buy_below")),
+            _optional_decimal(item.get("sell_above")),
+            _optional_decimal(item.get("max_buy_cash")),
+            int(item.get("minimum_holding", 0)),
+        ))
+    return PlanConfig(tuple(rules))
+
+
+
 
 
 def load_account(path: str | Path) -> AccountSnapshot:

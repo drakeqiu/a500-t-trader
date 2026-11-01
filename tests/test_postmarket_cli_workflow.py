@@ -8,7 +8,7 @@ from a500_t_trader.market_data import MinuteBar, Snapshot
 from a500_t_trader.trading_calendar import SessionState
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-MORNING = datetime(2026, 10, 30, 8, 30, tzinfo=SHANGHAI)
+MORNING = datetime(2026, 10, 30, 10, 0, tzinfo=SHANGHAI)
 CLOSE = datetime(2026, 10, 30, 15, 0, tzinfo=SHANGHAI)
 
 
@@ -47,7 +47,7 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
         '"max_buy_cash":"4000","minimum_holding":100}]}', encoding="utf-8"
     )
     account.write_text(
-        '{"as_of":"2026-10-30T08:30:00+08:00","holdings":{"510300":1200},'
+        '{"as_of":"2026-10-30T10:00:00+08:00","holdings":{"510300":1200},'
         '"cost_basis":{"510300":"3.70"},"sellable":{"510300":800},'
         '"available_cash":"5000"}', encoding="utf-8"
     )
@@ -64,6 +64,12 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
         "--database", str(database), "--once",
     ], market_data=data, as_of=datetime(2026, 10, 30, 10, 1, tzinfo=SHANGHAI)) == 0
     assert "NOT AN ORDER" in capsys.readouterr().out
+    assert main([
+        "manual-fill", "--timestamp", "2026-10-30T10:02:00+08:00",
+        "--symbol", "510300", "--side", "buy", "--quantity", "100",
+        "--price", "3.80", "--database", str(database),
+    ]) == 0
+    capsys.readouterr()
 
     assert main([
         "postmarket", "--date", "2026-10-30", "--plan", str(plan_file),
@@ -77,7 +83,11 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
     assert review["triggers"][0]["related_recommendation_indices"] == [0]
     assert review["market_data"]["510300"]["close"] == "3.79"
     assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
-    assert review["manual_fills"] == {"status": "not recorded", "records": []}
+    assert review["manual_fills"]["status"] == "recorded"
+    assert review["manual_fills"]["records"][0]["quantity"] == 100
+    assert review["manual_fills"]["records"][0]["classification"] == (
+        "user-entered manual fill; not broker-verified"
+    )
     assert review["simulated_fills"] == {"status": "not recorded", "records": []}
     assert "order" in review["recommendations"]["classification"].lower()
 
@@ -94,3 +104,36 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(tmp_path, capsy
     assert any("trigger" in item.lower() for item in review["missing_data"])
     assert any("account snapshot" in item.lower() for item in review["missing_data"])
     assert any("market" in item.lower() for item in review["missing_data"])
+
+
+def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(tmp_path, capsys):
+    database = tmp_path / "evidence.sqlite3"
+    account = tmp_path / "account.json"
+    plan_file = tmp_path / "plan.json"
+    account.write_text(
+        '{"as_of":"2026-10-30T08:30:00+08:00","holdings":{"510300":100},'
+        '"cost_basis":{"510300":"3.70"},"sellable":{"510300":0},'
+        '"available_cash":"500"}',
+        encoding="utf-8",
+    )
+    plan_file.write_text(json.dumps({
+        "session_date": "2026-10-30", "plan": {"suggestions": []},
+    }), encoding="utf-8")
+    assert main([
+        "account-snapshot", "--account", str(account), "--database", str(database),
+    ]) == 0
+    capsys.readouterr()
+    assert main([
+        "manual-fill", "--timestamp", "2026-10-30T10:02:00+08:00",
+        "--symbol", "510300", "--side", "sell", "--quantity", "100",
+        "--price", "3.80", "--database", str(database),
+    ]) == 0
+    capsys.readouterr()
+    assert main([
+        "postmarket", "--date", "2026-10-30",
+        "--plan", str(plan_file), "--database", str(database),
+    ], market_data=None, as_of=CLOSE) == 0
+    review = json.loads(capsys.readouterr().out)
+    assert review["account_snapshot"]["available_cash"] == "500"
+    assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
+    assert review["manual_fills"]["records"][0]["side"] == "sell"

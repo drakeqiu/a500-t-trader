@@ -87,6 +87,25 @@ class MinuteBar:
 
 
 @dataclass(frozen=True, slots=True)
+class DailyBar:
+    """Normalized daily OHLCV aggregate."""
+
+    symbol: str
+    timestamp: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+    amount: Decimal | None = None
+    source: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", normalize_symbol(self.symbol))
+        object.__setattr__(self, "timestamp", _shanghai_time(self.timestamp))
+
+
+@dataclass(frozen=True, slots=True)
 class Trade:
     """One source-reported execution; quantity is shares, monetary values CNY."""
 
@@ -101,6 +120,8 @@ class Trade:
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", normalize_symbol(self.symbol))
         object.__setattr__(self, "timestamp", _shanghai_time(self.timestamp))
+
+
 
 
 class CapabilityUnavailableError(RuntimeError):
@@ -123,6 +144,10 @@ class MarketDataSource(Protocol):
         end_date: date,
         interval_minutes: int,
     ) -> tuple[MinuteBar, ...]: ...
+
+    def get_daily_history(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...]: ...
 
     def get_trades(self, symbol: str) -> tuple[Trade, ...]: ...
 
@@ -149,6 +174,17 @@ class MarketDataService:
         if interval_minutes not in (1, 5):
             raise ValueError("interval_minutes must be 1 or 5")
         return self._source.get_intraday_bars(self._symbol(symbol), interval_minutes)
+
+    def get_daily_history(
+        self, symbol: str | None, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...]:
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        query = getattr(self._source, "get_daily_history", None)
+        if query is None:
+            raise CapabilityUnavailableError("daily-history capability is unavailable")
+        return tuple(query(self._symbol(symbol), start_date, end_date))
+
 
     def get_history_bars(
         self,

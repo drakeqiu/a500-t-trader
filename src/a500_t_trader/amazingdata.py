@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .market_data import (
     CapabilityUnavailableError,
+    DailyBar,
     MinuteBar,
     Snapshot,
     Trade,
@@ -179,6 +180,58 @@ class AmazingDataProvider:
                     source="AmazingData",
                 )
             )
+        return tuple(bars)
+
+    def get_daily_history(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...]:
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        code = normalize_symbol(symbol)
+        try:
+            from AmazingData.query_api.market_data import Period
+
+            period = int(Period.day.value)
+            raw = self._market_data.query_kline(
+                [_vendor_symbol(code)],
+                int(start_date.strftime("%Y%m%d")),
+                int(end_date.strftime("%Y%m%d")),
+                period,
+            )
+        except Exception as error:
+            raise CapabilityUnavailableError(
+                f"AmazingData daily-history query unavailable or unauthorized: {error}"
+            ) from error
+        bars: list[DailyBar] = []
+        seen: set[date] = set()
+        previous: date | None = None
+        for row in _kline_rows(raw, code):
+            try:
+                timestamp = _vendor_time(row["kline_time"])
+            except (KeyError, TypeError) as error:
+                raise ValueError("invalid daily-bar timestamp") from error
+            day = timestamp.date()
+            if day < start_date or day > end_date:
+                raise ValueError(f"daily bar outside requested dates: {day}")
+            if day in seen or (previous is not None and day < previous):
+                raise ValueError("daily bars must be unique and ordered ascending")
+            opening = _required_decimal(row, "open")
+            high = _required_decimal(row, "high")
+            low = _required_decimal(row, "low")
+            close = _required_decimal(row, "close")
+            volume = _required_int(row, "volume")
+            if min(opening, high, low, close) <= 0 or low > min(opening, close) or high < max(opening, close) or low > high:
+                raise ValueError("invalid daily OHLC values")
+            if volume < 0:
+                raise ValueError("daily volume cannot be negative")
+            amount = _optional_decimal(row.get("amount"))
+            if amount is not None and amount < 0:
+                raise ValueError("daily amount cannot be negative")
+            bars.append(DailyBar(
+                code, timestamp, opening, high, low, close, volume, amount, "AmazingData"
+            ))
+            seen.add(day)
+            previous = day
         return tuple(bars)
 
     def get_trades(self, symbol: str) -> tuple[Trade, ...]:
