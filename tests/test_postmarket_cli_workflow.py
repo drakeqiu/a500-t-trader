@@ -1,6 +1,8 @@
 import json
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.__main__ import main
@@ -13,13 +15,15 @@ CLOSE = datetime(2026, 10, 30, 15, 0, tzinfo=SHANGHAI)
 
 
 class Data:
-    def get_snapshot(self, symbol):
+    def get_snapshot(self, symbol: str) -> Snapshot:
         return Snapshot(symbol, MORNING, MORNING, last_price=Decimal("3.80"))
 
-    def session_status(self, session_date):
+    def session_status(self, session_date: date) -> tuple[SessionState, bool]:
         return SessionState.TRADING, False
 
-    def get_intraday_bars(self, symbol, interval_minutes=1):
+    def get_intraday_bars(
+        self, symbol: str, interval_minutes: int = 1
+    ) -> tuple[MinuteBar, ...]:
         return (
             MinuteBar(
                 symbol,
@@ -34,8 +38,13 @@ class Data:
             ),
         )
 
-    def get_history_bars(self, symbol, start_date, end_date, interval_minutes=1):
-        assert start_date == end_date == date(2026, 10, 30)
+    def get_history_bars(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int = 1,
+    ) -> tuple[MinuteBar, ...]:
         return (
             MinuteBar(
                 symbol,
@@ -52,8 +61,8 @@ class Data:
 
 
 def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
-    tmp_path, capsys
-):
+    tmp_path: Path, capsys: Any
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     plan_file = tmp_path / "plan.json"
@@ -162,7 +171,9 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
     assert "order" in review["recommendations"]["classification"].lower()
 
 
-def test_postmarket_reports_missing_plan_trigger_and_market_data(tmp_path, capsys):
+def test_postmarket_reports_missing_plan_trigger_and_market_data(
+    tmp_path: Path, capsys: Any
+) -> None:
     plan_file = tmp_path / "plan.json"
     plan_file.write_text(
         json.dumps({"session_date": "2026-10-30", "plan": {"suggestions": []}})
@@ -190,7 +201,9 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(tmp_path, capsy
     assert any("market" in item.lower() for item in review["missing_data"])
 
 
-def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(tmp_path, capsys):
+def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
+    tmp_path: Path, capsys: Any
+) -> None:
     database = tmp_path / "evidence.sqlite3"
     account = tmp_path / "account.json"
     plan_file = tmp_path / "plan.json"

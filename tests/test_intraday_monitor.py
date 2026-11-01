@@ -1,6 +1,11 @@
-from datetime import datetime
+import sqlite3
+from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from _pytest.capture import CaptureFixture
+from _pytest.monkeypatch import MonkeyPatch
 
 from a500_t_trader.__main__ import main
 from a500_t_trader.market_data import MinuteBar
@@ -11,10 +16,12 @@ NOW = datetime(2026, 10, 30, 10, 1, tzinfo=SHANGHAI)
 
 
 class Bars:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
 
-    def get_intraday_bars(self, symbol, interval_minutes=1):
+    def get_intraday_bars(
+        self, symbol: str, interval_minutes: int = 1
+    ) -> tuple[MinuteBar, ...]:
         self.calls.append((symbol, interval_minutes))
         return (
             MinuteBar(
@@ -58,12 +65,12 @@ class Bars:
             ),
         )
 
-    def session_status(self, session_date):
+    def session_status(self, session_date: date) -> tuple[SessionState, bool]:
         assert session_date == NOW.date()
         return SessionState.TRADING, False
 
 
-def _inputs(tmp_path):
+def _inputs(tmp_path: Path) -> tuple[Path, Path]:
     config = tmp_path / "strategy.json"
     account = tmp_path / "account.json"
     config.write_text(
@@ -81,8 +88,8 @@ def _inputs(tmp_path):
 
 
 def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidence(
-    tmp_path, capsys
-):
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config, account = _inputs(tmp_path)
     database = tmp_path / "signals.sqlite3"
     data = Bars()
@@ -107,8 +114,6 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
     assert "UNFINISHED BAR" in output.out
     assert "09:00:00+08:00" not in output.out
     assert data.calls == [("510300", 1)]
-
-    import sqlite3
 
     with sqlite3.connect(database) as connection:
         rows = connection.execute(
@@ -143,8 +148,8 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
 
 
 def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(
-    tmp_path, capsys
-):
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config, account = _inputs(tmp_path)
     config.write_text(
         '{"etfs":[{"symbol":"510300","buy_below":"3.80",'
@@ -173,7 +178,9 @@ def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(
     assert "buy" in output and "sell" in output
 
 
-def test_monitor_requery_does_not_duplicate_a_trigger(tmp_path, capsys):
+def test_monitor_requery_does_not_duplicate_a_trigger(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config, account = _inputs(tmp_path)
     database = tmp_path / "signals.sqlite3"
     command = [
@@ -192,8 +199,6 @@ def test_monitor_requery_does_not_duplicate_a_trigger(tmp_path, capsys):
     assert main(command, market_data=Bars(), as_of=NOW) == 0
     assert "No new trigger" in capsys.readouterr().out
 
-    import sqlite3
-
     with sqlite3.connect(database) as connection:
         count = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()[
             0
@@ -202,18 +207,17 @@ def test_monitor_requery_does_not_duplicate_a_trigger(tmp_path, capsys):
 
 
 def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
-    tmp_path, capsys, monkeypatch
-):
-    from a500_t_trader import intraday
+    tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
+) -> None:
 
     class LiveBars(Bars):
-        def session_status(self, session_date):
+        def session_status(self, session_date: date) -> tuple[SessionState, bool]:
             return SessionState.TRADING, False
 
-    def stop(_seconds):
+    def stop(_seconds: float) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(intraday.time, "sleep", stop)
+    monkeypatch.setattr("a500_t_trader.intraday.time.sleep", stop)
     config, account = _inputs(tmp_path)
     command = [
         "monitor",
@@ -229,11 +233,14 @@ def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
     assert "stopped; no background process remains" in capsys.readouterr().out
 
 
-def test_monitor_reports_stale_bars_without_creating_trigger_evidence(tmp_path, capsys):
-    import sqlite3
+def test_monitor_reports_stale_bars_without_creating_trigger_evidence(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
 
     class StaleBars(Bars):
-        def get_intraday_bars(self, symbol, interval_minutes=1):
+        def get_intraday_bars(
+            self, symbol: str, interval_minutes: int = 1
+        ) -> tuple[MinuteBar, ...]:
             return (super().get_intraday_bars(symbol, interval_minutes)[0],)
 
     config, account = _inputs(tmp_path)

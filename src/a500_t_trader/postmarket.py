@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from .market_data import CapabilityUnavailableError, MinuteBar
 from .premarket import AccountSnapshot, Plan, plan_json
@@ -262,7 +263,8 @@ def _symbols(
 ) -> tuple[str, ...]:
     symbols: set[str] = {str(item["symbol"]) for item in triggers if item.get("symbol")}
     if plan:
-        for suggestion in plan.get("suggestions", []):
+        suggestions = cast(Iterable[object], plan.get("suggestions", []))
+        for suggestion in suggestions:
             if isinstance(suggestion, dict) and suggestion.get("symbol"):
                 symbols.add(str(suggestion["symbol"]))
     return tuple(sorted(symbols))

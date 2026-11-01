@@ -10,14 +10,14 @@ NOW = datetime(2026, 10, 30, 8, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
 class Data:
-    def get_snapshot(self, symbol: str):
+    def get_snapshot(self, symbol: str) -> Snapshot:
         return Snapshot(symbol, NOW, NOW, last_price=Decimal("4.20"))
 
-    def session_status(self, session_date: date):
+    def session_status(self, session_date: date) -> tuple[SessionState, bool]:
         return SessionState.TRADING, False
 
 
-def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding():
+def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding() -> None:
     plan = generate_plan(
         PlanConfig((EtfRule("510300", None, Decimal("4.10"), Decimal(0), 500),)),
         AccountSnapshot(
@@ -37,7 +37,7 @@ def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding():
     assert "minimum holding" in suggestion.risk_or_invalidation
 
 
-def test_missing_account_position_fields_veto_tradable_quantity():
+def test_missing_account_position_fields_veto_tradable_quantity() -> None:
     plan = generate_plan(
         PlanConfig((EtfRule("510300", Decimal("4.30"), None, Decimal("1000"), 0),)),
         AccountSnapshot(NOW, {}, {}, {}, Decimal("1000")),

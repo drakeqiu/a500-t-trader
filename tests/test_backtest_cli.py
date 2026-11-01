@@ -1,7 +1,10 @@
 import json
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from _pytest.capture import CaptureFixture
 
 from a500_t_trader.__main__ import main
 from a500_t_trader.market_data import MinuteBar
@@ -10,16 +13,19 @@ TZ = ZoneInfo("Asia/Shanghai")
 
 
 class HistoricalData:
-    def __init__(self, bars):
+    def __init__(self, bars: list[MinuteBar] | tuple[MinuteBar, ...]) -> None:
         self.bars = tuple(bars)
-        self.request = None
+        self.request: tuple[str, date, date, int] | None = None
 
-    def get_history_bars(self, symbol, start_date, end_date, interval_minutes):
+    def get_history_bars(
+        self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+    ) -> tuple[MinuteBar, ...]:
         self.request = (symbol, start_date, end_date, interval_minutes)
         return self.bars
 
 
-def bar(day, minute, price, *, completed=True):
+def bar(day: int, minute: int, price: str, *, completed: bool = True) -> MinuteBar:
+
     value = Decimal(price)
     return MinuteBar(
         "510300",
@@ -35,8 +41,8 @@ def bar(day, minute, price, *, completed=True):
 
 
 def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
-    tmp_path, capsys
-):
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     database = tmp_path / "history.sqlite"
@@ -103,7 +109,9 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
     assert result["strategy"]["final_value"] != result["baseline"]["final_value"]
 
 
-def test_backtest_reuses_exactly_covered_shared_history(tmp_path, capsys):
+def test_backtest_reuses_exactly_covered_shared_history(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     database = tmp_path / "history.sqlite"
@@ -137,7 +145,9 @@ def test_backtest_reuses_exactly_covered_shared_history(tmp_path, capsys):
     capsys.readouterr()
 
     class UnavailableData:
-        def get_history_bars(self, *args):
+        def get_history_bars(
+            self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+        ) -> tuple[MinuteBar, ...]:
             raise AssertionError("cached history should satisfy the exact request")
 
     assert main(args, market_data=UnavailableData()) == 0
@@ -145,8 +155,8 @@ def test_backtest_reuses_exactly_covered_shared_history(tmp_path, capsys):
 
 
 def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
-    tmp_path, capsys
-):
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     config.write_text(
@@ -161,7 +171,10 @@ def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
     )
 
     class Unavailable:
-        def get_history_bars(self, *args):
+        def get_history_bars(
+            self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+        ) -> tuple[MinuteBar, ...]:
+
             from a500_t_trader.market_data import CapabilityUnavailableError
 
             raise CapabilityUnavailableError("minute history permission missing")
@@ -184,7 +197,9 @@ def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
     assert "unavailable or unauthorized" in capsys.readouterr().err
 
 
-def test_cleanup_preserves_backtest_referenced_minute_snapshot(tmp_path, capsys):
+def test_cleanup_preserves_backtest_referenced_minute_snapshot(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     config.write_text(
@@ -226,7 +241,9 @@ def test_cleanup_preserves_backtest_referenced_minute_snapshot(tmp_path, capsys)
     assert shown["bars"][0]["close"] == "10"
 
 
-def test_backtest_requires_explicit_history_persistence_permission(tmp_path, capsys):
+def test_backtest_requires_explicit_history_persistence_permission(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     config.write_text(
@@ -259,7 +276,9 @@ def test_backtest_requires_explicit_history_persistence_permission(tmp_path, cap
     assert data.request is None
 
 
-def test_backtest_rejects_account_snapshot_after_first_history_bar(tmp_path, capsys):
+def test_backtest_rejects_account_snapshot_after_first_history_bar(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     config.write_text(

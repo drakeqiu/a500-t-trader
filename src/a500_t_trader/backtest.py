@@ -337,7 +337,10 @@ class BacktestRepository:
                 "INSERT INTO backtests(snapshot_id, result_json) VALUES (?, '')",
                 (digest,),
             )
-            result = replace(result, run_id=int(cursor.lastrowid))
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise TypeError("SQLite insert did not return a row id")
+            result = replace(result, run_id=lastrowid)
             db.execute(
                 "UPDATE backtests SET result_json=? WHERE id=?",
                 (_json(asdict(result)), result.run_id),
@@ -447,7 +450,7 @@ class BacktestRepository:
                 ).fetchone()
         if row is None:
             return None
-        result = json.loads(row[0])
+        result: dict[str, object] = json.loads(row[0])
         result["bars"] = json.loads(row[1])
         return result
 

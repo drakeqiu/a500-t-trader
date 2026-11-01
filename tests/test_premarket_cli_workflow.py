@@ -1,5 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.__main__ import main
@@ -10,7 +12,7 @@ NOW = datetime(2026, 10, 30, 8, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
 class Data:
-    def __init__(self, *, stale=False, calendar_stale=False):
+    def __init__(self, *, stale: bool = False, calendar_stale: bool = False) -> None:
         timestamp = datetime(2026, 10, 29, 8, 20, tzinfo=NOW.tzinfo) if stale else NOW
         self.snapshot = Snapshot(
             "510300",
@@ -21,14 +23,16 @@ class Data:
         )
         self.calendar_stale = calendar_stale
 
-    def get_snapshot(self, symbol: str):
+    def get_snapshot(self, symbol: str) -> Snapshot:
         return self.snapshot
 
-    def session_status(self, session_date: date):
+    def session_status(self, session_date: date) -> tuple[SessionState, bool]:
         return SessionState.TRADING, self.calendar_stale
 
 
-def test_cli_workflow_emits_plan_then_veto_and_missing_input(tmp_path, capsys):
+def test_cli_workflow_emits_plan_then_veto_and_missing_input(
+    tmp_path: Path, capsys: Any
+) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     config.write_text(

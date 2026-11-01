@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from zoneinfo import ZoneInfo
 
 from .market_data import CapabilityUnavailableError, Snapshot
@@ -146,14 +146,15 @@ def generate_plan(
         else:
             market_age = plan_time - snapshot.timestamp.astimezone(SHANGHAI)
             if market_age < timedelta(0) or market_age > MAX_INPUT_AGE:
+                market_unavailable = True
                 reasons.append(
                     "stale market data unavailable: future-dated "
                     "or older than 30 minutes"
                 )
-                market_unavailable = True
         if not calendar_ok:
             reasons.append("trading calendar unavailable or not an active session")
-        direction = "none" if reasons else rule.triggered_direction(price)
+        safe_price = cast(Decimal, price)
+        direction = "none" if reasons else rule.triggered_direction(safe_price)
         quantity: int | None = None
         condition = "no configured threshold met"
         reason = "Current price is outside configured thresholds."
@@ -170,7 +171,7 @@ def generate_plan(
                 if rule.max_buy_cash is not None
                 else account.available_cash,
             )
-            quantity = int(cash_limit / price / 100) * 100
+            quantity = int(cash_limit / safe_price / 100) * 100
             if (
                 rule.symbol not in account.holdings
                 or rule.symbol not in account.sellable

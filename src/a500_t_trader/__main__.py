@@ -9,13 +9,19 @@ from collections.abc import Sequence
 from dataclasses import asdict, replace
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Protocol, cast
 from zoneinfo import ZoneInfo
 
 from .account_ledger import AccountLedger
 from .backtest import BacktestMarketData, BacktestRepository, run_backtest
 from .daily_indicators import calculate_indicators
-from .intraday import run_monitor
-from .market_data import CapabilityUnavailableError, MarketDataService, normalize_symbol
+from .intraday import MonitorMarketData, run_monitor
+from .market_data import (
+    CapabilityUnavailableError,
+    DailyBar,
+    MarketDataService,
+    normalize_symbol,
+)
 from .postmarket import ReviewMarketData, generate_review, review_json, save_plan
 from .premarket import (
     PlanMarketData,
@@ -27,10 +33,21 @@ from .premarket import (
 from .runtime import create_provider_from_env
 
 
+class DailyHistoryMarketData(Protocol):
+    def get_daily_history(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...]: ...
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
-    market_data: PlanMarketData | BacktestMarketData | ReviewMarketData | None = None,
+    market_data: PlanMarketData
+    | BacktestMarketData
+    | ReviewMarketData
+    | MonitorMarketData
+    | DailyHistoryMarketData
+    | None = None,
     as_of: datetime | None = None,
 ) -> int:
     """Run CLI commands; injected data/time form the public CLI-to-app seam."""
@@ -144,14 +161,16 @@ def main(
     monitor.add_argument(
         "--once", action="store_true", help="evaluate one pass and exit"
     )
-    review = commands.add_parser(
+    review_parser = commands.add_parser(
         "postmarket", help="review a saved plan and daily evidence"
     )
-    review.add_argument(
+    review_parser.add_argument(
         "--date", required=True, type=date.fromisoformat, help="reviewed trading date"
     )
-    review.add_argument("--plan", required=True, help="saved pre-market plan JSON")
-    review.add_argument(
+    review_parser.add_argument(
+        "--plan", required=True, help="saved pre-market plan JSON"
+    )
+    review_parser.add_argument(
         "--database", required=True, help="SQLite trigger-evidence file"
     )
     args = parser.parse_args(argv)
@@ -223,12 +242,10 @@ def main(
             )
             if bars is None:
                 source = market_data or MarketDataService(create_provider_from_env())
-                query = getattr(source, "get_daily_history", None)
-                if query is None:
-                    raise CapabilityUnavailableError(
-                        "daily-history capability is unavailable"
-                    )
-                bars = tuple(query(symbol, args.start_date, args.end_date))
+                query_source = cast(DailyHistoryMarketData, source)
+                bars = query_source.get_daily_history(
+                    symbol, args.start_date, args.end_date
+                )
                 if bars:
                     repository.save_daily_history(bars, args.start_date, args.end_date)
             records = (
@@ -259,14 +276,14 @@ def main(
                     market_data = MarketDataService(create_provider_from_env())
                 except Exception as error:
                     market_data_error = str(error)
-            result = generate_review(
+            review = generate_review(
                 args.date,
                 args.plan,
                 args.database,
-                market_data,
+                cast(ReviewMarketData | None, market_data),
                 market_data_error,
             )
-            print(review_json(result))
+            print(review_json(review))
             return 0
         except Exception as error:
             print(f"Unable to generate post-market review: {error}", file=sys.stderr)
@@ -282,16 +299,16 @@ def main(
         return 0
     if args.command == "backtest-show":
         try:
-            result = BacktestRepository(args.database).get(
+            stored_backtest = BacktestRepository(args.database).get(
                 None if args.latest else args.run_id
             )
         except Exception as error:
             print(f"Unable to read backtest history: {error}", file=sys.stderr)
             return 2
-        if result is None:
+        if stored_backtest is None:
             print("No backtest is stored.", file=sys.stderr)
             return 2
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(stored_backtest, ensure_ascii=False, indent=2))
         return 0
     if args.command == "monitor":
         try:
@@ -302,7 +319,7 @@ def main(
             run_monitor(
                 config,
                 account,
-                market_data,
+                cast(MonitorMarketData, market_data),
                 args.database,
                 poll_seconds=args.poll_seconds,
                 once=args.once,
@@ -359,10 +376,10 @@ def main(
                             file=sys.stderr,
                         )
                         return 2
-                bars = market_data.get_history_bars(
+                minute_bars = cast(BacktestMarketData, market_data).get_history_bars(
                     symbol, args.start_date, args.end_date, args.interval_minutes
                 )
-                if not bars:
+                if not minute_bars:
                     print(
                         "Minute-history capability returned no bars "
                         "for the requested range.",
@@ -373,7 +390,7 @@ def main(
                     sorted(
                         (
                             bar
-                            for bar in bars
+                            for bar in minute_bars
                             if args.start_date <= bar.timestamp.date() <= args.end_date
                             and bar.is_completed
                         ),
@@ -387,7 +404,7 @@ def main(
                         file=sys.stderr,
                     )
                     return 2
-            result = run_backtest(
+            backtest_result = run_backtest(
                 config,
                 account,
                 selected_bars,
@@ -398,17 +415,22 @@ def main(
                 slippage_bps=args.slippage_bps,
                 implementation_version=args.implementation_version,
             )
-            result = repository.save(selected_bars, result)
+            backtest_result = repository.save(selected_bars, backtest_result)
             print(
                 json.dumps(
-                    asdict(result), ensure_ascii=False, indent=2, default=_json_default
+                    asdict(backtest_result),
+                    ensure_ascii=False,
+                    indent=2,
+                    default=_json_default,
                 )
             )
             return 0
         if market_data is None:
             market_data = MarketDataService(create_provider_from_env())
         now = as_of or datetime.now(ZoneInfo("Asia/Shanghai"))
-        plan = generate_plan(config, account, market_data, as_of=now)
+        plan = generate_plan(
+            config, account, cast(PlanMarketData, market_data), as_of=now
+        )
     except CapabilityUnavailableError as error:
         print(
             f"Required data capability unavailable or unauthorized: {error}",

@@ -42,7 +42,11 @@ def calculate_indicators(bars: tuple[DailyBar, ...]) -> tuple[DailyIndicators, .
             if len(gains) == 14:
                 average_gain = sum(gains, Decimal(0)) / Decimal(14)
                 average_loss = sum(losses, Decimal(0)) / Decimal(14)
-            elif len(gains) > 14:
+            elif (
+                len(gains) > 14
+                and average_gain is not None
+                and average_loss is not None
+            ):
                 average_gain = (average_gain * 13 + gains[-1]) / Decimal(14)
                 average_loss = (average_loss * 13 + losses[-1]) / Decimal(14)
             if average_gain is not None and average_loss is not None:

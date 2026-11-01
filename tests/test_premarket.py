@@ -1,6 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from _pytest.capture import CaptureFixture
 
 from a500_t_trader.__main__ import main
 from a500_t_trader.market_data import Snapshot
@@ -12,7 +15,11 @@ AS_OF = datetime(2026, 10, 30, 8, 30, tzinfo=SHANGHAI)
 
 
 class MarketData:
-    def __init__(self, snapshot: Snapshot | None, status=(SessionState.TRADING, False)):
+    def __init__(
+        self,
+        snapshot: Snapshot | None,
+        status: tuple[SessionState, bool] = (SessionState.TRADING, False),
+    ) -> None:
         self.snapshot = snapshot
         self.status = status
 
@@ -20,7 +27,7 @@ class MarketData:
         assert symbol == "510300"
         return self.snapshot
 
-    def session_status(self, session_date: date):
+    def session_status(self, session_date: date) -> tuple[SessionState, bool]:
         assert session_date == AS_OF.date()
         return self.status
 
@@ -37,7 +44,7 @@ def _snapshot(
     )
 
 
-def _inputs():
+def _inputs() -> tuple[PlanConfig, AccountSnapshot]:
     config = PlanConfig(
         (
             EtfRule(
@@ -59,7 +66,7 @@ def _inputs():
     return config, account
 
 
-def test_plan_calculates_explainable_buy_quantity_from_explicit_rule():
+def test_plan_calculates_explainable_buy_quantity_from_explicit_rule() -> None:
     config, account = _inputs()
     plan = generate_plan(config, account, MarketData(_snapshot()), as_of=AS_OF)
     suggestion = plan.suggestions[0]
@@ -76,7 +83,7 @@ def test_plan_calculates_explainable_buy_quantity_from_explicit_rule():
     assert suggestion.risk_or_invalidation
 
 
-def test_missing_or_stale_market_data_never_recommends_tradable_quantity():
+def test_missing_or_stale_market_data_never_recommends_tradable_quantity() -> None:
     config, account = _inputs()
     stale = _snapshot(datetime(2026, 10, 29, 8, 20, tzinfo=SHANGHAI))
     plan = generate_plan(config, account, MarketData(stale), as_of=AS_OF)
@@ -86,7 +93,7 @@ def test_missing_or_stale_market_data_never_recommends_tradable_quantity():
     assert "stale" in plan.suggestions[0].risk_or_invalidation
 
 
-def test_risk_control_can_veto_strategy_signal():
+def test_risk_control_can_veto_strategy_signal() -> None:
     config, account = _inputs()
     plan = generate_plan(
         config,
@@ -100,7 +107,9 @@ def test_risk_control_can_veto_strategy_signal():
     assert "calendar" in plan.suggestions[0].risk_or_invalidation
 
 
-def test_cli_invokes_same_plan_workflow_and_emits_advisory_json(tmp_path, capsys):
+def test_cli_invokes_same_plan_workflow_and_emits_advisory_json(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     config = tmp_path / "strategy.json"
     account = tmp_path / "account.json"
     config.write_text(

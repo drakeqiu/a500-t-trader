@@ -12,7 +12,7 @@ from typing import Protocol, TextIO
 from zoneinfo import ZoneInfo
 
 from .market_data import CapabilityUnavailableError, MinuteBar
-from .premarket import MAX_INPUT_AGE, AccountSnapshot, PlanConfig
+from .premarket import MAX_INPUT_AGE, AccountSnapshot, EtfRule, PlanConfig
 from .trading_calendar import SessionState
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -235,7 +235,7 @@ def run_monitor(
 
 
 def _triggers(
-    rule, bar: MinuteBar, now: datetime, account_as_of: datetime
+    rule: EtfRule, bar: MinuteBar, now: datetime, account_as_of: datetime
 ) -> tuple[Trigger, ...]:
     """Emit each advisory trigger whose configured level the bar crossed."""
     found: list[Trigger] = []
@@ -278,9 +278,11 @@ def _triggers(
     return tuple(found)
 
 
-def _account_allows(rule, direction: str, account: AccountSnapshot) -> bool:
+def _account_allows(rule: EtfRule, direction: str, account: AccountSnapshot) -> bool:
     if direction == "buy":
         threshold = rule.buy_below
+        if threshold is None:
+            return False
         cash_limit = min(
             account.available_cash,
             rule.max_buy_cash

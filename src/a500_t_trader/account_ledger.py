@@ -52,7 +52,10 @@ class AccountLedger:
                     "user-entered; not broker-verified",
                 ),
             )
-            return int(cursor.lastrowid)
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise TypeError("SQLite insert did not return a row id")
+            return lastrowid
 
     def record_fill(
         self,
@@ -86,7 +89,10 @@ class AccountLedger:
                     "user-entered manual fill; not broker-verified",
                 ),
             )
-            return int(cursor.lastrowid)
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise TypeError("SQLite insert did not return a row id")
+            return lastrowid
 
     def snapshots(self) -> list[dict[str, object]]:
         with sqlite3.connect(self.path) as db:

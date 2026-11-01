@@ -6,6 +6,7 @@ import pytest
 
 from a500_t_trader.market_data import (
     CapabilityUnavailableError,
+    DailyBar,
     MarketDataService,
     MinuteBar,
     Snapshot,
@@ -55,6 +56,13 @@ class DeterministicSource:
         if "trades" in self.unavailable:
             raise CapabilityUnavailableError("trades unavailable")
         return self.trades
+
+    def get_daily_history(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...]:
+        if "daily" in self.unavailable:
+            raise CapabilityUnavailableError("daily history unavailable")
+        return ()
 
 
 class FixedCalendar:

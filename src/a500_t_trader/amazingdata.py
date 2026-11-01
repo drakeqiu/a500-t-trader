@@ -189,7 +189,7 @@ class AmazingDataProvider:
             raise ValueError("start_date must be on or before end_date")
         code = normalize_symbol(symbol)
         try:
-            from AmazingData.query_api.market_data import Period
+            from AmazingData.query_api.market_data import Period  # type: ignore[import-untyped]
 
             period = int(Period.day.value)
             raw = self._market_data.query_kline(
@@ -258,7 +258,7 @@ class AmazingDataProvider:
 
 def _make_market_data() -> Any:
     from AmazingData.query_api.base_data import BaseData  # type: ignore[import-untyped]
-    from AmazingData.query_api.market_data import MarketData  # type: ignore[import-untyped]
+    from AmazingData.query_api.market_data import MarketData
 
     calendar = BaseData().get_calendar(market="SH")
     return MarketData(calendar)

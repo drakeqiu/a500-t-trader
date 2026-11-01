@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.__main__ import main
@@ -6,7 +8,9 @@ from a500_t_trader.__main__ import main
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def test_manual_fill_cli_persists_user_record_separately(tmp_path, capsys):
+def test_manual_fill_cli_persists_user_record_separately(
+    tmp_path: Path, capsys: Any
+) -> None:
     database = tmp_path / "account.sqlite3"
     result = main(
         [
@@ -38,7 +42,9 @@ def test_manual_fill_cli_persists_user_record_separately(tmp_path, capsys):
     assert ledger["manual_fills"][0]["price"] == "3.85"
 
 
-def test_manual_fill_requires_timezone_and_positive_order_values(tmp_path, capsys):
+def test_manual_fill_requires_timezone_and_positive_order_values(
+    tmp_path: Path, capsys: Any
+) -> None:
     result = main(
         [
             "manual-fill",
