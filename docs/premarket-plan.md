@@ -77,6 +77,7 @@ python -m a500_t_trader manual-fill --timestamp 2026-10-30T10:02:00+08:00 \
   --symbol 510300 --side buy --quantity 100 --price 3.80 --database signals.sqlite3
 python -m a500_t_trader account-ledger --database signals.sqlite3
 ```
+
 ## 用户启动盘中监控
 
 监控只在用户前台启动的进程中运行。提供本地账户快照、规则配置及用于保存触发证据的 SQLite 路径：
