@@ -38,7 +38,7 @@ class AmazingDataCalendar:
 def default_calendar_source() -> CalendarSource:
     """Create AmazingData's Shanghai adapter when the SDK is importable."""
     try:
-        from AmazingData.query_api.base_data import BaseData
+        from AmazingData.query_api.base_data import BaseData  # type: ignore[import-untyped]
 
         return AmazingDataCalendar(BaseData())
     except Exception:
@@ -63,7 +63,9 @@ class TradingCalendarService:
         with self._lock:
             self._refresh_for(self._local_today())
 
-    def session_status(self, session_date: date | None = None) -> tuple[SessionState, bool]:
+    def session_status(
+        self, session_date: date | None = None
+    ) -> tuple[SessionState, bool]:
         """Return (state, stale); never infer sessions from weekday rules."""
         with self._lock:
             today = self._local_today()
@@ -87,7 +89,10 @@ class TradingCalendarService:
             return
         self._last_refresh_date = today
         try:
-            dates = frozenset(_calendar_date(value) for value in self._source.get_calendar(market="SH"))
+            dates = frozenset(
+                _calendar_date(value)
+                for value in self._source.get_calendar(market="SH")
+            )
             if not dates:
                 raise ValueError("calendar source returned no trading dates")
         except Exception:

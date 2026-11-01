@@ -101,9 +101,7 @@ def test_mdga_directory_permission_failure_prevents_sdk_start(tmp_path: Path) ->
         return object()
 
     with pytest.raises(PermissionDeniedError):
-        create_provider_from_env(
-            env=_config(), home=home, provider_factory=sdk_factory
-        )
+        create_provider_from_env(env=_config(), home=home, provider_factory=sdk_factory)
 
     assert calls == 0
 
@@ -115,9 +113,7 @@ def test_authentication_and_permission_errors_are_not_retried(tmp_path: Path) ->
     ):
         calls = 0
 
-        def sdk_factory(
-            *_args: object, failure: Exception = error
-        ) -> object:
+        def sdk_factory(*_args: object, failure: Exception = error) -> object:
             nonlocal calls
             calls += 1
             raise failure

@@ -26,7 +26,9 @@ class DeterministicCalendar:
 
 def test_calendar_loads_at_startup_and_reports_known_trading_dates() -> None:
     provider = DeterministicCalendar((date(2026, 11, 2),))
-    clock = lambda: datetime(2026, 11, 2, 9, tzinfo=SHANGHAI)
+
+    def clock() -> datetime:
+        return datetime(2026, 11, 2, 9, tzinfo=SHANGHAI)
 
     calendar = TradingCalendarService(provider, clock=clock)
 

@@ -9,6 +9,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import cast
 
 from .amazingdata import AmazingDataProvider
 
@@ -54,10 +55,11 @@ def create_provider_from_env[ProviderT](
     env: Mapping[str, str] | None = None,
     env_file: str | Path = ".env",
     home: str | Path | None = None,
-    provider_factory: Callable[..., ProviderT] = AmazingDataProvider,
+    provider_factory: Callable[..., ProviderT] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> ProviderT:
     """Load credentials, prepare the SDK directory, and start the real provider."""
+    factory = provider_factory or cast(Callable[..., ProviderT], AmazingDataProvider)
     process_env = os.environ if env is None else env
     settings = _read_dotenv(Path(env_file))
     settings.update(process_env)
@@ -74,15 +76,13 @@ def create_provider_from_env[ProviderT](
         raise ConfigurationError("AMAZINGDATA_PORT must be a valid TCP port")
 
     home_path = (
-        Path(home)
-        if home is not None
-        else Path(settings.get("HOME") or Path.home())
+        Path(home) if home is not None else Path(settings.get("HOME") or Path.home())
     )
     _ensure_sdk_directory(home_path / "mdga_file")
 
     for attempt in range(3):
         try:
-            return provider_factory(username, password, host, port)
+            return factory(username, password, host, port)
         except Exception as error:
             category = _error_category(error)
             if category == "network":
@@ -94,9 +94,7 @@ def create_provider_from_env[ProviderT](
                     "network retries"
                 ) from None
             if category == "authentication":
-                raise AuthenticationError(
-                    "AmazingData authentication failed"
-                ) from None
+                raise AuthenticationError("AmazingData authentication failed") from None
             if category == "permission":
                 raise PermissionDeniedError(
                     "AmazingData provider permission denied"
@@ -105,9 +103,7 @@ def create_provider_from_env[ProviderT](
                 raise ConfigurationError(
                     "AmazingData provider configuration failed"
                 ) from None
-            raise ProviderStartupError(
-                "AmazingData provider startup failed"
-            ) from None
+            raise ProviderStartupError("AmazingData provider startup failed") from None
     raise AssertionError("bounded startup retry loop ended unexpectedly")
 
 
@@ -183,7 +179,8 @@ def _error_category(error: Exception) -> str:
         return "permission"
     if any(
         isinstance(item, (TimeoutError, ConnectionError, socket.gaierror))
-        or isinstance(item, OSError) and item.errno in _TRANSIENT_ERRNOS
+        or isinstance(item, OSError)
+        and item.errno in _TRANSIENT_ERRNOS
         for item in chain
     ) or any(
         word in message
