@@ -88,6 +88,22 @@ python -m a500_t_trader premarket --config strategy.json --account account.json
 
 CLI 输出 JSON 盘前做T建议及数据能力状态。规则必须由用户明确配置，不自动发现或优化策略。账户快照是用户录入数据，不是券商验证余额。必要账户、行情或日历输入缺失/过期时计划不提供可交易数量建议；数据能力不可用或未授权会明确报告。该命令不写成交、模拟成交，不连接券商，也不会下单。
 
+如需在收盘后回看，请在生成计划时保存计划与其对应的用户录入账户快照：
+
+```bash
+python -m a500_t_trader premarket \
+  --config strategy.json --account account.json --output plan-2026-10-30.json
+```
+
+监控仍使用同一 SQLite 证据库。盘后按交易日生成复盘：
+
+```bash
+python -m a500_t_trader postmarket \
+  --date 2026-10-30 --plan plan-2026-10-30.json --database signals.sqlite3
+```
+
+复盘读取该日期保存的盘前建议、SQLite 触发证据，并查询该 ETF 当日可用的规范化 1 分钟历史行情；最后一根可用分钟线仅标作最新可用线，不保证是官方收盘价。输出分别列出账户快照、建议、触发、手工录入成交和模拟成交。当前命令不创建成交记录；未提供或不可用的计划、触发证据、历史行情会列入 `missing_data`，不会补造。建议和触发是参考证据，不是订单或成交。
+
 ## 5. 订阅 tgw 推送
 
 `TgwPushProvider` 需要调用方提供**已初始化的 tgw API 对象**。本项目只适配它的订阅回调，不负责创建、登录或配置该对象；连接方法请使用你所接入 tgw 环境提供的说明。

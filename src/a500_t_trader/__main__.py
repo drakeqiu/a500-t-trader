@@ -4,20 +4,27 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
-from typing import Sequence
+from datetime import date, datetime
+from typing import Protocol, Sequence
 from zoneinfo import ZoneInfo
 
-from .intraday import run_monitor
+from .intraday import MonitorMarketData, run_monitor
 from .market_data import CapabilityUnavailableError, MarketDataService
 from .premarket import PlanMarketData, generate_plan, load_account, load_config, plan_json
+from .postmarket import ReviewMarketData, generate_review, review_json, save_plan
 from .runtime import create_provider_from_env
+
+
+class CliMarketData(PlanMarketData, MonitorMarketData, ReviewMarketData, Protocol):
+    """Combined data boundary used by all interactive workflow commands."""
+
+
 
 
 def main(
     argv: Sequence[str] | None = None,
     *,
-    market_data: PlanMarketData | None = None,
+    market_data: CliMarketData | None = None,
     as_of: datetime | None = None,
 ) -> int:
     """Run CLI commands; injected data/time form the public CLI-to-app seam."""
@@ -26,6 +33,7 @@ def main(
     premarket = commands.add_parser("premarket", help="generate an advisory pre-market plan")
     premarket.add_argument("--config", required=True, help="local ETF/rule JSON file")
     premarket.add_argument("--account", required=True, help="user-entered account snapshot JSON")
+    premarket.add_argument("--output", help="save the plan and account snapshot as JSON")
     monitor = commands.add_parser("monitor", help="start foreground intraday advisory monitoring")
     monitor.add_argument("--config", required=True, help="local ETF/rule JSON file")
     monitor.add_argument("--account", required=True, help="user-entered account snapshot JSON")
@@ -34,7 +42,27 @@ def main(
         "--poll-seconds", type=float, default=5.0, help="foreground polling interval"
     )
     monitor.add_argument("--once", action="store_true", help="evaluate one pass and exit")
+    review = commands.add_parser("postmarket", help="review a saved plan and daily evidence")
+    review.add_argument("--date", required=True, type=date.fromisoformat, help="reviewed trading date")
+    review.add_argument("--plan", required=True, help="saved pre-market plan JSON")
+    review.add_argument("--database", required=True, help="SQLite trigger-evidence file")
     args = parser.parse_args(argv)
+    if args.command == "postmarket":
+        try:
+            market_data_error = None
+            if market_data is None:
+                try:
+                    market_data = MarketDataService(create_provider_from_env())
+                except Exception as error:
+                    market_data_error = str(error)
+            result = generate_review(
+                args.date, args.plan, args.database, market_data, market_data_error,
+            )
+            print(review_json(result))
+            return 0
+        except Exception as error:
+            print(f"Unable to generate post-market review: {error}", file=sys.stderr)
+            return 2
 
     if args.command == "monitor":
         try:
@@ -72,6 +100,12 @@ def main(
     except Exception as error:
         print(f"Unable to generate plan: {error}", file=sys.stderr)
         return 2
+    if args.output:
+        try:
+            save_plan(args.output, plan, account)
+        except OSError as error:
+            print(f"Unable to save pre-market plan: {error}", file=sys.stderr)
+            return 2
     print(plan_json(plan))
     return 0
 
