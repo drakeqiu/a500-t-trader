@@ -50,3 +50,15 @@ The configuration is local to the clone and is not shared through the repository
 
 GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and pull
 requests. CI installs the locked environment with `uv sync --locked`.
+
+## Automatic PR merging
+
+Add the `automerge` label to a pull request targeting the default branch to enable
+GitHub auto-merge with squash. Removing the label cancels pending auto-merge.
+Only pull requests from branches in this repository are managed; fork pull requests
+are ignored.
+
+Enable auto-merge in the repository settings, then configure the default branch's
+protection rules or ruleset to require the desired status checks, at least one
+approval, and an up-to-date branch. GitHub auto-merge waits for those rules before
+merging.
