@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -12,7 +12,6 @@ from a500_t_trader.market_data import (
     Trade,
 )
 from a500_t_trader.trading_calendar import SessionState, TradingCalendarService
-
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -31,10 +30,24 @@ class DeterministicSource:
             raise CapabilityUnavailableError("snapshot unavailable")
         return self.snapshot
 
-    def get_intraday_bars(self, symbol: str, interval_minutes: int) -> tuple[MinuteBar, ...]:
+    def get_intraday_bars(
+        self, symbol: str, interval_minutes: int
+    ) -> tuple[MinuteBar, ...]:
         self.calls.append(("bars", symbol))
         if "bars" in self.unavailable:
             raise CapabilityUnavailableError("bars unavailable")
+        return self.bars
+
+    def get_history_bars(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int,
+    ) -> tuple[MinuteBar, ...]:
+        self.calls.append(("history", symbol))
+        if "history" in self.unavailable:
+            raise CapabilityUnavailableError("history unavailable")
         return self.bars
 
     def get_trades(self, symbol: str) -> tuple[Trade, ...]:
@@ -54,13 +67,13 @@ def _service(source: DeterministicSource) -> MarketDataService:
     return MarketDataService(source, calendar=TradingCalendarService(FixedCalendar()))
 
 
-def test_service_normalizes_requested_symbol_and_preserves_optional_snapshot_fields() -> None:
+def test_service_normalizes_symbols_and_preserves_snapshot_fields() -> None:
     source = DeterministicSource()
     expected_time = datetime(2026, 11, 1, 9, 30, tzinfo=SHANGHAI)
     source.snapshot = Snapshot(
         symbol="563360",
         timestamp=expected_time,
-        received_at=datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc),
+        received_at=datetime(2026, 11, 1, 1, 30, tzinfo=UTC),
         last_price=Decimal("1.2345"),
     )
     service = _service(source)
@@ -85,7 +98,11 @@ def test_service_defaults_symbol_and_returns_empty_bar_and_trade_results() -> No
     assert service.get_snapshot() is None
     assert service.get_intraday_bars() == ()
     assert service.get_trades() == ()
-    assert source.calls == [("snapshot", "563360"), ("bars", "563360"), ("trades", "563360")]
+    assert source.calls == [
+        ("snapshot", "563360"),
+        ("bars", "563360"),
+        ("trades", "563360"),
+    ]
 
 
 def test_service_preserves_units_precision_and_optional_bar_and_trade_fields() -> None:
@@ -120,8 +137,9 @@ def test_service_preserves_units_precision_and_optional_bar_and_trade_fields() -
     assert trade.amount is None
     assert trade.side is None
 
+
 def test_models_normalize_exchange_suffix_and_convert_times_to_shanghai() -> None:
-    timestamp = datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc)
+    timestamp = datetime(2026, 11, 1, 1, 30, tzinfo=UTC)
 
     bar = MinuteBar(
         symbol="563360.SH",
@@ -141,8 +159,10 @@ def test_models_normalize_exchange_suffix_and_convert_times_to_shanghai() -> Non
     )
 
     assert bar.symbol == trade.symbol == "563360"
-    assert bar.timestamp == trade.timestamp == datetime(
-        2026, 11, 1, 9, 30, tzinfo=SHANGHAI
+    assert (
+        bar.timestamp
+        == trade.timestamp
+        == datetime(2026, 11, 1, 9, 30, tzinfo=SHANGHAI)
     )
     assert bar.open == Decimal("1.2300")
     assert bar.amount is None
@@ -160,7 +180,7 @@ def test_models_reject_naive_timestamps_and_unsupported_bar_intervals() -> None:
     with pytest.raises(ValueError, match="interval_minutes"):
         MinuteBar(
             symbol="563360",
-            timestamp=datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 11, 1, 1, 30, tzinfo=UTC),
             interval_minutes=3,
             open=Decimal("1.23"),
             high=Decimal("1.25"),
@@ -168,6 +188,7 @@ def test_models_reject_naive_timestamps_and_unsupported_bar_intervals() -> None:
             close=Decimal("1.24"),
             volume=1200,
         )
+
 
 def test_unavailable_capability_is_distinct_from_empty_result() -> None:
     source = DeterministicSource()
