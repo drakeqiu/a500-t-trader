@@ -57,6 +57,30 @@ tuple for bars. An unavailable or unauthorized capability raises
 bars retain source-reported gaps and identify an unfinished current bar with
 `is_completed=False`.
 
+## tgw push subscriptions
+
+`TgwPushProvider` adapts tgw snapshot, one-minute bar, and tick-execution push
+callbacks to the normalized `Snapshot`, `MinuteBar`, and `Trade` models:
+
+```python
+from a500_t_trader import TgwPushProvider
+
+push = TgwPushProvider(tgw)
+snapshots = push.subscribe("563360", "snapshot", buffer_size=8)
+try:
+    latest = next(snapshots)
+finally:
+    snapshots.close()
+    push.close()
+```
+
+Pass `callback=...` to `subscribe` for callback consumption; otherwise the
+returned subscription is an iterator. Snapshot and bar iterator buffers
+coalesce to the latest update when full. Tick overflow raises
+`TickOverflowError` and terminates that subscription. Close subscriptions when
+finished and close the provider to cancel remaining subscriptions and release
+the tgw connection.
+
 ## Git commits
 
 This repository uses a repository-local Conventional Commits template. Git loads
