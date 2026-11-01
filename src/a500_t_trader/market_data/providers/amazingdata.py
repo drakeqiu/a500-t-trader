@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .market_data import (
+from .. import (
     CapabilityUnavailableError,
     DailyBar,
     MinuteBar,

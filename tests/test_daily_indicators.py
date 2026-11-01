@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from a500_t_trader.__main__ import main
-from a500_t_trader.daily_indicators import calculate_indicators
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import DailyBar
+from a500_t_trader.strategy.daily_indicators import calculate_indicators
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 

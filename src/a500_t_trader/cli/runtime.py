@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 
-from .amazingdata import AmazingDataProvider
+from ..market_data.providers.amazingdata import AmazingDataProvider
 
 _REQUIRED_SETTINGS = (
     "AMAZINGDATA_USERNAME",

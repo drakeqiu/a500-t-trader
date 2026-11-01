@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from a500_t_trader.runtime import (
+from a500_t_trader.cli.runtime import (
     AuthenticationError,
     ConfigurationError,
     PermissionDeniedError,

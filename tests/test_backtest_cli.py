@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from _pytest.capture import CaptureFixture
 
-from a500_t_trader.__main__ import main
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import MinuteBar
 
 TZ = ZoneInfo("Asia/Shanghai")

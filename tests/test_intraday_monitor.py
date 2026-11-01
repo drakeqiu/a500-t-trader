@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
 
-from a500_t_trader.__main__ import main
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import MinuteBar
-from a500_t_trader.trading_calendar import SessionState
+from a500_t_trader.market_data.trading_calendar import SessionState
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 NOW = datetime(2026, 10, 30, 10, 1, tzinfo=SHANGHAI)
@@ -217,7 +217,7 @@ def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
     def stop(_seconds: float) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("a500_t_trader.intraday.time.sleep", stop)
+    monkeypatch.setattr("a500_t_trader.strategy.intraday.time.sleep", stop)
     config, account = _inputs(tmp_path)
     command = [
         "monitor",

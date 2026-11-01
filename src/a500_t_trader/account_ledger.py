@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from .market_data import normalize_symbol
-from .premarket import AccountSnapshot
+from .strategy.premarket import AccountSnapshot
 
 
 class AccountLedger:

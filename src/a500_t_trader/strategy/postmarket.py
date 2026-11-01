@@ -11,7 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, cast
 
-from .market_data import CapabilityUnavailableError, MinuteBar
+from ..market_data import CapabilityUnavailableError, MinuteBar
 from .premarket import AccountSnapshot, Plan, plan_json
 
 
