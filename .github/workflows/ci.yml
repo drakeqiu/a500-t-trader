@@ -35,6 +35,17 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Markdown lint
+        run: npx --yes markdownlint-cli2
+
+      - name: Markdown format check
+        run: npx --yes prettier --check "**/*.md"
+
       - name: Ruff lint
         run: uv run ruff check .
 

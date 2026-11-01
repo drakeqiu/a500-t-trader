@@ -9,13 +9,13 @@
 - AmazingData 账号以及服务方提供的连接地址、端口和相应行情权限
 - 若使用 tgw 推送：调用方已初始化的 tgw API 对象及相应连接/权限
 
+首次同步前，按[项目依赖说明](dependencies.md)下载所需 wheel。项目的运行时直接依赖、依赖 wheel 的获取方式及安装说明均见该文档。
+
 在仓库根目录同步锁定的环境：
 
 ```bash
 uv sync --locked
 ```
-
-项目依赖指向仓库内的 `wheels/` 本地 wheel（`AmazingData` 和 `tgw`）。运行同步前，确保这些依赖文件可用。仓库配置未说明外部包发布或独立的 `pip install` 安装流程。
 
 ## 2. 配置 AmazingData
 
