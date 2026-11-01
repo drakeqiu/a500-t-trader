@@ -28,19 +28,19 @@ The smoke test is run with `uv run pytest`.
 `AmazingDataProvider` logs in using AmazingData's internet API mode and exposes
 request/response snapshot and bar queries through `MarketDataService`:
 
+Create a local `.env` file containing `AMAZINGDATA_USERNAME`,
+`AMAZINGDATA_PASSWORD`, `AMAZINGDATA_HOST`, and `AMAZINGDATA_PORT`. It is read
+without printing its contents; environment variables override values from the
+file. Startup also verifies that `$HOME/mdga_file` is writable before
+initializing the SDK.
+
 ```python
 from datetime import date
-import os
 
-from a500_t_trader import AmazingDataProvider
+from a500_t_trader import create_provider_from_env
 from a500_t_trader.market_data import MarketDataService
 
-provider = AmazingDataProvider(
-    os.environ["AMAZINGDATA_USERNAME"],
-    os.environ["AMAZINGDATA_PASSWORD"],
-    os.environ["AMAZINGDATA_HOST"],
-    int(os.environ["AMAZINGDATA_PORT"]),
-)
+provider = create_provider_from_env()
 market_data = MarketDataService(provider)
 
 snapshot = market_data.get_snapshot()
