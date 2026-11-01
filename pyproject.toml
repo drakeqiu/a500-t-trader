@@ -32,6 +32,8 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-m", "not live"]
+markers = ["live: requires a live AmazingData provider connection and current data"]
 
 [tool.uv.sources]
 tgw = { path = "wheels/tgw-1.0.9.2-py3-none-any.whl" }
