@@ -88,7 +88,29 @@ python -m a500_t_trader premarket --config strategy.json --account account.json
 
 CLI 输出 JSON 盘前做T建议及数据能力状态。规则必须由用户明确配置，不自动发现或优化策略。账户快照是用户录入数据，不是券商验证余额。必要账户、行情或日历输入缺失/过期时计划不提供可交易数量建议；数据能力不可用或未授权会明确报告。该命令不写成交、模拟成交，不连接券商，也不会下单。
 
-## 5. 订阅 tgw 推送
+## 5. 分钟历史回测 CLI
+
+回测仅适用于规则文件中选定的一只 ETF。它使用历史接口返回的已完成分钟线，按配置的 `buy_below` / `sell_above` 阈值在前一根 bar 收盘后产生信号，并以紧接的下一根 bar 开盘价模拟成交。持仓遵守 T+1（当日买入不可当日卖出）和 `minimum_holding` 下限；`max_buy_cash`、初始现金/持仓、交易费和滑点均纳入约束。默认费用和滑点为零，结果同时给出策略及相同初始账户的持有基线。缺失或未授权分钟历史会明确报错，不会生成替代行情或成交。
+
+```bash
+python -m a500_t_trader backtest \
+  --config strategy.json --account account.json --symbol 510300 \
+  --start-date 2026-10-01 --end-date 2026-10-31 --interval-minutes 1 \
+  --cost-bps 3 --slippage-bps 5 --implementation-version my-rules-v2 \
+  --database backtest.sqlite \
+  --confirm-history-persistence-permitted
+```
+
+仅当数据服务条款允许本地保存分钟历史时，才提供最后的确认选项；未确认时程序在查询和写入之前退出。SQLite 共用历史按证券/周期/时间复用；每次回测另存内容寻址的不可变 bar 快照、初始参数、实现版本、费用/滑点假设、模拟成交、策略结果和持有基线。返回的 `run_id` 可用于复核该次记录及其准确输入：
+
+```bash
+python -m a500_t_trader backtest-show --database backtest.sqlite --run-id 1
+python -m a500_t_trader history-cleanup --database backtest.sqlite
+```
+
+`backtest-show --latest` 可显示最新运行；`history-cleanup` 只清除可复用的共用历史，不删除回测引用的快照或记录。模拟成交明确标记为非实际成交。本工具不连接券商、不下单，也不提供投资建议。
+
+## 6. 订阅 tgw 推送
 
 `TgwPushProvider` 需要调用方提供**已初始化的 tgw API 对象**。本项目只适配它的订阅回调，不负责创建、登录或配置该对象；连接方法请使用你所接入 tgw 环境提供的说明。
 
@@ -112,7 +134,7 @@ finally:
 
 迭代订阅的缓冲区有界：快照和分钟线缓冲区满时会丢弃旧事件、保留最新更新；tick 不会这样合并，缓冲区溢出会终止订阅，迭代读取时抛出 `TickOverflowError`。根据消费速度选择合适的 `buffer_size`，并处理溢出；不要把 tick 缓冲区当作可无损无限队列。关闭 provider 会取消剩余订阅并关闭 tgw 连接。
 
-## 6. 交易日状态
+## 7. 交易日状态
 
 `session_status()` 返回 `(state, stale)`，可选传入待查询日期；默认查询当前上海日期：
 
@@ -128,7 +150,7 @@ else:
 
 `state` 为 `TRADING`、`CLOSED` 或 `UNKNOWN`。交易状态由交易日历数据决定，不根据星期几推测。`stale=True` 表示日历数据不可用或过期；若没有可用的日历数据，状态为 `UNKNOWN`。将未知状态与休市区分处理。
 
-## 7. 统一行情模型
+## 8. 统一行情模型
 
 查询结果和 tgw 推送均使用标准模型：`Snapshot`、`MinuteBar` 和 `Trade`。金额与价格使用人民币（CNY），成交量/数量使用股；价格和金额字段使用 `Decimal`。时间戳是带时区的 `datetime`，统一转换为 `Asia/Shanghai`。
 
