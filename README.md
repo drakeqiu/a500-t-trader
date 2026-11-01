@@ -13,9 +13,9 @@
 
 ## 使用
 
-本项目要求 Python 3.14。安装前需获取 Release 中的 `AmazingData` 与 `tgw` wheel，并同步仓库环境；首次设置步骤见[项目依赖说明](docs/dependencies.md)。
+详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。
 
-查询、认证配置、推送订阅示例及资源清理方式见[使用指南](docs/user-guide.md)。项目不提供交易策略、下单功能或交互式行情查询 CLI；`python -m a500_t_trader` 仅打印项目名称。
+项目要求 Python 3.14；不提供交易策略、下单功能或交互式行情查询 CLI。`python -m a500_t_trader` 仅打印项目名称。
 
 ## 开发与贡献
 

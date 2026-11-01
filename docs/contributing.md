@@ -2,7 +2,9 @@
 
 ## 开发环境
 
-需要 Python 3.14、[uv](https://docs.astral.sh/uv/) 和 GitHub CLI（`gh`）。首次设置开发环境时，先按[项目依赖说明](dependencies.md)下载所需 wheel。
+需要 Python 3.14、Node.js 24、[uv](https://docs.astral.sh/uv/) 和 GitHub CLI
+（`gh`）。首次设置开发环境时，先按[项目依赖说明](dependencies.md)下载所需
+wheel。
 
 下载完成后运行以下命令安装锁定的开发环境：
 
@@ -10,17 +12,28 @@
 uv sync --locked
 ```
 
+安装 Node.js 工具依赖：
+
+```bash
+npm ci
+```
+
 运行质量检查并执行包入口命令：
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
+uv run pymarkdown scan --respect-gitignore --recurse .
+uv run yamllint --strict .github
+npm run format:check
+npx --yes markdownlint-cli2
+npx --yes prettier --check "**/*.md"
 uv run mypy
 uv run pytest
 uv run python -m a500_t_trader
-npx --yes markdownlint-cli2
-npx --yes prettier --check "**/*.md"
 ```
+
+运行 `npm run format` 可格式化 JSON、YAML 和 TOML 文件。
 
 ## Git 提交规范
 

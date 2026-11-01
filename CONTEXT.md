@@ -1,6 +1,7 @@
 # Market Data Context
 
-This context defines the language for normalized market data used in ETF intraday analysis.
+This context defines the language for normalized market data used in ETF
+intraday analysis.
 
 ## Language
 

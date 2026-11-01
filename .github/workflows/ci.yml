@@ -1,3 +1,4 @@
+---
 name: CI
 
 on:
@@ -29,16 +30,19 @@ jobs:
 
           ls -lh wheels/
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install locked Node dependencies
+        run: npm ci
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Install locked dependencies
         run: uv sync --locked
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
 
       - name: Markdown lint
         run: npx --yes markdownlint-cli2
@@ -51,6 +55,15 @@ jobs:
 
       - name: Ruff format check
         run: uv run ruff format --check .
+
+      - name: Markdown lint
+        run: uv run pymarkdown scan --respect-gitignore --recurse .
+
+      - name: Structured-data lint
+        run: uv run yamllint --strict .github
+
+      - name: Structured-data format check
+        run: npm run format:check
 
       - name: mypy strict
         run: uv run mypy

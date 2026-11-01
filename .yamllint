@@ -1,0 +1,5 @@
+extends: default
+rules:
+  truthy:
+    # GitHub Actions uses `on` as a key; YAML 1.1 treats it as a truthy scalar.
+    check-keys: false
