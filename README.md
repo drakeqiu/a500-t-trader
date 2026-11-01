@@ -1,17 +1,17 @@
 # A500 T-Trader
 
-A minimal Python project skeleton for A500 T-Trader. It currently contains only the
-package entry point and development quality checks.
+用于查询标准化行情数据和订阅 tgw 推送的 Python 包。本项目不提供交易策略、下单功能，也没有可交互的命令行工具。
+安装与配置、API 示例和数据语义请参阅[使用指南](docs/user-guide.md)。
 
-## Development
+## 开发
 
-Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
+需要 Python 3.14 和 [uv](https://docs.astral.sh/uv/)。
 
 ```bash
 uv sync --locked
 ```
 
-Run all quality checks and the package entry point:
+运行全部质量检查并执行包入口命令：
 
 ```bash
 uv run ruff check .
@@ -21,102 +21,53 @@ uv run pytest
 uv run python -m a500_t_trader
 ```
 
-The smoke test is run with `uv run pytest`.
+运行冒烟测试：
 
-## AmazingData market-data queries
-
-`AmazingDataProvider` logs in using AmazingData's internet API mode and exposes
-request/response snapshot and bar queries through `MarketDataService`:
-
-Create a local `.env` file containing `AMAZINGDATA_USERNAME`,
-`AMAZINGDATA_PASSWORD`, `AMAZINGDATA_HOST`, and `AMAZINGDATA_PORT`. It is read
-without printing its contents; environment variables override values from the
-file. Startup also verifies that `$HOME/mdga_file` is writable before
-initializing the SDK.
-
-```python
-from datetime import date
-
-from a500_t_trader import create_provider_from_env
-from a500_t_trader.market_data import MarketDataService
-
-provider = create_provider_from_env()
-market_data = MarketDataService(provider)
-
-snapshot = market_data.get_snapshot()
-today_bars = market_data.get_intraday_bars(interval_minutes=1)
-history = market_data.get_history_bars(
-    "563360", date(2026, 11, 2), date(2026, 11, 4), interval_minutes=5
-)
+```bash
+uv run pytest
 ```
 
-These methods issue on-demand queries; they are not subscriptions or push
-streams. Empty source results return `None` for a missing snapshot or an empty
-tuple for bars. An unavailable or unauthorized capability raises
-`CapabilityUnavailableError`, rather than being reported as empty data. Returned
-bars retain source-reported gaps and identify an unfinished current bar with
-`is_completed=False`.
+## 使用
 
-## tgw push subscriptions
+- `AmazingDataProvider` 和 `MarketDataService` 提供按需快照及分钟线查询。
+- `TgwPushProvider` 适配调用方已初始化的 tgw API 对象，接收快照、分钟线和逐笔成交推送。
 
-`TgwPushProvider` adapts tgw snapshot, one-minute bar, and tick-execution push
-callbacks to the normalized `Snapshot`, `MinuteBar`, and `Trade` models:
+这两种用法的配置要求和数据交付方式不同。安装前提、配置、示例、能力限制、错误处理和订阅清理方式请参阅[使用指南](docs/user-guide.md)。
 
-```python
-from a500_t_trader import TgwPushProvider
+## Git 提交规范
 
-push = TgwPushProvider(tgw)
-snapshots = push.subscribe("563360", "snapshot", buffer_size=8)
-try:
-    latest = next(snapshots)
-finally:
-    snapshots.close()
-    push.close()
-```
-
-Pass `callback=...` to `subscribe` for callback consumption; otherwise the
-returned subscription is an iterator. Snapshot and bar iterator buffers
-coalesce to the latest update when full. Tick overflow raises
-`TickOverflowError` and terminates that subscription. Close subscriptions when
-finished and close the provider to cancel remaining subscriptions and release
-the tgw connection.
-
-## Git commits
-
-This repository uses a repository-local Conventional Commits template. Git loads
-`.gitmessage` when you run `git commit`:
+本仓库使用 Conventional Commits 提交模板。执行 `git commit` 时，Git 会读取
+`.gitmessage`：
 
 ```text
 type(scope): description
 ```
 
-Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, and `ci`. The
-scope is optional; a body and footers are optional. Use `!` before the colon or
-a `BREAKING CHANGE:` footer to mark a breaking change. Edit the template as
-needed; lines beginning with `#` are guidance and are omitted from the commit
-message.
+常见类型包括 `feat`、`fix`、`docs`、`refactor`、`test`、`chore` 和 `ci`。
+`scope`、正文和脚注均为可选项。可在冒号前添加 `!`，或使用
+`BREAKING CHANGE:` 脚注标记不兼容变更。可按需修改模板；以 `#` 开头的行仅作
+提示，不会写入提交消息。
 
-To enable it in a fresh clone:
+在新克隆的仓库中启用此模板：
 
 ```bash
 git config --local commit.template .gitmessage
 ```
 
-The configuration is local to the clone and is not shared through the repository.
+此配置仅对当前克隆生效，不会通过仓库共享。
 
-## CI
+## 持续集成
 
-GitHub Actions runs lint, format checking, strict mypy, and pytest on pushes and pull
-requests. CI installs the locked environment with `uv sync --locked`.
+GitHub Actions 会在推送和拉取请求时运行代码检查、格式检查、严格模式的 mypy
+和 pytest。持续集成会使用 `uv sync --locked` 安装锁定的依赖环境。
 
-## Automatic PR merging
+## 自动合并拉取请求
 
-Add the `automerge` label to a pull request targeting the default branch to enable
-GitHub auto-merge with squash. Removing the label cancels pending auto-merge.
-Only pull requests from branches in this repository are managed; fork pull requests
-are ignored.
+为目标分支是默认分支的拉取请求添加 `automerge` 标签，即可启用 GitHub 的
+压缩提交合并（squash）。移除该标签会取消待处理的自动合并。
 
-Enable auto-merge in the repository settings, then configure the default branch's
-protection rules or ruleset to require the desired status checks, at least one
-approval, and an up-to-date branch. GitHub auto-merge waits for those rules before
-merging.
+自动合并仅管理来自本仓库分支的拉取请求；来自派生仓库（fork）的拉取请求会被忽略。
+
+要启用此功能，先在仓库设置中开启自动合并，再配置默认分支的保护规则或
+规则集，要求所需的状态检查、至少一项审批，以及分支保持最新。GitHub
+自动合并会等待这些条件满足后再执行合并。
