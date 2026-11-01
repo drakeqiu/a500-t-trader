@@ -66,9 +66,7 @@ market_data = MarketDataService(provider)
 snapshot = market_data.get_snapshot()  # 默认证券代码 563360
 intraday = market_data.get_intraday_bars(interval_minutes=1)
 today = date.today()
-history = market_data.get_history_bars(
-    "563360", today, today, interval_minutes=5
-)
+history = market_data.get_history_bars("563360", today, today, interval_minutes=5)
 ```
 
 可用查询：
