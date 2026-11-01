@@ -2,7 +2,9 @@
 
 ## 开发环境
 
-需要 Python 3.14 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录同步锁定的环境：
+需要 Python 3.14、[uv](https://docs.astral.sh/uv/) 和 GitHub CLI（`gh`）。首次设置开发环境时，先按[项目依赖说明](dependencies.md)下载所需 wheel。
+
+下载完成后运行以下命令安装锁定的开发环境：
 
 ```bash
 uv sync --locked
@@ -16,6 +18,8 @@ uv run ruff format --check .
 uv run mypy
 uv run pytest
 uv run python -m a500_t_trader
+npx --yes markdownlint-cli2
+npx --yes prettier --check "**/*.md"
 ```
 
 ## Git 提交规范
