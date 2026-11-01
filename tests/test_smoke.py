@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 
-def test_module_entry_point_exposes_premarket_workflow() -> None:
+def test_module_entry_point_exposes_premarket_and_monitoring_workflows() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "a500_t_trader", "--help"],
         check=False,
@@ -14,4 +14,5 @@ def test_module_entry_point_exposes_premarket_workflow() -> None:
 
     assert result.returncode == 0
     assert "premarket" in result.stdout
+    assert "monitor" in result.stdout
     assert result.stderr == ""
