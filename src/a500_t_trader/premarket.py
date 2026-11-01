@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -40,8 +40,11 @@ class EtfRule:
             raise ValueError("buy_below must be positive")
         if self.sell_above is not None and self.sell_above <= 0:
             raise ValueError("sell_above must be positive")
-        if (self.buy_below is not None and self.sell_above is not None
-                and self.buy_below >= self.sell_above):
+        if (
+            self.buy_below is not None
+            and self.sell_above is not None
+            and self.buy_below >= self.sell_above
+        ):
             raise ValueError("buy_below must be below sell_above")
         if self.max_buy_cash is not None and self.max_buy_cash < 0:
             raise ValueError("max_buy_cash cannot be negative")
@@ -65,6 +68,7 @@ class PlanConfig:
         if not symbols or len(symbols) != len(set(symbols)):
             raise ValueError("configuration must contain unique ETF symbols")
 
+
 @dataclass(frozen=True, slots=True)
 class AccountSnapshot:
     as_of: datetime
@@ -76,7 +80,9 @@ class AccountSnapshot:
     def __post_init__(self) -> None:
         if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
             raise ValueError("account snapshot timestamp must include a timezone")
-        if self.available_cash < 0 or any(value < 0 for value in (*self.holdings.values(), *self.sellable.values())):
+        if self.available_cash < 0 or any(
+            value < 0 for value in (*self.holdings.values(), *self.sellable.values())
+        ):
             raise ValueError("account quantities and available cash cannot be negative")
         if any(value < 0 for value in self.cost_basis.values()):
             raise ValueError("cost basis cannot be negative")
@@ -140,7 +146,10 @@ def generate_plan(
         else:
             market_age = plan_time - snapshot.timestamp.astimezone(SHANGHAI)
             if market_age < timedelta(0) or market_age > MAX_INPUT_AGE:
-                reasons.append("stale market data unavailable: future-dated or older than 30 minutes")
+                reasons.append(
+                    "stale market data unavailable: future-dated "
+                    "or older than 30 minutes"
+                )
                 market_unavailable = True
         if not calendar_ok:
             reasons.append("trading calendar unavailable or not an active session")
@@ -151,40 +160,71 @@ def generate_plan(
         if direction == "buy":
             threshold = rule.buy_below
             condition = f"price <= {threshold} CNY"
-            reason = f"last price {price} CNY meets configured buy-below rule {threshold} CNY"
-            cash_limit = min(account.available_cash, rule.max_buy_cash if rule.max_buy_cash is not None else account.available_cash)
+            reason = (
+                f"last price {price} CNY meets configured buy-below rule "
+                f"{threshold} CNY"
+            )
+            cash_limit = min(
+                account.available_cash,
+                rule.max_buy_cash
+                if rule.max_buy_cash is not None
+                else account.available_cash,
+            )
             quantity = int(cash_limit / price / 100) * 100
-            if rule.symbol not in account.holdings or rule.symbol not in account.sellable:
+            if (
+                rule.symbol not in account.holdings
+                or rule.symbol not in account.sellable
+            ):
                 account_unavailable = True
                 direction, quantity = "none", None
-                reasons.append("account fields unavailable: position or sellable quantity is missing")
+                reasons.append(
+                    "account fields unavailable: position or sellable quantity missing"
+                )
             elif quantity == 0:
                 direction, quantity = "none", None
-                reasons.append("available cash is below one board lot or max_buy_cash is zero")
+                reasons.append(
+                    "available cash is below one board lot or max_buy_cash is zero"
+                )
         elif direction == "sell":
             threshold = rule.sell_above
             condition = f"price >= {threshold} CNY"
-            reason = f"last price {price} CNY meets configured sell-above rule {threshold} CNY"
-            permitted = max(0, account.holdings.get(rule.symbol, 0) - rule.minimum_holding)
+            reason = f"last price {price} CNY meets sell-above rule {threshold} CNY"
+            permitted = max(
+                0, account.holdings.get(rule.symbol, 0) - rule.minimum_holding
+            )
             quantity = min(account.sellable.get(rule.symbol, 0), permitted) // 100 * 100
             if quantity == 0:
                 direction, quantity = "none", None
                 reasons.append("no sellable board lot remains above minimum holding")
         elif reasons:
             reason = "; ".join(reasons)
-        risk = "; ".join(reasons) if reasons else (
-            f"Configured price threshold; minimum holding is {rule.minimum_holding} shares; "
-            "review manually before any action."
+        risk = (
+            "; ".join(reasons)
+            if reasons
+            else (
+                f"Configured threshold; minimum holding is "
+                f"{rule.minimum_holding} shares; "
+                "review manually before any action."
+            )
         )
-        suggestions.append(Suggestion(
-            rule.symbol, direction, condition, quantity, reason,
-            risk,
-            None, "No signal score is defined; threshold rules are binary, not scored.",
-        ))
+        suggestions.append(
+            Suggestion(
+                rule.symbol,
+                direction,
+                condition,
+                quantity,
+                reason,
+                risk,
+                None,
+                "No signal score is defined; threshold rules are binary, not scored.",
+            )
+        )
     status = f"{calendar_status}; market data "
     status += "unavailable: stale/missing" if market_unavailable else "available"
     status += "; account fields unavailable" if account_unavailable else ""
-    return Plan(plan_time, "user-entered; not broker-verified", status, tuple(suggestions))
+    return Plan(
+        plan_time, "user-entered; not broker-verified", status, tuple(suggestions)
+    )
 
 
 def load_config(path: str | Path) -> PlanConfig:
@@ -195,24 +235,28 @@ def load_config(path: str | Path) -> PlanConfig:
     fields = {"symbol", "buy_below", "sell_above", "max_buy_cash", "minimum_holding"}
     for item in data["etfs"]:
         if not isinstance(item, dict) or "symbol" not in item or set(item) - fields:
-            raise ValueError("ETF entries require symbol and only documented price/limit fields")
-        rules.append(EtfRule(
-            item["symbol"],
-            _optional_decimal(item.get("buy_below")),
-            _optional_decimal(item.get("sell_above")),
-            _optional_decimal(item.get("max_buy_cash")),
-            int(item.get("minimum_holding", 0)),
-        ))
+            raise ValueError(
+                "ETF entries require symbol and only documented price/limit fields"
+            )
+        rules.append(
+            EtfRule(
+                item["symbol"],
+                _optional_decimal(item.get("buy_below")),
+                _optional_decimal(item.get("sell_above")),
+                _optional_decimal(item.get("max_buy_cash")),
+                int(item.get("minimum_holding", 0)),
+            )
+        )
     return PlanConfig(tuple(rules))
-
-
-
 
 
 def load_account(path: str | Path) -> AccountSnapshot:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if set(data) != {"as_of", "holdings", "cost_basis", "sellable", "available_cash"}:
-        raise ValueError("account snapshot requires as_of, holdings, cost_basis, sellable, and available_cash")
+        raise ValueError(
+            "account snapshot requires as_of, holdings, cost_basis, sellable, "
+            "and available_cash"
+        )
     return AccountSnapshot(
         datetime.fromisoformat(data["as_of"]),
         {key: int(value) for key, value in data["holdings"].items()},

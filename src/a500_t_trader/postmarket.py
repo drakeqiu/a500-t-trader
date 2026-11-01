@@ -69,7 +69,9 @@ def generate_review(
         if not isinstance(saved, dict):
             missing.append("saved pre-market plan is not a JSON object")
         elif saved.get("session_date") != session_date.isoformat():
-            missing.append("saved pre-market plan does not match the requested session date")
+            missing.append(
+                "saved pre-market plan does not match the requested session date"
+            )
         elif not isinstance(saved.get("plan"), dict):
             missing.append("saved pre-market plan has no valid plan record")
         else:
@@ -111,11 +113,10 @@ def generate_review(
         ) as db:
             db.row_factory = sqlite3.Row
             has_snapshots = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_snapshots'"
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='account_snapshots'"
             ).fetchone()
-            if (
-                has_snapshots and account_record.get("source") == "unavailable"
-            ):
+            if has_snapshots and account_record.get("source") == "unavailable":
                 snapshot_row = db.execute(
                     "SELECT as_of,record_json,classification FROM account_snapshots "
                     "WHERE substr(as_of,1,10)=? ORDER BY as_of DESC,id DESC LIMIT 1",
@@ -125,14 +126,20 @@ def generate_review(
                     account_record = json.loads(snapshot_row["record_json"])
                     account_record["status"] = "recorded"
                     account_record["source"] = snapshot_row["classification"]
-                    missing = [item for item in missing if "account snapshot unavailable" not in item]
+                    missing = [
+                        item
+                        for item in missing
+                        if "account snapshot unavailable" not in item
+                    ]
             has_triggers = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trigger_evidence'"
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='trigger_evidence'"
             ).fetchone()
             triggers = []
             if has_triggers:
                 rows = db.execute(
-                    "SELECT * FROM trigger_evidence WHERE substr(bar_timestamp, 1, 10) = ? "
+                    "SELECT * FROM trigger_evidence "
+                    "WHERE substr(bar_timestamp, 1, 10) = ? "
                     "ORDER BY bar_timestamp, symbol, direction",
                     (session_date.isoformat(),),
                 )
@@ -164,7 +171,9 @@ def generate_review(
                 ]
     except (sqlite3.Error, OSError) as error:
         missing.append(f"trigger evidence unavailable: {error}")
-    if not triggers and not any("trigger evidence unavailable" in item for item in missing):
+    if not triggers and not any(
+        "trigger evidence unavailable" in item for item in missing
+    ):
         missing.append("no trigger evidence recorded for the requested session date")
 
     market: dict[str, object] = {}
@@ -180,37 +189,45 @@ def generate_review(
                 )
             except CapabilityUnavailableError as error:
                 missing.append(
-                    f"{symbol} historical market data unavailable or unauthorized: {error}"
+                    f"{symbol} historical data unavailable or unauthorized: {error}"
                 )
                 continue
             except Exception as error:
                 missing.append(f"{symbol} historical market data unavailable: {error}")
                 continue
             valid = [
-                bar for bar in bars
+                bar
+                for bar in bars
                 if bar.symbol == symbol
                 and bar.interval_minutes == 1
                 and bar.timestamp.date() == session_date
             ]
             if not valid:
-                missing.append(
-                    f"{symbol} has no historical 1-minute market bars for {session_date}"
-                )
+                missing.append(f"{symbol} has no 1-minute bars for {session_date}")
                 continue
             last = max(valid, key=lambda bar: bar.timestamp)
             market[symbol] = {
                 "bar_timestamp": last.timestamp.isoformat(),
-                "open": str(last.open), "high": str(last.high),
-                "low": str(last.low), "close": str(last.close),
+                "open": str(last.open),
+                "high": str(last.high),
+                "low": str(last.low),
+                "close": str(last.close),
                 "volume": last.volume,
                 "amount": None if last.amount is None else str(last.amount),
                 "is_completed": last.is_completed,
-                "interpretation": "latest available 1-minute bar; not necessarily an official close",
+                "interpretation": (
+                    "latest 1-minute bar; not necessarily an official close"
+                ),
             }
     if not symbols:
-        missing.append("no ETF symbols available from the saved plan or trigger evidence")
+        missing.append(
+            "no ETF symbols available from the saved plan or trigger evidence"
+        )
 
-    if account_record.get("status") == "not saved" or account_record.get("source") == "unavailable":
+    if (
+        account_record.get("status") == "not saved"
+        or account_record.get("source") == "unavailable"
+    ):
         account_record = {
             **account_record,
             "classification": "user-entered account snapshot; not broker-verified",
@@ -222,23 +239,28 @@ def generate_review(
             "classification": "account snapshot; not recommendation, order, or fill",
         }
     return PostMarketReview(
-        session_date.isoformat(), plan_record, account_record, recommendations,
-        tuple(triggers), market,
+        session_date.isoformat(),
+        plan_record,
+        account_record,
+        recommendations,
+        tuple(triggers),
+        market,
         manual_fills,
-        {"status": "not recorded", "records": []}, tuple(missing),
+        {"status": "not recorded", "records": []},
+        tuple(missing),
     )
 
 
 def review_json(review: PostMarketReview) -> str:
-    return json.dumps(asdict(review), ensure_ascii=False, default=_json_default, indent=2)
+    return json.dumps(
+        asdict(review), ensure_ascii=False, default=_json_default, indent=2
+    )
 
 
 def _symbols(
     plan: dict[str, object] | None, triggers: list[dict[str, object]]
 ) -> tuple[str, ...]:
-    symbols: set[str] = {
-        str(item["symbol"]) for item in triggers if item.get("symbol")
-    }
+    symbols: set[str] = {str(item["symbol"]) for item in triggers if item.get("symbol")}
     if plan:
         for suggestion in plan.get("suggestions", []):
             if isinstance(suggestion, dict) and suggestion.get("symbol"):

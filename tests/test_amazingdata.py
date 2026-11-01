@@ -110,13 +110,20 @@ def test_history_query_maps_supported_period_and_vendor_bars() -> None:
     assert bars[0].is_completed
     assert api.calls == [("kline", ["563360.SH"], 20261102, 20261104, 10002)]
 
+
 def test_daily_history_queries_day_period_and_returns_validated_daily_bars() -> None:
     api = VendorAPI()
-    api.kline_rows = [{
-        "kline_time": pd.Timestamp("2026-11-02"),
-        "open": 1.20, "high": 1.25, "low": 1.18, "close": 1.23,
-        "volume": 1000, "amount": 1230.0,
-    }]
+    api.kline_rows = [
+        {
+            "kline_time": pd.Timestamp("2026-11-02"),
+            "open": 1.20,
+            "high": 1.25,
+            "low": 1.18,
+            "close": 1.23,
+            "volume": 1000,
+            "amount": 1230.0,
+        }
+    ]
     service = MarketDataService(
         _provider(api, datetime(2026, 11, 5, 12, tzinfo=SHANGHAI))
     )

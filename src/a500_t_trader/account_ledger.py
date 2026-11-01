@@ -44,7 +44,8 @@ class AccountLedger:
         record = asdict(snapshot)
         with sqlite3.connect(self.path) as db:
             cursor = db.execute(
-                "INSERT INTO account_snapshots(as_of,record_json,classification) VALUES(?,?,?)",
+                "INSERT INTO account_snapshots(as_of,record_json,classification) "
+                "VALUES(?,?,?)",
                 (
                     snapshot.as_of.isoformat(),
                     json.dumps(record, default=_json_default),
@@ -73,10 +74,15 @@ class AccountLedger:
         code = normalize_symbol(symbol)
         with sqlite3.connect(self.path) as db:
             cursor = db.execute(
-                "INSERT INTO manual_fills(timestamp,symbol,side,quantity,price,notes,classification) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO manual_fills(timestamp,symbol,side,quantity,price,notes,"
+                "classification) VALUES(?,?,?,?,?,?,?)",
                 (
-                    timestamp.isoformat(), code, side, quantity, str(price), notes,
+                    timestamp.isoformat(),
+                    code,
+                    side,
+                    quantity,
+                    str(price),
+                    notes,
                     "user-entered manual fill; not broker-verified",
                 ),
             )
@@ -85,7 +91,10 @@ class AccountLedger:
     def snapshots(self) -> list[dict[str, object]]:
         with sqlite3.connect(self.path) as db:
             db.row_factory = sqlite3.Row
-            return [dict(row) for row in db.execute("SELECT * FROM account_snapshots ORDER BY id")]
+            return [
+                dict(row)
+                for row in db.execute("SELECT * FROM account_snapshots ORDER BY id")
+            ]
 
     def fills(self, session_date: str | None = None) -> list[dict[str, object]]:
         with sqlite3.connect(self.path) as db:

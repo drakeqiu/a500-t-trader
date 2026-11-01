@@ -80,13 +80,24 @@ class TriggerEvidenceStore:
                     evaluated_at, risk_or_invalidation, account_as_of, account_source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    trigger.symbol, trigger.direction, trigger.condition,
-                    bar.timestamp.isoformat(), bar.interval_minutes, str(bar.open),
-                    str(bar.high), str(bar.low), str(bar.close), bar.volume,
+                    trigger.symbol,
+                    trigger.direction,
+                    trigger.condition,
+                    bar.timestamp.isoformat(),
+                    bar.interval_minutes,
+                    str(bar.open),
+                    str(bar.high),
+                    str(bar.low),
+                    str(bar.close),
+                    bar.volume,
                     None if bar.amount is None else str(bar.amount),
-                    int(bar.is_completed), bar.source, session.value,
-                    trigger.evaluated_at.isoformat(), trigger.risk_or_invalidation,
-                    trigger.account_as_of.isoformat(), trigger.account_source,
+                    int(bar.is_completed),
+                    bar.source,
+                    session.value,
+                    trigger.evaluated_at.isoformat(),
+                    trigger.risk_or_invalidation,
+                    trigger.account_as_of.isoformat(),
+                    trigger.account_source,
                 ),
             )
             return result.rowcount == 1
@@ -114,14 +125,20 @@ def monitor_once(
         print(f"Required trading-calendar capability unavailable: {error}", file=errors)
         return 0
     if stale or session is SessionState.UNKNOWN:
-        print("Trading calendar unavailable or stale; monitoring conditions not evaluated.", file=errors)
+        print(
+            "Trading calendar unavailable or stale; conditions not evaluated.",
+            file=errors,
+        )
         return 0
     if session is SessionState.CLOSED:
         print("Trading session is closed; no conditions evaluated.", file=output)
         return 0
     account_age = now - account.as_of.astimezone(SHANGHAI)
     if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
-        print("Account snapshot is stale or future-dated; no conditions evaluated.", file=errors)
+        print(
+            "Account snapshot is stale or future-dated; no conditions evaluated.",
+            file=errors,
+        )
         return 0
 
     saved = 0
@@ -131,16 +148,23 @@ def monitor_once(
         except CapabilityUnavailableError as error:
             print(
                 f"{rule.symbol}: required 1-minute market-data capability unavailable "
-                f"or unauthorized: {error}", file=errors,
+                f"or unauthorized: {error}",
+                file=errors,
             )
             continue
         if not bars:
-            print(f"{rule.symbol}: no 1-minute bars available; no condition evaluated.", file=errors)
+            print(
+                f"{rule.symbol}: no 1-minute bars available; no condition evaluated.",
+                file=errors,
+            )
             continue
         latest_by_status: dict[bool, MinuteBar] = {}
         for bar in bars:
             if bar.symbol != rule.symbol or bar.interval_minutes != 1:
-                print(f"{rule.symbol}: provider returned an unexpected normalized bar.", file=errors)
+                print(
+                    f"{rule.symbol}: provider returned an unexpected normalized bar.",
+                    file=errors,
+                )
                 continue
             current = latest_by_status.get(bar.is_completed)
             if current is None or bar.timestamp > current.timestamp:
@@ -158,19 +182,24 @@ def monitor_once(
             for trigger in _triggers(rule, bar, now, account.as_of):
                 if not _account_allows(rule, trigger.direction, account):
                     print(
-                        f"{rule.symbol}: account limits veto the {trigger.direction} trigger.",
+                        f"{rule.symbol}: account limits vetoed "
+                        f"the {trigger.direction} trigger.",
                         file=errors,
                     )
                     continue
                 if not evidence.record(trigger, session):
                     continue
                 saved += 1
-                completion = "" if bar.is_completed else " [UNFINISHED BAR — provisional]"
+                completion = (
+                    "" if bar.is_completed else " [UNFINISHED BAR — provisional]"
+                )
                 print(
                     f"SUGGESTION{completion}: {trigger.direction} {trigger.symbol}; "
-                    f"condition: {trigger.condition}; bar: {bar.timestamp.isoformat()}; "
+                    f"condition: {trigger.condition}; bar: "
+                    f"{bar.timestamp.isoformat()}; "
                     f"risk/invalidation: {trigger.risk_or_invalidation}. NOT AN ORDER; "
-                    "no trade was executed.", file=output,
+                    "no trade was executed.",
+                    file=output,
                 )
     if not saved:
         print("No new trigger.", file=output)
@@ -194,7 +223,10 @@ def run_monitor(
     print("Intraday monitoring started in this process; press Ctrl-C to stop.")
     while True:
         monitor_once(
-            config, account, market_data, evidence,
+            config,
+            account,
+            market_data,
+            evidence,
             as_of=as_of if once and as_of is not None else datetime.now(SHANGHAI),
         )
         if once:
@@ -209,24 +241,40 @@ def _triggers(
     found: list[Trigger] = []
     if rule.buy_below is not None and bar.low <= rule.buy_below:
         risk = (
-            f"expires if a later price rises above {rule.buy_below} CNY; user review required"
-            if bar.is_completed else
-            "provisional while the minute bar is unfinished; user review required"
+            f"expires if a later price rises above {rule.buy_below} CNY; "
+            "user review required"
+            if bar.is_completed
+            else "provisional while the minute bar is unfinished; user review required"
         )
-        found.append(Trigger(
-            rule.symbol, "buy", f"low <= {rule.buy_below} CNY", risk,
-            bar, now, account_as_of,
-        ))
+        found.append(
+            Trigger(
+                rule.symbol,
+                "buy",
+                f"low <= {rule.buy_below} CNY",
+                risk,
+                bar,
+                now,
+                account_as_of,
+            )
+        )
     if rule.sell_above is not None and bar.high >= rule.sell_above:
         risk = (
-            f"expires if a later price falls below {rule.sell_above} CNY; user review required"
-            if bar.is_completed else
-            "provisional while the minute bar is unfinished; user review required"
+            f"expires if a later price falls below {rule.sell_above} CNY; "
+            "user review required"
+            if bar.is_completed
+            else "provisional while the minute bar is unfinished; user review required"
         )
-        found.append(Trigger(
-            rule.symbol, "sell", f"high >= {rule.sell_above} CNY", risk,
-            bar, now, account_as_of,
-        ))
+        found.append(
+            Trigger(
+                rule.symbol,
+                "sell",
+                f"high >= {rule.sell_above} CNY",
+                risk,
+                bar,
+                now,
+                account_as_of,
+            )
+        )
     return tuple(found)
 
 
@@ -235,7 +283,9 @@ def _account_allows(rule, direction: str, account: AccountSnapshot) -> bool:
         threshold = rule.buy_below
         cash_limit = min(
             account.available_cash,
-            rule.max_buy_cash if rule.max_buy_cash is not None else account.available_cash,
+            rule.max_buy_cash
+            if rule.max_buy_cash is not None
+            else account.available_cash,
         )
         return int(cash_limit / threshold / 100) > 0
     sellable = min(

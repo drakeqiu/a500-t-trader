@@ -122,8 +122,6 @@ class Trade:
         object.__setattr__(self, "timestamp", _shanghai_time(self.timestamp))
 
 
-
-
 class CapabilityUnavailableError(RuntimeError):
     """Raised when the current source cannot provide a requested capability."""
 
@@ -184,7 +182,6 @@ class MarketDataService:
         if query is None:
             raise CapabilityUnavailableError("daily-history capability is unavailable")
         return tuple(query(self._symbol(symbol), start_date, end_date))
-
 
     def get_history_bars(
         self,

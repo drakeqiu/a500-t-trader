@@ -7,11 +7,12 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Protocol
 
 from .market_data import DailyBar, MinuteBar
+from .premarket import AccountSnapshot, PlanConfig
 
 HUNDRED = Decimal(100)
 
@@ -90,21 +91,38 @@ def run_backtest(
     if len(symbols) != 1:
         raise ValueError("a backtest requires exactly one configured ETF")
     symbol = next(iter(symbols))
-    selected = tuple(sorted(
-        (bar for bar in bars if start_date <= bar.timestamp.date() <= end_date
-         and bar.is_completed), key=lambda bar: bar.timestamp
-    ))
+    selected = tuple(
+        sorted(
+            (
+                bar
+                for bar in bars
+                if start_date <= bar.timestamp.date() <= end_date and bar.is_completed
+            ),
+            key=lambda bar: bar.timestamp,
+        )
+    )
     if not selected:
-        raise ValueError("no completed minute bars are available for the requested range")
-    if any(bar.symbol != symbol or bar.interval_minutes != interval_minutes for bar in selected):
-        raise ValueError("minute history does not match the configured symbol and interval")
+        raise ValueError(
+            "no completed minute bars are available for the requested range"
+        )
+    if any(
+        bar.symbol != symbol or bar.interval_minutes != interval_minutes
+        for bar in selected
+    ):
+        raise ValueError(
+            "minute history does not match the configured symbol and interval"
+        )
     if len({bar.timestamp for bar in selected}) != len(selected):
         raise ValueError("minute history contains duplicate timestamps")
     first_timestamp = selected[0].timestamp
     if account.as_of.tzinfo is None or first_timestamp.tzinfo is None:
-        raise ValueError("initial account and minute history timestamps must include time zones")
+        raise ValueError(
+            "initial account and minute history timestamps must include time zones"
+        )
     if account.as_of > first_timestamp:
-        raise ValueError("initial account snapshot must not follow the first history bar")
+        raise ValueError(
+            "initial account snapshot must not follow the first history bar"
+        )
     rule = config.rules[0]
     initial_cash = account.available_cash
     initial_holdings = account.holdings.get(symbol, 0)
@@ -115,11 +133,15 @@ def run_backtest(
     fills: list[SimulatedFill] = []
     for previous, current in zip(selected, selected[1:], strict=False):
         # T+1: a lot becomes sellable only after a later session date appears.
-        newly_sellable = sum(qty for acquired_date, qty in acquired
-                             if acquired_date < current.timestamp.date())
+        newly_sellable = sum(
+            qty
+            for acquired_date, qty in acquired
+            if acquired_date < current.timestamp.date()
+        )
         immediately_sellable += newly_sellable
-        acquired = [(day, qty) for day, qty in acquired
-                    if day >= current.timestamp.date()]
+        acquired = [
+            (day, qty) for day, qty in acquired if day >= current.timestamp.date()
+        ]
         signal: str | None = None
         if rule.buy_below is not None and previous.close <= rule.buy_below:
             signal = "buy"
@@ -128,8 +150,14 @@ def run_backtest(
         if signal == "buy":
             market_price = current.open * (Decimal(1) + slippage_bps / Decimal(10000))
             cash_limit = min(cash, rule.max_buy_cash or cash)
-            quantity = int((cash_limit / (market_price * (1 + cost_bps / Decimal(10000)))
-                            / HUNDRED).to_integral_value(rounding=ROUND_DOWN) * 100)
+            quantity = int(
+                (
+                    cash_limit
+                    / (market_price * (1 + cost_bps / Decimal(10000)))
+                    / HUNDRED
+                ).to_integral_value(rounding=ROUND_DOWN)
+                * 100
+            )
             if quantity:
                 notional = market_price * quantity
                 costs = notional * cost_bps / Decimal(10000)
@@ -137,21 +165,45 @@ def run_backtest(
                 cash -= notional + costs
                 holdings += quantity
                 acquired.append((current.timestamp.date(), quantity))
-                fills.append(SimulatedFill(symbol, "buy", quantity, previous.timestamp,
-                                            current.timestamp, market_price, costs, slippage))
+                fills.append(
+                    SimulatedFill(
+                        symbol,
+                        "buy",
+                        quantity,
+                        previous.timestamp,
+                        current.timestamp,
+                        market_price,
+                        costs,
+                        slippage,
+                    )
+                )
         elif signal == "sell":
-            quantity = min(max(0, holdings - rule.minimum_holding), immediately_sellable)
+            quantity = min(
+                max(0, holdings - rule.minimum_holding), immediately_sellable
+            )
             quantity = quantity // 100 * 100
             if quantity:
-                market_price = current.open * (Decimal(1) - slippage_bps / Decimal(10000))
+                market_price = current.open * (
+                    Decimal(1) - slippage_bps / Decimal(10000)
+                )
                 notional = market_price * quantity
                 costs = notional * cost_bps / Decimal(10000)
                 slippage = (current.open - market_price) * quantity
                 cash += notional - costs
                 holdings -= quantity
                 immediately_sellable -= quantity
-                fills.append(SimulatedFill(symbol, "sell", quantity, previous.timestamp,
-                                            current.timestamp, market_price, costs, slippage))
+                fills.append(
+                    SimulatedFill(
+                        symbol,
+                        "sell",
+                        quantity,
+                        previous.timestamp,
+                        current.timestamp,
+                        market_price,
+                        costs,
+                        slippage,
+                    )
+                )
     final_price = selected[-1].close
     strategy_value = cash + holdings * final_price
     baseline_value = initial_cash + initial_holdings * final_price
@@ -160,21 +212,47 @@ def run_backtest(
         raise ValueError("initial portfolio value must be positive")
     snapshot_id = snapshot_digest(selected)
     return BacktestResult(
-        "completed", symbol, start_date, end_date, interval_minutes,
-        {"buy_below": rule.buy_below, "sell_above": rule.sell_above,
-         "max_buy_cash": rule.max_buy_cash, "minimum_holding": rule.minimum_holding},
-        implementation_version, "next_bar_open", cost_bps, slippage_bps,
-        snapshot_id, len(selected), tuple(fills), initial_cash, initial_holdings,
-        cash, holdings, strategy_value, baseline_value,
+        "completed",
+        symbol,
+        start_date,
+        end_date,
+        interval_minutes,
+        {
+            "buy_below": rule.buy_below,
+            "sell_above": rule.sell_above,
+            "max_buy_cash": rule.max_buy_cash,
+            "minimum_holding": rule.minimum_holding,
+        },
+        implementation_version,
+        "next_bar_open",
+        cost_bps,
+        slippage_bps,
+        snapshot_id,
+        len(selected),
+        tuple(fills),
+        initial_cash,
+        initial_holdings,
+        cash,
+        holdings,
+        strategy_value,
+        baseline_value,
         (strategy_value - initial_value) / initial_value,
         (baseline_value - initial_value) / initial_value,
-        {"final_value": strategy_value,
-         "return": (strategy_value - initial_value) / initial_value},
-        {"final_value": baseline_value,
-         "return": (baseline_value - initial_value) / initial_value},
-        {"as_of": account.as_of, "holdings": account.holdings,
-         "cost_basis": account.cost_basis, "sellable": account.sellable,
-         "available_cash": account.available_cash},
+        {
+            "final_value": strategy_value,
+            "return": (strategy_value - initial_value) / initial_value,
+        },
+        {
+            "final_value": baseline_value,
+            "return": (baseline_value - initial_value) / initial_value,
+        },
+        {
+            "as_of": account.as_of,
+            "holdings": account.holdings,
+            "cost_basis": account.cost_basis,
+            "sellable": account.sellable,
+            "available_cash": account.available_cash,
+        },
     )
 
 
@@ -208,16 +286,22 @@ class BacktestRepository:
                     result_json TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS shared_daily_bars (
-                    symbol TEXT NOT NULL, timestamp TEXT NOT NULL, bar_json TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    bar_json TEXT NOT NULL,
                     PRIMARY KEY (symbol, timestamp)
                 );
                 CREATE TABLE IF NOT EXISTS shared_daily_history_ranges (
-                    symbol TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
                     PRIMARY KEY (symbol, start_date, end_date)
                 );
             """)
 
-    def save(self, bars: tuple[MinuteBar, ...], result: BacktestResult) -> BacktestResult:
+    def save(
+        self, bars: tuple[MinuteBar, ...], result: BacktestResult
+    ) -> BacktestResult:
         content = _bars_json(bars)
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if digest != result.snapshot_id:
@@ -229,22 +313,35 @@ class BacktestRepository:
                     "INSERT INTO shared_bars VALUES (?, ?, ?, ?) "
                     "ON CONFLICT(symbol, interval_minutes, timestamp) DO UPDATE SET "
                     "bar_json=excluded.bar_json",
-                    (bar.symbol, bar.interval_minutes, bar.timestamp.isoformat(),
-                     _bar_json(bar)),
+                    (
+                        bar.symbol,
+                        bar.interval_minutes,
+                        bar.timestamp.isoformat(),
+                        _bar_json(bar),
+                    ),
                 )
             db.execute(
                 "INSERT OR IGNORE INTO shared_history_ranges VALUES (?, ?, ?, ?)",
-                (result.symbol, result.interval_minutes, result.start_date.isoformat(),
-                 result.end_date.isoformat()),
+                (
+                    result.symbol,
+                    result.interval_minutes,
+                    result.start_date.isoformat(),
+                    result.end_date.isoformat(),
+                ),
             )
-            db.execute("INSERT OR IGNORE INTO minute_snapshots VALUES (?, ?)",
-                       (digest, content))
+            db.execute(
+                "INSERT OR IGNORE INTO minute_snapshots VALUES (?, ?)",
+                (digest, content),
+            )
             cursor = db.execute(
-                "INSERT INTO backtests(snapshot_id, result_json) VALUES (?, '')", (digest,)
+                "INSERT INTO backtests(snapshot_id, result_json) VALUES (?, '')",
+                (digest,),
             )
             result = replace(result, run_id=int(cursor.lastrowid))
-            db.execute("UPDATE backtests SET result_json=? WHERE id=?",
-                       (_json(asdict(result)), result.run_id))
+            db.execute(
+                "UPDATE backtests SET result_json=? WHERE id=?",
+                (_json(asdict(result)), result.run_id),
+            )
         return result
 
     def get_shared_history(
@@ -252,22 +349,33 @@ class BacktestRepository:
     ) -> tuple[MinuteBar, ...] | None:
         with self._connect() as db:
             covered = db.execute(
-                "SELECT 1 FROM shared_history_ranges WHERE symbol=? AND interval_minutes=? "
-                "AND start_date=? AND end_date=?",
-                (symbol, interval_minutes, start_date.isoformat(), end_date.isoformat()),
+                "SELECT 1 FROM shared_history_ranges WHERE symbol=? "
+                "AND interval_minutes=? AND start_date=? AND end_date=?",
+                (
+                    symbol,
+                    interval_minutes,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                ),
             ).fetchone()
             if covered is None:
                 return None
             rows = db.execute(
-                "SELECT bar_json FROM shared_bars WHERE symbol=? AND interval_minutes=? "
-                "AND timestamp>=? AND timestamp<? ORDER BY timestamp",
-                (symbol, interval_minutes, start_date.isoformat(),
-                 datetime.combine(end_date, datetime.max.time()).isoformat()),
+                "SELECT bar_json FROM shared_bars WHERE symbol=? "
+                "AND interval_minutes=? AND timestamp>=? AND timestamp<? "
+                "ORDER BY timestamp",
+                (
+                    symbol,
+                    interval_minutes,
+                    start_date.isoformat(),
+                    datetime.combine(end_date, datetime.max.time()).isoformat(),
+                ),
             ).fetchall()
         return tuple(_bar_from_json(row[0]) for row in rows)
 
-    def save_daily_history(self, bars: tuple[DailyBar, ...], start_date: date,
-                           end_date: date) -> None:
+    def save_daily_history(
+        self, bars: tuple[DailyBar, ...], start_date: date, end_date: date
+    ) -> None:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
         with self._connect() as db:
@@ -275,17 +383,20 @@ class BacktestRepository:
             for bar in bars:
                 db.execute(
                     "INSERT INTO shared_daily_bars VALUES (?, ?, ?) "
-                    "ON CONFLICT(symbol, timestamp) DO UPDATE SET bar_json=excluded.bar_json",
+                    "ON CONFLICT(symbol, timestamp) "
+                    "DO UPDATE SET bar_json=excluded.bar_json",
                     (bar.symbol, bar.timestamp.isoformat(), _daily_bar_json(bar)),
                 )
             if bars:
                 db.execute(
-                    "INSERT OR IGNORE INTO shared_daily_history_ranges VALUES (?, ?, ?)",
+                    "INSERT OR IGNORE INTO shared_daily_history_ranges "
+                    "VALUES (?, ?, ?)",
                     (bars[0].symbol, start_date.isoformat(), end_date.isoformat()),
                 )
 
-    def get_shared_daily_history(self, symbol: str, start_date: date,
-                                 end_date: date) -> tuple[DailyBar, ...] | None:
+    def get_shared_daily_history(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> tuple[DailyBar, ...] | None:
         with self._connect() as db:
             covered = db.execute(
                 "SELECT 1 FROM shared_daily_history_ranges WHERE symbol=? "
@@ -297,16 +408,21 @@ class BacktestRepository:
             rows = db.execute(
                 "SELECT bar_json FROM shared_daily_bars WHERE symbol=? "
                 "AND timestamp>=? AND timestamp<? ORDER BY timestamp",
-                (symbol, start_date.isoformat(),
-                 datetime.combine(end_date, datetime.max.time()).isoformat()),
+                (
+                    symbol,
+                    start_date.isoformat(),
+                    datetime.combine(end_date, datetime.max.time()).isoformat(),
+                ),
             ).fetchall()
         return tuple(_daily_bar_from_json(row[0]) for row in rows)
 
     def cleanup_shared_history(self) -> int:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            count = (db.execute("SELECT count(*) FROM shared_bars").fetchone()[0]
-                     + db.execute("SELECT count(*) FROM shared_daily_bars").fetchone()[0])
+            count = (
+                db.execute("SELECT count(*) FROM shared_bars").fetchone()[0]
+                + db.execute("SELECT count(*) FROM shared_daily_bars").fetchone()[0]
+            )
             db.execute("DELETE FROM shared_bars")
             db.execute("DELETE FROM shared_daily_bars")
             db.execute("DELETE FROM shared_daily_history_ranges")
@@ -326,7 +442,8 @@ class BacktestRepository:
             else:
                 row = db.execute(
                     "SELECT result_json, bars_json FROM backtests "
-                    "JOIN minute_snapshots USING(snapshot_id) WHERE id=?", (run_id,)
+                    "JOIN minute_snapshots USING(snapshot_id) WHERE id=?",
+                    (run_id,),
                 ).fetchone()
         if row is None:
             return None
@@ -340,13 +457,17 @@ class BacktestRepository:
         return db
 
 
-
 def _daily_bar_json(bar: DailyBar) -> str:
-    return _json({
-        key: str(value) if isinstance(value, Decimal) else
-        value.isoformat() if isinstance(value, datetime) else value
-        for key, value in asdict(bar).items()
-    })
+    return _json(
+        {
+            key: str(value)
+            if isinstance(value, Decimal)
+            else value.isoformat()
+            if isinstance(value, datetime)
+            else value
+            for key, value in asdict(bar).items()
+        }
+    )
 
 
 def _daily_bar_from_json(content: str) -> DailyBar:
@@ -356,10 +477,21 @@ def _daily_bar_from_json(content: str) -> DailyBar:
             value[key] = Decimal(value[key])
     value["timestamp"] = datetime.fromisoformat(value["timestamp"])
     return DailyBar(**value)
+
+
 def _bar_json(bar: MinuteBar) -> str:
-    return _json({key: (str(value) if isinstance(value, Decimal) else
-                        value.isoformat() if isinstance(value, datetime) else value)
-                  for key, value in asdict(bar).items()})
+    return _json(
+        {
+            key: (
+                str(value)
+                if isinstance(value, Decimal)
+                else value.isoformat()
+                if isinstance(value, datetime)
+                else value
+            )
+            for key, value in asdict(bar).items()
+        }
+    )
 
 
 def _bar_from_json(content: str) -> MinuteBar:
@@ -376,7 +508,9 @@ def _bars_json(bars: tuple[MinuteBar, ...]) -> str:
 
 
 def _json(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=_json_default)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), default=_json_default
+    )
 
 
 def _json_default(value: object) -> str:

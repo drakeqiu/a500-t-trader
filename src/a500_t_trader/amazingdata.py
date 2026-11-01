@@ -220,16 +220,31 @@ class AmazingDataProvider:
             low = _required_decimal(row, "low")
             close = _required_decimal(row, "close")
             volume = _required_int(row, "volume")
-            if min(opening, high, low, close) <= 0 or low > min(opening, close) or high < max(opening, close) or low > high:
+            if (
+                min(opening, high, low, close) <= 0
+                or low > min(opening, close)
+                or high < max(opening, close)
+                or low > high
+            ):
                 raise ValueError("invalid daily OHLC values")
             if volume < 0:
                 raise ValueError("daily volume cannot be negative")
             amount = _optional_decimal(row.get("amount"))
             if amount is not None and amount < 0:
                 raise ValueError("daily amount cannot be negative")
-            bars.append(DailyBar(
-                code, timestamp, opening, high, low, close, volume, amount, "AmazingData"
-            ))
+            bars.append(
+                DailyBar(
+                    code,
+                    timestamp,
+                    opening,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    amount,
+                    "AmazingData",
+                )
+            )
             seen.add(day)
             previous = day
         return tuple(bars)

@@ -20,9 +20,15 @@ class Data:
 def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding():
     plan = generate_plan(
         PlanConfig((EtfRule("510300", None, Decimal("4.10"), Decimal(0), 500),)),
-        AccountSnapshot(NOW, {"510300": 1200}, {"510300": Decimal("3.70")},
-                        {"510300": 600}, Decimal("1000")),
-        Data(), as_of=NOW,
+        AccountSnapshot(
+            NOW,
+            {"510300": 1200},
+            {"510300": Decimal("3.70")},
+            {"510300": 600},
+            Decimal("1000"),
+        ),
+        Data(),
+        as_of=NOW,
     )
 
     suggestion = plan.suggestions[0]
@@ -34,7 +40,9 @@ def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding():
 def test_missing_account_position_fields_veto_tradable_quantity():
     plan = generate_plan(
         PlanConfig((EtfRule("510300", Decimal("4.30"), None, Decimal("1000"), 0),)),
-        AccountSnapshot(NOW, {}, {}, {}, Decimal("1000")), Data(), as_of=NOW,
+        AccountSnapshot(NOW, {}, {}, {}, Decimal("1000")),
+        Data(),
+        as_of=NOW,
     )
 
     assert plan.suggestions[0].direction == "none"

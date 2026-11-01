@@ -8,7 +8,6 @@ import pytest
 from a500_t_trader.daily_indicators import calculate_indicators
 from a500_t_trader.market_data import DailyBar
 
-
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -17,7 +16,11 @@ def _bars(closes: list[str]) -> tuple[DailyBar, ...]:
         DailyBar(
             "510300",
             datetime(2026, 1, 1, tzinfo=SHANGHAI) + timedelta(days=index),
-            Decimal(close), Decimal(close), Decimal(close), Decimal(close), 100,
+            Decimal(close),
+            Decimal(close),
+            Decimal(close),
+            Decimal(close),
+            100,
         )
         for index, close in enumerate(closes)
     )
@@ -47,13 +50,18 @@ def test_daily_indicators_cli_returns_calculated_values(tmp_path, capsys):
             assert (start_date, end_date) == (date(2026, 1, 1), date(2026, 1, 21))
             return _bars([str(value) for value in range(1, 22)])
 
-    from a500_t_trader.__main__ import main
-
     database = tmp_path / "history.sqlite3"
     args = [
-        "daily-indicators", "--symbol", "510300",
-        "--start-date", "2026-01-01", "--end-date", "2026-01-21",
-        "--database", str(database), "--confirm-history-persistence-permitted",
+        "daily-indicators",
+        "--symbol",
+        "510300",
+        "--start-date",
+        "2026-01-01",
+        "--end-date",
+        "2026-01-21",
+        "--database",
+        str(database),
+        "--confirm-history-persistence-permitted",
     ]
     assert main(args, market_data=DailyData()) == 0
     output = json.loads(capsys.readouterr().out)
