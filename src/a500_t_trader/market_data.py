@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
+
+from .trading_calendar import SessionState, TradingCalendarService
 
 DEFAULT_SYMBOL = "563360"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -120,9 +121,15 @@ class MarketDataSource(Protocol):
 class MarketDataService:
     """Unified request/response market data API over an injected source."""
 
-    def __init__(self, source: MarketDataSource, default_symbol: str = DEFAULT_SYMBOL) -> None:
+    def __init__(
+        self,
+        source: MarketDataSource,
+        default_symbol: str = DEFAULT_SYMBOL,
+        calendar: TradingCalendarService | None = None,
+    ) -> None:
         self._source = source
         self._default_symbol = normalize_symbol(default_symbol)
+        self._calendar = calendar if calendar is not None else TradingCalendarService()
 
     def get_snapshot(self, symbol: str | None = None) -> Snapshot | None:
         return self._source.get_snapshot(self._symbol(symbol))
@@ -136,6 +143,11 @@ class MarketDataService:
 
     def get_trades(self, symbol: str | None = None) -> tuple[Trade, ...]:
         return self._source.get_trades(self._symbol(symbol))
+
+    def session_status(
+        self, session_date: date | None = None
+    ) -> tuple[SessionState, bool]:
+        return self._calendar.session_status(session_date)
 
     def _symbol(self, symbol: str | None) -> str:
         return self._default_symbol if symbol is None else normalize_symbol(symbol)

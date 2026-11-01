@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,8 @@ from a500_t_trader.market_data import (
     Snapshot,
     Trade,
 )
+from a500_t_trader.trading_calendar import SessionState, TradingCalendarService
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -42,6 +44,16 @@ class DeterministicSource:
         return self.trades
 
 
+class FixedCalendar:
+    def get_calendar(self, market: str = "SH") -> tuple[date, ...]:
+        assert market == "SH"
+        return (date(2026, 11, 2),)
+
+
+def _service(source: DeterministicSource) -> MarketDataService:
+    return MarketDataService(source, calendar=TradingCalendarService(FixedCalendar()))
+
+
 def test_service_normalizes_requested_symbol_and_preserves_optional_snapshot_fields() -> None:
     source = DeterministicSource()
     expected_time = datetime(2026, 11, 1, 9, 30, tzinfo=SHANGHAI)
@@ -51,7 +63,7 @@ def test_service_normalizes_requested_symbol_and_preserves_optional_snapshot_fie
         received_at=datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc),
         last_price=Decimal("1.2345"),
     )
-    service = MarketDataService(source)
+    service = _service(source)
 
     actual = service.get_snapshot("sh.563360")
 
@@ -100,8 +112,8 @@ def test_service_preserves_units_precision_and_optional_bar_and_trade_fields() -
     source.bars = (bar,)
     source.trades = (trade,)
 
-    assert MarketDataService(source).get_intraday_bars() == (bar,)
-    assert MarketDataService(source).get_trades() == (trade,)
+    assert _service(source).get_intraday_bars() == (bar,)
+    assert _service(source).get_trades() == (trade,)
     assert bar.interval_minutes == 1
     assert bar.is_completed is False
     assert bar.amount == Decimal("1488.00")
@@ -159,8 +171,14 @@ def test_models_reject_naive_timestamps_and_unsupported_bar_intervals() -> None:
 
 def test_unavailable_capability_is_distinct_from_empty_result() -> None:
     source = DeterministicSource()
-    service = MarketDataService(source)
+    service = _service(source)
     source.unavailable.add("trades")
 
     with pytest.raises(CapabilityUnavailableError, match="trades unavailable"):
         service.get_trades()
+
+
+def test_market_data_service_exposes_injected_calendar_status() -> None:
+    service = _service(DeterministicSource())
+
+    assert service.session_status(date(2026, 11, 2)) == (SessionState.TRADING, False)
