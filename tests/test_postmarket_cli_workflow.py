@@ -92,4 +92,5 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(tmp_path, capsy
     review = json.loads(capsys.readouterr().out)
     assert review["missing_data"]
     assert any("trigger" in item.lower() for item in review["missing_data"])
+    assert any("account snapshot" in item.lower() for item in review["missing_data"])
     assert any("market" in item.lower() for item in review["missing_data"])

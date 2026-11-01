@@ -85,6 +85,11 @@ def generate_review(
                 missing.append("saved account snapshot unavailable or invalid")
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         missing.append(f"saved pre-market plan unavailable: {error}")
+    if (
+        account_record.get("status") == "not saved"
+        and account_record.get("source") == "unavailable"
+    ):
+        missing.append("account snapshot unavailable in the saved plan")
 
     recommendations: dict[str, object]
     if plan_record is None:
