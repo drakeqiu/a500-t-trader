@@ -13,13 +13,21 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 pytestmark = pytest.mark.live
 
 
-def test_live_provider_connects() -> None:
+@pytest.fixture(scope="module")
+def live_market_data_service() -> MarketDataService:
+    """Share one authenticated provider across live market-data checks."""
+    return MarketDataService(create_provider_from_env())
+
+
+def test_live_provider_connects(live_market_data_service: MarketDataService) -> None:
     """Provider construction performs a real login and must not be skipped."""
-    create_provider_from_env()
+    assert live_market_data_service is not None
 
 
-def test_live_snapshot_for_563360() -> None:
-    service = MarketDataService(create_provider_from_env())
+def test_live_snapshot_for_563360(
+    live_market_data_service: MarketDataService,
+) -> None:
+    service = live_market_data_service
 
     snapshot = service.get_snapshot("563360")
 
@@ -29,10 +37,10 @@ def test_live_snapshot_for_563360() -> None:
     assert snapshot.source == "AmazingData"
 
 
-def test_live_minute_bars_for_563360() -> None:
-    service = MarketDataService(create_provider_from_env())
-    today = datetime.now(SHANGHAI).date()
-
+def test_live_minute_bars_for_563360(
+    live_market_data_service: MarketDataService,
+) -> None:
+    service = live_market_data_service
     bars = service.get_history_bars(
         "563360", today - timedelta(days=10), today, interval_minutes=1
     )
