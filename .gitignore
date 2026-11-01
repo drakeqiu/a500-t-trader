@@ -32,3 +32,6 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+
+# local dependency packages
+wheels/
