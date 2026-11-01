@@ -23,6 +23,64 @@ uv run python -m a500_t_trader
 
 The smoke test is run with `uv run pytest`.
 
+## AmazingData market-data queries
+
+`AmazingDataProvider` logs in using AmazingData's internet API mode and exposes
+request/response snapshot and bar queries through `MarketDataService`:
+
+Create a local `.env` file containing `AMAZINGDATA_USERNAME`,
+`AMAZINGDATA_PASSWORD`, `AMAZINGDATA_HOST`, and `AMAZINGDATA_PORT`. It is read
+without printing its contents; environment variables override values from the
+file. Startup also verifies that `$HOME/mdga_file` is writable before
+initializing the SDK.
+
+```python
+from datetime import date
+
+from a500_t_trader import create_provider_from_env
+from a500_t_trader.market_data import MarketDataService
+
+provider = create_provider_from_env()
+market_data = MarketDataService(provider)
+
+snapshot = market_data.get_snapshot()
+today_bars = market_data.get_intraday_bars(interval_minutes=1)
+history = market_data.get_history_bars(
+    "563360", date(2026, 11, 2), date(2026, 11, 4), interval_minutes=5
+)
+```
+
+These methods issue on-demand queries; they are not subscriptions or push
+streams. Empty source results return `None` for a missing snapshot or an empty
+tuple for bars. An unavailable or unauthorized capability raises
+`CapabilityUnavailableError`, rather than being reported as empty data. Returned
+bars retain source-reported gaps and identify an unfinished current bar with
+`is_completed=False`.
+
+## tgw push subscriptions
+
+`TgwPushProvider` adapts tgw snapshot, one-minute bar, and tick-execution push
+callbacks to the normalized `Snapshot`, `MinuteBar`, and `Trade` models:
+
+```python
+from a500_t_trader import TgwPushProvider
+
+push = TgwPushProvider(tgw)
+snapshots = push.subscribe("563360", "snapshot", buffer_size=8)
+try:
+    latest = next(snapshots)
+finally:
+    snapshots.close()
+    push.close()
+```
+
+Pass `callback=...` to `subscribe` for callback consumption; otherwise the
+returned subscription is an iterator. Snapshot and bar iterator buffers
+coalesce to the latest update when full. Tick overflow raises
+`TickOverflowError` and terminates that subscription. Close subscriptions when
+finished and close the provider to cancel remaining subscriptions and release
+the tgw connection.
+
 ## Git commits
 
 This repository uses a repository-local Conventional Commits template. Git loads
