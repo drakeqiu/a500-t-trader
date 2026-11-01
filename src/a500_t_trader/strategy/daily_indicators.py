@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .market_data import DailyBar
+from ..market_data import DailyBar
 
 
 @dataclass(frozen=True, slots=True)

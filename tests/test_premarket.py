@@ -5,10 +5,15 @@ from zoneinfo import ZoneInfo
 
 from _pytest.capture import CaptureFixture
 
-from a500_t_trader.__main__ import main
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import Snapshot
-from a500_t_trader.premarket import AccountSnapshot, EtfRule, PlanConfig, generate_plan
-from a500_t_trader.trading_calendar import SessionState
+from a500_t_trader.market_data.trading_calendar import SessionState
+from a500_t_trader.strategy.premarket import (
+    AccountSnapshot,
+    EtfRule,
+    PlanConfig,
+    generate_plan,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 10, 30, 8, 30, tzinfo=SHANGHAI)

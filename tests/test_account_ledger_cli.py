@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from a500_t_trader.__main__ import main
+from a500_t_trader.cli.main import main
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 

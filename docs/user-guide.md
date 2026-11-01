@@ -33,7 +33,7 @@ AMAZINGDATA_PORT=12345
 启动前，程序会确保 `$HOME/mdga_file` 存在且可写，供 SDK 使用。通过以下入口加载配置并创建真实的 AmazingData provider：
 
 ```python
-from a500_t_trader import create_provider_from_env
+from a500_t_trader.cli.runtime import create_provider_from_env
 
 provider = create_provider_from_env()
 ```
@@ -55,7 +55,7 @@ provider = create_provider_from_env()
 ```python
 from datetime import date
 
-from a500_t_trader import create_provider_from_env
+from a500_t_trader.cli.runtime import create_provider_from_env
 from a500_t_trader.market_data import MarketDataService
 
 provider = create_provider_from_env()
@@ -133,7 +133,7 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 以下示例以迭代器接收 tick 推送。`next(subscription)` 会等待事件；实际应用可在迭代中持续处理。无论正常退出还是异常，都要关闭订阅和 provider：
 
 ```python
-from a500_t_trader import TgwPushProvider
+from a500_t_trader.market_data.providers.tgw_push import TgwPushProvider
 
 # connected_tgw 必须由调用方按其 tgw 环境完成初始化和连接。
 push = TgwPushProvider(connected_tgw)
@@ -155,7 +155,7 @@ finally:
 `session_status()` 返回 `(state, stale)`，可选传入待查询日期；默认查询当前上海日期：
 
 ```python
-from a500_t_trader.trading_calendar import SessionState
+from a500_t_trader.market_data.trading_calendar import SessionState
 
 state, stale = market_data.session_status()
 if state is SessionState.UNKNOWN:

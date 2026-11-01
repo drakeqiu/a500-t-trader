@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd  # type: ignore[import-untyped]
 import pytest
 
-from a500_t_trader.amazingdata import AmazingDataProvider
 from a500_t_trader.market_data import CapabilityUnavailableError, MarketDataService
+from a500_t_trader.market_data.providers.amazingdata import AmazingDataProvider
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 

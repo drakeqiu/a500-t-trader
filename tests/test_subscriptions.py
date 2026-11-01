@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 
 from a500_t_trader.market_data import MinuteBar, Snapshot, Trade
-from a500_t_trader.push_provider import (
+from a500_t_trader.market_data.providers.tgw_push import (
     SHANGHAI,
     Subscription,
     TgwPushProvider,
@@ -44,7 +44,7 @@ class FakeTgw:
 def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
     from types import SimpleNamespace
 
-    from a500_t_trader.push_provider import TgwPushProvider
+    from a500_t_trader.market_data.providers.tgw_push import TgwPushProvider
 
     api = FakeTgw()
     provider = TgwPushProvider(

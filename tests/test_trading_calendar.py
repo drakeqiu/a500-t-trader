@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from a500_t_trader.trading_calendar import (
+from a500_t_trader.market_data.trading_calendar import (
     AmazingDataCalendar,
     SessionState,
     TradingCalendarService,

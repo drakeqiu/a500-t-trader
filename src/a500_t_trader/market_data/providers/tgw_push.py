@@ -8,7 +8,7 @@ from threading import Condition, RLock
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .market_data import MinuteBar, Snapshot, Trade, normalize_symbol
+from .. import MinuteBar, Snapshot, Trade, normalize_symbol
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 

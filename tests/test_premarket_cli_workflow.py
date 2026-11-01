@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from a500_t_trader.__main__ import main
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import Snapshot
-from a500_t_trader.trading_calendar import SessionState
+from a500_t_trader.market_data.trading_calendar import SessionState
 
 NOW = datetime(2026, 10, 30, 8, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
