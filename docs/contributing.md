@@ -23,7 +23,6 @@ npm ci
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run pymarkdown scan --respect-gitignore --recurse .
 uv run yamllint --strict .github
 npm run format:check
 npx --yes markdownlint-cli2
