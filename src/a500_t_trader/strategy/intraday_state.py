@@ -65,6 +65,7 @@ class StrategyFill:
 
 _SETTLED_ORDER_STATES = frozenset({"none", "filled", "cancelled", "rejected"})
 
+
 class IntradayStrategyStateStore:
     """Persist advisory strategy state without treating it as account truth."""
 
@@ -131,12 +132,15 @@ class IntradayStrategyStateStore:
                     grid_layer INTEGER NOT NULL,
                     grid_round INTEGER NOT NULL,
                     side TEXT NOT NULL CHECK(side IN ('buy','sell')),
-                    PRIMARY KEY(symbol,session_date,grid_version,grid_layer,grid_round,side)
+                    PRIMARY KEY(
+                        symbol,session_date,grid_version,grid_layer,grid_round,side
+                    )
                 );
                 """
             )
             state_columns = {
-                row[1] for row in db.execute("PRAGMA table_info(intraday_strategy_state)")
+                row[1]
+                for row in db.execute("PRAGMA table_info(intraday_strategy_state)")
             }
             for name in ("grid_layer", "grid_round"):
                 if name not in state_columns:
@@ -145,7 +149,8 @@ class IntradayStrategyStateStore:
                         "INTEGER NOT NULL DEFAULT 0"
                     )
             recommendation_columns = {
-                row[1] for row in db.execute("PRAGMA table_info(strategy_recommendations)")
+                row[1]
+                for row in db.execute("PRAGMA table_info(strategy_recommendations)")
             }
             for name in ("grid_layer", "grid_round"):
                 if name not in recommendation_columns:
@@ -175,12 +180,18 @@ class IntradayStrategyStateStore:
                     daily_add_count=excluded.daily_add_count,
                     daily_turnover=excluded.daily_turnover""",
                 (
-                    state.symbol, state.session_date.isoformat(), state.grid_version,
-                    state.grid_layer, state.grid_round, str(state.spacing),
+                    state.symbol,
+                    state.session_date.isoformat(),
+                    state.grid_version,
+                    state.grid_layer,
+                    state.grid_round,
+                    str(state.spacing),
                     state.same_direction_bars,
                     _timestamp(state.cooldown_until) if state.cooldown_until else None,
-                    state.reset_anchor_crossings, state.daily_trade_count,
-                    state.daily_add_count, str(state.daily_turnover),
+                    state.reset_anchor_crossings,
+                    state.daily_trade_count,
+                    state.daily_add_count,
+                    str(state.daily_turnover),
                 ),
             )
 
@@ -196,9 +207,18 @@ class IntradayStrategyStateStore:
         if row is None:
             return None
         return StrategyState(
-            row[0], date.fromisoformat(row[1]), row[2], row[3], row[4],
-            Decimal(row[5]), row[6], datetime.fromisoformat(row[7]) if row[7] else None,
-            row[8], row[9], row[10], Decimal(row[11]),
+            row[0],
+            date.fromisoformat(row[1]),
+            row[2],
+            row[3],
+            row[4],
+            Decimal(row[5]),
+            row[6],
+            datetime.fromisoformat(row[7]) if row[7] else None,
+            row[8],
+            row[9],
+            row[10],
+            Decimal(row[11]),
         )
 
     def record_initial_holdings(self, holdings: InitialHoldings) -> None:
@@ -228,11 +248,13 @@ class IntradayStrategyStateStore:
             return None
         values = json.loads(row[0])
         return InitialHoldings(
-            values["symbol"], datetime.fromisoformat(values["as_of"]),
-            values["protected_floor"], Decimal(values["cost_basis"]),
-            values["total_quantity"], values["sellable_quantity"],
+            values["symbol"],
+            datetime.fromisoformat(values["as_of"]),
+            values["protected_floor"],
+            Decimal(values["cost_basis"]),
+            values["total_quantity"],
+            values["sellable_quantity"],
         )
-
 
     def check_constraints(
         self,
@@ -254,12 +276,19 @@ class IntradayStrategyStateStore:
         _validate_side(side)
         _validate_timestamp(now, "constraint timestamp")
         if (
-            not symbol.strip() or grid_version < 1 or grid_layer < 0 or grid_round < 0
-            or max_daily_trades < 1 or max_daily_adds < 1
-            or not max_daily_turnover.is_finite() or max_daily_turnover <= 0
+            not symbol.strip()
+            or grid_version < 1
+            or grid_layer < 0
+            or grid_round < 0
+            or max_daily_trades < 1
+            or max_daily_adds < 1
+            or not max_daily_turnover.is_finite()
+            or max_daily_turnover <= 0
             or min_same_direction_bars < 0
         ):
-            raise ValueError("explicit positive strategy limits and grid coordinates are required")
+            raise ValueError(
+                "explicit positive strategy limits and grid coordinates are required"
+            )
         reasons: list[str] = []
         if pending_order_state not in _SETTLED_ORDER_STATES:
             reasons.append("order state unavailable or pending")
@@ -274,11 +303,21 @@ class IntradayStrategyStateStore:
                 """SELECT 1 FROM consumed_grid_slots
                 WHERE symbol=? AND session_date=? AND grid_version=?
                     AND grid_layer=? AND grid_round=? AND side=?""",
-                (symbol, session_date.isoformat(), grid_version, grid_layer, grid_round, side),
+                (
+                    symbol,
+                    session_date.isoformat(),
+                    grid_version,
+                    grid_layer,
+                    grid_round,
+                    side,
+                ),
             ).fetchone()
         if used is not None:
             reasons.append("grid slot already used")
-        if state.cooldown_until is not None and now.astimezone(state.cooldown_until.tzinfo) < state.cooldown_until:
+        if (
+            state.cooldown_until is not None
+            and now.astimezone(state.cooldown_until.tzinfo) < state.cooldown_until
+        ):
             reasons.append("direction cooldown is active")
         if state.same_direction_bars < min_same_direction_bars:
             reasons.append("same-direction bar interval not met")
@@ -300,7 +339,10 @@ class IntradayStrategyStateStore:
             or recommendation.grid_layer < 0
             or recommendation.grid_round < 0
         ):
-            raise ValueError("recommendation id, symbol and non-negative grid coordinates are required")
+            raise ValueError(
+                "recommendation id, symbol and non-negative grid coordinates "
+                "are required"
+            )
         with sqlite3.connect(self.path) as db:
             db.execute(
                 """INSERT OR IGNORE INTO strategy_recommendations (
@@ -318,8 +360,13 @@ class IntradayStrategyStateStore:
             )
 
     def consume_grid_slot(
-        self, symbol: str, session_date: date, grid_version: int,
-        grid_layer: int, grid_round: int, side: str,
+        self,
+        symbol: str,
+        session_date: date,
+        grid_version: int,
+        grid_layer: int,
+        grid_round: int,
+        side: str,
     ) -> bool:
         """Persist a once-per-layer/round use; return false if already consumed."""
         _validate_side(side)
@@ -328,7 +375,14 @@ class IntradayStrategyStateStore:
         with sqlite3.connect(self.path) as db:
             cursor = db.execute(
                 "INSERT OR IGNORE INTO consumed_grid_slots VALUES(?,?,?,?,?,?)",
-                (symbol, session_date.isoformat(), grid_version, grid_layer, grid_round, side),
+                (
+                    symbol,
+                    session_date.isoformat(),
+                    grid_version,
+                    grid_layer,
+                    grid_round,
+                    side,
+                ),
             )
             return cursor.rowcount == 1
 
@@ -351,10 +405,15 @@ class IntradayStrategyStateStore:
         _validate_side(fill.side)
         _validate_timestamp(fill.timestamp, "fill timestamp")
         if (
-            not fill.fill_id.strip() or not fill.trade_pair_id.strip()
-            or fill.quantity <= 0 or not fill.price.is_finite() or fill.price <= 0
+            not fill.fill_id.strip()
+            or not fill.trade_pair_id.strip()
+            or fill.quantity <= 0
+            or not fill.price.is_finite()
+            or fill.price <= 0
         ):
-            raise ValueError("fill id, pair id, positive quantity and price are required")
+            raise ValueError(
+                "fill id, pair id, positive quantity and price are required"
+            )
         session_date = fill.timestamp.astimezone(ZoneInfo("Asia/Shanghai")).date()
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA foreign_keys=ON")
@@ -370,44 +429,75 @@ class IntradayStrategyStateStore:
                 raise ValueError("fill side must match its recommendation")
             consumed = db.execute(
                 "INSERT OR IGNORE INTO consumed_grid_slots VALUES(?,?,?,?,?,?)",
-                (symbol, session_date.isoformat(), grid_version, grid_layer, grid_round, side),
+                (
+                    symbol,
+                    session_date.isoformat(),
+                    grid_version,
+                    grid_layer,
+                    grid_round,
+                    side,
+                ),
             )
             if consumed.rowcount != 1:
                 return False
             pair = db.execute(
-                "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,buy_quantity,sell_quantity "
+                "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,buy_quantity,"
+                "sell_quantity "
                 "FROM strategy_trade_pairs WHERE trade_pair_id=?",
                 (fill.trade_pair_id,),
             ).fetchone()
             if pair is None:
                 if fill.side == "buy":
                     db.execute(
-                        "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,NULL,?,0,'open')",
-                        (fill.trade_pair_id, symbol, grid_version, fill.fill_id, fill.quantity),
+                        "INSERT INTO strategy_trade_pairs "
+                        "VALUES(?,?,?,?,NULL,?,0,'open')",
+                        (
+                            fill.trade_pair_id,
+                            symbol,
+                            grid_version,
+                            fill.fill_id,
+                            fill.quantity,
+                        ),
                     )
                 else:
                     holdings_row = db.execute(
-                        "SELECT record_json FROM strategy_initial_holdings WHERE symbol=?",
+                        "SELECT record_json FROM strategy_initial_holdings "
+                        "WHERE symbol=?",
                         (symbol,),
                     ).fetchone()
                     if holdings_row is None:
-                        raise ValueError("sell-first pair requires recorded initial sellable inventory")
+                        raise ValueError(
+                            "sell-first pair requires recorded initial "
+                            "sellable inventory"
+                        )
                     sellable_quantity = json.loads(holdings_row[0])["sellable_quantity"]
                     allocated = db.execute(
-                        "SELECT COALESCE(SUM(p.sell_quantity),0) FROM strategy_trade_pairs p "
+                        "SELECT COALESCE(SUM(p.sell_quantity),0) "
+                        "FROM strategy_trade_pairs p "
                         "WHERE p.symbol=? AND EXISTS ("
                         "SELECT 1 FROM strategy_actual_fills first_fill "
-                        "WHERE first_fill.trade_pair_id=p.trade_pair_id AND first_fill.side='sell' "
+                        "WHERE first_fill.trade_pair_id=p.trade_pair_id "
+                        "AND first_fill.side='sell' "
                         "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
                         "WHERE earlier.trade_pair_id=p.trade_pair_id "
                         "AND earlier.rowid<first_fill.rowid))",
                         (symbol,),
                     ).fetchone()[0]
                     if allocated + fill.quantity > sellable_quantity:
-                        raise ValueError("sell fill exceeds unallocated initial sellable inventory")
+                        raise ValueError(
+                            "sell fill exceeds unallocated initial sellable inventory"
+                        )
                     db.execute(
                         "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,?,?,?,'open')",
-                        (fill.trade_pair_id, symbol, grid_version, None, fill.fill_id, 0, fill.quantity),
+                        (
+                            fill.trade_pair_id,
+                            symbol,
+                            grid_version,
+                            None,
+                            fill.fill_id,
+                            0,
+                            fill.quantity,
+                        ),
                     )
             else:
                 pair_symbol, _, buy_fill, sell_fill, buy_qty, sell_qty = pair
@@ -416,54 +506,97 @@ class IntradayStrategyStateStore:
                 if fill.side == "buy":
                     if sell_fill is None and buy_fill is not None:
                         db.execute(
-                            "UPDATE strategy_trade_pairs SET buy_quantity=buy_quantity+? "
-                            "WHERE trade_pair_id=?", (fill.quantity, fill.trade_pair_id)
+                            "UPDATE strategy_trade_pairs "
+                            "SET buy_quantity=buy_quantity+? "
+                            "WHERE trade_pair_id=?",
+                            (fill.quantity, fill.trade_pair_id),
                         )
                     else:
                         if buy_qty + fill.quantity > sell_qty:
-                            raise ValueError("buy fill exceeds outstanding linked strategy sell quantity")
+                            raise ValueError(
+                                "buy fill exceeds outstanding linked "
+                                "strategy sell quantity"
+                            )
                         db.execute(
-                            "UPDATE strategy_trade_pairs SET buy_fill_id=COALESCE(buy_fill_id,?),"
-                            "buy_quantity=buy_quantity+?,status=CASE WHEN buy_quantity+?=sell_quantity "
+                            "UPDATE strategy_trade_pairs "
+                            "SET buy_fill_id=COALESCE(buy_fill_id,?),"
+                            "buy_quantity=buy_quantity+?,"
+                            "status=CASE WHEN buy_quantity+?=sell_quantity "
                             "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=?",
-                            (fill.fill_id, fill.quantity, fill.quantity, fill.trade_pair_id)
+                            (
+                                fill.fill_id,
+                                fill.quantity,
+                                fill.quantity,
+                                fill.trade_pair_id,
+                            ),
                         )
                 else:
                     if buy_fill is not None:
                         if buy_qty < sell_qty + fill.quantity:
-                            raise ValueError("sell fill exceeds linked strategy buy quantity")
+                            raise ValueError(
+                                "sell fill exceeds linked strategy buy quantity"
+                            )
                     else:
                         if buy_qty > 0:
-                            raise ValueError("cannot add a sell fill after the pair has begun closing")
+                            raise ValueError(
+                                "cannot add a sell fill after the pair has begun "
+                                "closing"
+                            )
                         holdings_row = db.execute(
-                            "SELECT record_json FROM strategy_initial_holdings WHERE symbol=?",
+                            "SELECT record_json FROM strategy_initial_holdings "
+                            "WHERE symbol=?",
                             (symbol,),
                         ).fetchone()
                         if holdings_row is None:
-                            raise ValueError("sell-first pair requires recorded initial sellable inventory")
-                        sellable_quantity = json.loads(holdings_row[0])["sellable_quantity"]
+                            raise ValueError(
+                                "sell-first pair requires recorded initial "
+                                "sellable inventory"
+                            )
+                        sellable_quantity = json.loads(holdings_row[0])[
+                            "sellable_quantity"
+                        ]
                         allocated = db.execute(
-                            "SELECT COALESCE(SUM(p.sell_quantity),0) FROM strategy_trade_pairs p "
+                            "SELECT COALESCE(SUM(p.sell_quantity),0) "
+                            "FROM strategy_trade_pairs p "
                             "WHERE p.symbol=? AND p.trade_pair_id<>? AND EXISTS ("
                             "SELECT 1 FROM strategy_actual_fills first_fill "
-                            "WHERE first_fill.trade_pair_id=p.trade_pair_id AND first_fill.side='sell' "
-                            "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
+                            "WHERE first_fill.trade_pair_id=p.trade_pair_id "
+                            "AND first_fill.side='sell' "
+                            "AND NOT EXISTS (SELECT 1 FROM "
+                            "strategy_actual_fills earlier "
                             "WHERE earlier.trade_pair_id=p.trade_pair_id "
                             "AND earlier.rowid<first_fill.rowid))",
                             (symbol, fill.trade_pair_id),
                         ).fetchone()[0]
                         if allocated + sell_qty + fill.quantity > sellable_quantity:
-                            raise ValueError("sell fill exceeds unallocated initial sellable inventory")
+                            raise ValueError(
+                                "sell fill exceeds unallocated initial "
+                                "sellable inventory"
+                            )
                     db.execute(
-                        "UPDATE strategy_trade_pairs SET sell_fill_id=COALESCE(sell_fill_id,?),"
-                        "sell_quantity=sell_quantity+?,status=CASE WHEN buy_quantity=sell_quantity+? "
+                        "UPDATE strategy_trade_pairs "
+                        "SET sell_fill_id=COALESCE(sell_fill_id,?),"
+                        "sell_quantity=sell_quantity+?,"
+                        "status=CASE WHEN buy_quantity=sell_quantity+? "
                         "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=?",
-                        (fill.fill_id, fill.quantity, fill.quantity, fill.trade_pair_id),
+                        (
+                            fill.fill_id,
+                            fill.quantity,
+                            fill.quantity,
+                            fill.trade_pair_id,
+                        ),
                     )
             db.execute(
                 "INSERT INTO strategy_actual_fills VALUES(?,?,?,?,?,?,?)",
-                (fill.fill_id, fill.recommendation_id, fill.trade_pair_id, fill.side,
-                 fill.quantity, str(fill.price), _timestamp(fill.timestamp)),
+                (
+                    fill.fill_id,
+                    fill.recommendation_id,
+                    fill.trade_pair_id,
+                    fill.side,
+                    fill.quantity,
+                    str(fill.price),
+                    _timestamp(fill.timestamp),
+                ),
             )
             existing = db.execute(
                 "SELECT daily_turnover FROM intraday_strategy_state "
@@ -478,8 +611,13 @@ class IntradayStrategyStateStore:
                         cooldown_until=?,daily_trade_count=daily_trade_count+1,
                         daily_add_count=daily_add_count+?,daily_turnover=?
                     WHERE symbol=? AND session_date=?""",
-                    (_timestamp(cooldown_until), int(fill.side == "buy"), str(value),
-                     symbol, session_date.isoformat()),
+                    (
+                        _timestamp(cooldown_until),
+                        int(fill.side == "buy"),
+                        str(value),
+                        symbol,
+                        session_date.isoformat(),
+                    ),
                 )
 
         return True
@@ -488,7 +626,8 @@ class IntradayStrategyStateStore:
         with sqlite3.connect(self.path) as db:
             db.row_factory = sqlite3.Row
             rows = db.execute(
-                "SELECT trade_pair_id,symbol,grid_version,buy_fill_id,sell_fill_id,status "
+                "SELECT trade_pair_id,symbol,grid_version,buy_fill_id,"
+                "sell_fill_id,status "
                 "FROM strategy_trade_pairs ORDER BY trade_pair_id"
             )
             return [dict(row) for row in rows]
@@ -509,12 +648,21 @@ class IntradayStrategyStateStore:
 
 
 def _validate_state(state: StrategyState) -> None:
-    if not state.symbol.strip() or state.grid_version < 1 or state.grid_layer < 0 or state.grid_round < 0:
+    if (
+        not state.symbol.strip()
+        or state.grid_version < 1
+        or state.grid_layer < 0
+        or state.grid_round < 0
+    ):
         raise ValueError("symbol and non-negative grid coordinates are required")
     if state.spacing <= 0 or not state.spacing.is_finite() or state.daily_turnover < 0:
         raise ValueError("spacing must be positive and turnover non-negative")
-    counters = (state.same_direction_bars, state.reset_anchor_crossings,
-                state.daily_trade_count, state.daily_add_count)
+    counters = (
+        state.same_direction_bars,
+        state.reset_anchor_crossings,
+        state.daily_trade_count,
+        state.daily_add_count,
+    )
     if any(value < 0 for value in counters):
         raise ValueError("strategy counters must be non-negative")
     if state.cooldown_until is not None:
@@ -523,11 +671,15 @@ def _validate_state(state: StrategyState) -> None:
 
 def _validate_holdings(holdings: InitialHoldings) -> None:
     _validate_timestamp(holdings.as_of, "holdings timestamp")
-    if (not holdings.symbol.strip() or holdings.protected_floor < 0
-            or holdings.total_quantity < holdings.protected_floor
-            or holdings.sellable_quantity < 0
-            or holdings.sellable_quantity > holdings.total_quantity
-            or not holdings.cost_basis.is_finite() or holdings.cost_basis < 0):
+    if (
+        not holdings.symbol.strip()
+        or holdings.protected_floor < 0
+        or holdings.total_quantity < holdings.protected_floor
+        or holdings.sellable_quantity < 0
+        or holdings.sellable_quantity > holdings.total_quantity
+        or not holdings.cost_basis.is_finite()
+        or holdings.cost_basis < 0
+    ):
         raise ValueError("initial holding quantities and cost basis are inconsistent")
 
 

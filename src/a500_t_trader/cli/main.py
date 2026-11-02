@@ -197,7 +197,9 @@ def main(
     strategy = commands.add_parser(
         "intraday-strategy", help="evaluate user-supplied intraday strategy inputs"
     )
-    strategy.add_argument("--config", required=True, help="explicit V1 strategy input JSON")
+    strategy.add_argument(
+        "--config", required=True, help="explicit V1 strategy input JSON"
+    )
     strategy.add_argument("--bars", required=True, help="minute bars JSON input")
     strategy.add_argument("--as-of", required=True, type=datetime.fromisoformat)
     strategy.add_argument("--output", help="export the exact structured result as JSON")
@@ -214,26 +216,35 @@ def main(
                 if not isinstance(item, dict):
                     raise ValueError("each bar must be a JSON object")
                 bar = MinuteBar(
-                    item["symbol"], datetime.fromisoformat(item["timestamp"]),
-                    item["interval_minutes"], Decimal(str(item["open"])),
-                    Decimal(str(item["high"])), Decimal(str(item["low"])),
-                    Decimal(str(item["close"])), item["volume"],
-                    None if item.get("amount") is None else Decimal(str(item["amount"])),
+                    item["symbol"],
+                    datetime.fromisoformat(item["timestamp"]),
+                    item["interval_minutes"],
+                    Decimal(str(item["open"])),
+                    Decimal(str(item["high"])),
+                    Decimal(str(item["low"])),
+                    Decimal(str(item["close"])),
+                    item["volume"],
+                    None
+                    if item.get("amount") is None
+                    else Decimal(str(item["amount"])),
                     item.get("is_completed", True),
                 )
                 grouped.setdefault(bar.symbol, []).append(bar)
             result = evaluate_intraday_strategy(
                 {symbol: tuple(bars) for symbol, bars in grouped.items()},
-                as_of=args.as_of, config=config,
+                as_of=args.as_of,
+                config=config,
             )
-            rendered = json.dumps(result, ensure_ascii=False, indent=2, default=_json_default)
+            rendered = json.dumps(
+                result, ensure_ascii=False, indent=2, default=_json_default
+            )
             print(rendered)
             if args.output:
                 with open(args.output, "w", encoding="utf-8") as stream:
                     stream.write(rendered + "\n")
             print(
-                "Advisory only: this system does not connect to a broker; pending broker "
-                "orders are unseen and may cause duplicate orders.",
+                "Advisory only: this system does not connect to a broker; pending "
+                "broker orders are unseen and may cause duplicate orders.",
                 file=sys.stderr,
             )
             return 0

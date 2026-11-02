@@ -3,8 +3,8 @@ from decimal import Decimal
 
 from a500_t_trader.backtest import (
     CertificationEvidence,
-    certify_intraday_backtest,
     certification_is_current,
+    certify_intraday_backtest,
 )
 
 
@@ -60,28 +60,44 @@ def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> 
 
     changed = binding() | {"implementation_version": "commit:def456"}
     assert certification_is_current(result, changed, config()) is False
-    assert certification_is_current(result, binding(), config() | {"maximum_drawdown": "0.08"}) is False
-    assert certification_is_current(
-        result,
-        binding() | {"data_snapshot_sha256": "c" * 64},
-        config(),
-    ) is False
-    assert certification_is_current(
-        result,
-        binding() | {"cost_model": {"commission": "0.0004", "slippage_bps": "2"}},
-        config(),
-    ) is False
-    assert certification_is_current(
-        result,
-        binding() | {"parameters": {"grid": {"width": "0.4%"}}},
-        config(),
-    ) is False
-    assert certification_is_current(
-        result,
-        binding() | {"rule_source_sha256": "c" * 64},
-        config(),
-    ) is False
-
+    assert (
+        certification_is_current(
+            result, binding(), config() | {"maximum_drawdown": "0.08"}
+        )
+        is False
+    )
+    assert (
+        certification_is_current(
+            result,
+            binding() | {"data_snapshot_sha256": "c" * 64},
+            config(),
+        )
+        is False
+    )
+    assert (
+        certification_is_current(
+            result,
+            binding() | {"cost_model": {"commission": "0.0004", "slippage_bps": "2"}},
+            config(),
+        )
+        is False
+    )
+    assert (
+        certification_is_current(
+            result,
+            binding() | {"parameters": {"grid": {"width": "0.4%"}}},
+            config(),
+        )
+        is False
+    )
+    assert (
+        certification_is_current(
+            result,
+            binding() | {"rule_source_sha256": "c" * 64},
+            config(),
+        )
+        is False
+    )
 
 
 def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() -> None:
@@ -113,6 +129,7 @@ def test_binding_must_be_complete_and_canonicalizable() -> None:
         result = certify_intraday_backtest(passing_evidence(), invalid, config())
         assert result.certified is False
         assert result.fingerprint is None
+
 
 def test_incomplete_certification_configuration_never_certifies() -> None:
     incomplete = config() | {"walk_forward": {"splits": 3}}

@@ -4,11 +4,11 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from test_intraday_v1_config import _complete_config, _write_config
 
 from a500_t_trader.strategy.intraday_execution import calculate_intraday_execution
 from a500_t_trader.strategy.intraday_technical import IntradayTechnicalAnalysis
 from a500_t_trader.strategy.intraday_v1_config import load_intraday_v1_config
-from test_intraday_v1_config import _complete_config, _write_config
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -57,8 +57,14 @@ def test_missing_position_valuation_blocks_all_action_quantities(
     account["positions"] = positions
     config = replace(config, account=account)
     analysis = IntradayTechnicalAnalysis(
-        symbol="510300", trend="RANGE", indicators={}, scores={"buy": 80, "sell": 0},
-        candidate="BUY", risk_status="READY", reasons=(), completed_valid_bars=180,
+        symbol="510300",
+        trend="RANGE",
+        indicators={},
+        scores={"buy": 80, "sell": 0},
+        candidate="BUY",
+        risk_status="READY",
+        reasons=(),
+        completed_valid_bars=180,
     )
 
     result = calculate_intraday_execution(
@@ -135,6 +141,7 @@ def test_sell_quantity_is_capped_at_eight_percent_of_nav(tmp_path: Path) -> None
 
     assert result.symbols["510300"].allowed is True
     assert result.symbols["510300"].quantity == 1800
+
 
 def test_buy_quantity_respects_remaining_daily_turnover_budget(tmp_path: Path) -> None:
     config_data = _complete_config()

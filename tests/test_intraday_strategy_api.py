@@ -4,14 +4,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+import a500_t_trader.strategy.intraday_api as intraday_api
 from a500_t_trader.backtest.certification import (
     CertificationEvidence,
     CertificationResult,
     certify_intraday_backtest,
 )
 from a500_t_trader.market_data import MinuteBar
-from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
-import a500_t_trader.strategy.intraday_api as intraday_api
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
 from a500_t_trader.strategy.intraday_state import (
     InitialHoldings,
@@ -20,11 +19,11 @@ from a500_t_trader.strategy.intraday_state import (
     StrategyRecommendation,
 )
 from a500_t_trader.strategy.intraday_technical import (
-    IntradayTechnicalAnalysis,
     RULE_SOURCE_SHA256,
     TECHNICAL_PARAMETERS,
+    IntradayTechnicalAnalysis,
 )
-
+from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI)
@@ -74,26 +73,34 @@ def _config(
     positions: dict[str, dict[str, object]] | None = None,
     securities: dict[str, dict[str, object]] | None = None,
 ) -> IntradayV1Config:
-    position_data = positions if positions is not None else {
-        "510300": {
-            "quantity": 1000,
-            "protected_floor": 300,
-            "cost_basis": "3.8",
-            "sellable_quantity": 700,
-            "market_value": "4000",
+    position_data = (
+        positions
+        if positions is not None
+        else {
+            "510300": {
+                "quantity": 1000,
+                "protected_floor": 300,
+                "cost_basis": "3.8",
+                "sellable_quantity": 700,
+                "market_value": "4000",
+            }
         }
-    }
-    security_data = securities if securities is not None else {
-        "510300": {
-            "t_plus": "T+1",
-            "lot_size": 100,
-            "tick_size": "0.001",
-            "lower_price_limit": "3.6",
-            "upper_price_limit": "4.4",
-            "source": "exchange rule sheet",
-            "as_of": rule_as_of.isoformat(),
+    )
+    security_data = (
+        securities
+        if securities is not None
+        else {
+            "510300": {
+                "t_plus": "T+1",
+                "lot_size": 100,
+                "tick_size": "0.001",
+                "lower_price_limit": "3.6",
+                "upper_price_limit": "4.4",
+                "source": "exchange rule sheet",
+                "as_of": rule_as_of.isoformat(),
+            }
         }
-    }
+    )
     parameters = {
         **TECHNICAL_PARAMETERS,
         "grid": {
@@ -147,6 +154,7 @@ def _config(
         "a" * 64,
     )
 
+
 def _evaluate(**overrides: object) -> dict[str, dict[str, object]]:
     arguments: dict[str, object] = {
         "bars_by_symbol": {"510300": _bars()},
@@ -170,9 +178,7 @@ def _seed_pair(
     created_at = datetime(2026, 11, 1, 9, 30, tzinfo=SHANGHAI)
     if first_side == "sell":
         store.record_initial_holdings(
-            InitialHoldings(
-                symbol, created_at, 300, Decimal("4.00"), 500, 200
-            )
+            InitialHoldings(symbol, created_at, 300, Decimal("4.00"), 500, 200)
         )
     first_recommendation_id = f"{pair_id}-{first_side}-recommendation"
     store.record_recommendation(
@@ -199,7 +205,9 @@ def _seed_pair(
         second_side = "sell" if first_side == "buy" else "buy"
         recommendation_id = f"{pair_id}-{second_side}-recommendation"
         store.record_recommendation(
-            StrategyRecommendation(recommendation_id, symbol, second_side, created_at, 1)
+            StrategyRecommendation(
+                recommendation_id, symbol, second_side, created_at, 1
+            )
         )
         assert store.confirm_fill(
             StrategyFill(
@@ -270,14 +278,19 @@ def _current_binding(config: IntradayV1Config) -> dict[str, object]:
     }
 
 
-def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context() -> None:
+def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context() -> (
+    None
+):
     result = _evaluate()["510300"]
 
     signal = result["signal"]
     assert isinstance(signal, dict)
     assert signal["candidate"] == "WAIT"
     assert set(signal["scores"]) == {"buy", "sell", "delta"}
-    assert "dynamic grid inputs unavailable or grid width exceeds 0.90%" in signal["reasons"]
+    assert (
+        "dynamic grid inputs unavailable or grid width exceeds 0.90%"
+        in signal["reasons"]
+    )
     assert result["risk"]["status"] == "BLOCKED"  # type: ignore[index]
 
 
@@ -332,9 +345,14 @@ def test_current_certification_binding_is_accepted() -> None:
     certification = certify_intraday_backtest(evidence, binding, config.certification)
     assert certification.certified
 
-    result = _evaluate(certification=certification, certification_binding=binding)["510300"]
+    result = _evaluate(certification=certification, certification_binding=binding)[
+        "510300"
+    ]
 
-    assert "certification is stale or mismatched with current inputs" not in result["reasons"]
+    assert (
+        "certification is stale or mismatched with current inputs"
+        not in result["reasons"]
+    )
     assert "certification binding unavailable" not in result["reasons"]
 
 
@@ -359,7 +377,9 @@ def test_api_returns_separate_technical_candidate_and_risk_veto() -> None:
     _assert_blocked(result, "certification evidence unavailable")
 
 
-def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason() -> None:
+def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason() -> (
+    None
+):
     stale = AS_OF - timedelta(hours=1)
     cases = (
         (
@@ -436,6 +456,7 @@ def test_paired_targets_do_not_bypass_source_candidate_rules() -> None:
     assert execution["allowed"] is False
     assert execution["quantity"] == 0
 
+
 @pytest.mark.parametrize(
     ("candidate", "first_side"),
     (("TAKE_PROFIT", "buy"), ("BUYBACK", "sell")),
@@ -495,6 +516,7 @@ def test_invalid_pair_provenance_or_status_blocks_pair_id(
         "paired intent does not match an open persisted pair with eligible fills",
     )
 
+
 @pytest.mark.parametrize("pair_id", ("unknown-pair", None))
 def test_missing_or_unknown_pair_id_fails_closed(
     tmp_path, monkeypatch, pair_id: str | None
@@ -516,6 +538,8 @@ def test_evaluation_requires_existing_persistent_state(tmp_path) -> None:
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     result = _evaluate(state_store=store)["510300"]
 
-    _assert_blocked(result, "dynamic grid inputs unavailable or grid width exceeds 0.90%")
+    _assert_blocked(
+        result, "dynamic grid inputs unavailable or grid width exceeds 0.90%"
+    )
     assert store.state("510300", AS_OF.date()) is None
     assert store.trade_pairs() == []

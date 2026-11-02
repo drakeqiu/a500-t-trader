@@ -103,9 +103,8 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     )
     rule_source = _text(root["rule_source"], "rule_source")
     rule_source_sha256 = _text(root["rule_source_sha256"], "rule_source_sha256")
-    if (
-        len(rule_source_sha256) != 64
-        or any(char not in "0123456789abcdefABCDEF" for char in rule_source_sha256)
+    if len(rule_source_sha256) != 64 or any(
+        char not in "0123456789abcdefABCDEF" for char in rule_source_sha256
     ):
         raise ValueError("rule_source_sha256 must be a 64-character SHA-256 digest")
     parameters = _object(root["parameters"], "parameters")
@@ -139,7 +138,9 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
         security = _object(security_value, f"securities.{symbol}")
         _require(security, _REQUIRED_SECURITY_FIELDS, f"securities.{symbol}")
         if security["t_plus"] not in ("T+0", "T+1"):
-            raise ValueError(f"securities.{symbol}.t_plus must be explicitly T+0 or T+1")
+            raise ValueError(
+                f"securities.{symbol}.t_plus must be explicitly T+0 or T+1"
+            )
         _text(security["source"], f"securities.{symbol}.source")
         _timestamp(security["as_of"], f"securities.{symbol}.as_of")
         securities[symbol] = security

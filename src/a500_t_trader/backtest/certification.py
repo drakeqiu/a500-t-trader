@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 
 _REQUIRED_CONFIG = (
     "net_return_minimum",
@@ -32,7 +32,7 @@ _REQUIRED_BINDING = (
 
 @dataclass(frozen=True, slots=True)
 class CertificationEvidence:
-    """Computed performance metrics; absent metrics are deliberately represented as None."""
+    """Computed metrics; missing values are represented as None."""
 
     net_return: Decimal | None
     paired_trade_net_profits: tuple[Decimal, ...]
@@ -56,7 +56,9 @@ class CertificationResult:
     fingerprint: str | None
     blockers: tuple[str, ...]
     report: dict[str, object]
-    disclaimer: str = "Historical certification is not a guarantee of future profitability."
+    disclaimer: str = (
+        "Historical certification is not a guarantee of future profitability."
+    )
 
 
 def certify_intraday_backtest(
@@ -64,7 +66,7 @@ def certify_intraday_backtest(
     binding: Mapping[str, object],
     config: Mapping[str, object],
 ) -> CertificationResult:
-    """Evaluate fully supplied metrics and bind any pass to exact certification inputs."""
+    """Evaluate supplied metrics and bind passes to exact certification inputs."""
     blockers: list[str] = []
     thresholds = _thresholds(config, blockers)
     if not isinstance(binding, Mapping):
@@ -93,8 +95,10 @@ def certify_intraday_backtest(
     if not blockers:
         try:
             fingerprint = _fingerprint(binding, config)
-        except (TypeError, ValueError):
-            blockers.append("binding and certification configuration must be JSON serializable")
+        except TypeError, ValueError:
+            blockers.append(
+                "binding and certification configuration must be JSON serializable"
+            )
     certified = not blockers
     if not certified:
         fingerprint = None
@@ -118,12 +122,13 @@ def certification_is_current(
         return False
     try:
         return result.fingerprint == _fingerprint(binding, config)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
-
-def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, object] | None:
+def _thresholds(
+    config: Mapping[str, object], blockers: list[str]
+) -> dict[str, object] | None:
     if not isinstance(config, Mapping):
         blockers.append("certification configuration is incomplete")
         return None
@@ -139,7 +144,7 @@ def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, 
             if not value.is_finite():
                 raise InvalidOperation
             values[name] = value
-        except (InvalidOperation, ValueError, TypeError):
+        except InvalidOperation, ValueError, TypeError:
             blockers.append(f"{name} must be a finite number")
     count = config.get("minimum_sample_count")
     if type(count) is not int or count < 1:
@@ -152,7 +157,7 @@ def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, 
         if not stress.is_finite() or stress != Decimal("1.5"):
             raise InvalidOperation
         values["cost_slippage_stress_multiplier"] = stress
-    except (InvalidOperation, ValueError, TypeError):
+    except InvalidOperation, ValueError, TypeError:
         blockers.append("cost_slippage_stress_multiplier must explicitly equal 1.5")
 
     walk = config.get("walk_forward")
@@ -173,19 +178,28 @@ def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, 
 
     perturbation = config.get("neighbor_parameter_perturbation")
     if not isinstance(perturbation, Mapping) or not perturbation:
-        blockers.append("neighbor_parameter_perturbation must explicitly configure ranges")
+        blockers.append(
+            "neighbor_parameter_perturbation must explicitly configure ranges"
+        )
     else:
         for name, amount in perturbation.items():
             try:
                 value = Decimal(str(amount))
                 if not name or not value.is_finite() or value <= 0:
                     raise InvalidOperation
-            except (InvalidOperation, ValueError, TypeError):
-                blockers.append(f"neighbor_parameter_perturbation.{name} must be positive")
+            except InvalidOperation, ValueError, TypeError:
+                blockers.append(
+                    f"neighbor_parameter_perturbation.{name} must be positive"
+                )
         values["neighbor_parameter_perturbation"] = dict(perturbation)
-    if "profit_factor_minimum" in values and values["profit_factor_minimum"] < Decimal("1.25"):
+    if "profit_factor_minimum" in values and values["profit_factor_minimum"] < Decimal(
+        "1.25"
+    ):
         blockers.append("profit_factor_minimum must be at least 1.25")
-    for name in ("in_sample_profit_factor_minimum", "out_of_sample_profit_factor_minimum"):
+    for name in (
+        "in_sample_profit_factor_minimum",
+        "out_of_sample_profit_factor_minimum",
+    ):
         if name in values and values[name] < Decimal(1):
             blockers.append(f"{name} must be at least 1")
     for name in (
@@ -202,7 +216,9 @@ def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, 
     return None if blockers else values
 
 
-def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], blockers: list[str]) -> None:
+def _evaluate(
+    evidence: CertificationEvidence, thresholds: dict[str, object], blockers: list[str]
+) -> None:
     def metric(value: Decimal | None, name: str) -> Decimal | None:
         if not isinstance(value, Decimal) or not value.is_finite():
             blockers.append(f"{name} is missing or invalid")
@@ -210,7 +226,9 @@ def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], bl
         return value
 
     net_return = metric(evidence.net_return, "net_return")
-    if net_return is not None and (net_return <= 0 or net_return < thresholds["net_return_minimum"]):
+    if net_return is not None and (
+        net_return <= 0 or net_return < thresholds["net_return_minimum"]
+    ):
         blockers.append("net_return")
 
     profits = evidence.paired_trade_net_profits
@@ -220,22 +238,31 @@ def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], bl
         blockers.append("paired_trade_net_profits are missing or incomplete")
     else:
         average = sum(profits, Decimal(0)) / len(profits)
-        if average <= 0 or average < thresholds["paired_trade_average_net_profit_minimum"]:
+        if (
+            average <= 0
+            or average < thresholds["paired_trade_average_net_profit_minimum"]
+        ):
             blockers.append("paired_trade_average_net_profit")
 
     pf = metric(evidence.profit_factor, "profit_factor")
-    if pf is not None and pf < max(Decimal("1.25"), thresholds["profit_factor_minimum"]):
+    if pf is not None and pf < max(
+        Decimal("1.25"), thresholds["profit_factor_minimum"]
+    ):
         blockers.append("profit_factor")
     for name, value in (
         ("in_sample_profit_factor", evidence.in_sample_profit_factor),
         ("out_of_sample_profit_factor", evidence.out_of_sample_profit_factor),
     ):
         observed = metric(value, name)
-        if observed is not None and observed <= max(Decimal(1), thresholds[name + "_minimum"]):
+        if observed is not None and observed <= max(
+            Decimal(1), thresholds[name + "_minimum"]
+        ):
             blockers.append(name)
 
     drawdown = metric(evidence.maximum_drawdown, "maximum_drawdown")
-    if drawdown is not None and (drawdown < 0 or drawdown > thresholds["maximum_drawdown"]):
+    if drawdown is not None and (
+        drawdown < 0 or drawdown > thresholds["maximum_drawdown"]
+    ):
         blockers.append("maximum_drawdown")
     if type(evidence.sample_count) is not int:
         blockers.append("sample_count is missing")
@@ -254,15 +281,24 @@ def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], bl
         stress_return <= 0 or stress_return < thresholds["net_return_minimum"]
     ):
         blockers.append("cost_slippage_stress.net_return")
-    if stress_pf is not None and stress_pf < max(Decimal("1.25"), thresholds["profit_factor_minimum"]):
+    if stress_pf is not None and stress_pf < max(
+        Decimal("1.25"), thresholds["profit_factor_minimum"]
+    ):
         blockers.append("cost_slippage_stress.profit_factor")
 
     neighbor_count = len(thresholds["neighbor_parameter_perturbation"])
-    if len(evidence.neighbor_net_returns) != neighbor_count or len(evidence.neighbor_profit_factors) != neighbor_count:
+    if (
+        len(evidence.neighbor_net_returns) != neighbor_count
+        or len(evidence.neighbor_profit_factors) != neighbor_count
+    ):
         blockers.append("neighbor_parameter_metrics are incomplete")
     else:
         for index, (neighbor_return, neighbor_pf) in enumerate(
-            zip(evidence.neighbor_net_returns, evidence.neighbor_profit_factors)
+            zip(
+                evidence.neighbor_net_returns,
+                evidence.neighbor_profit_factors,
+                strict=True,
+            )
         ):
             if (
                 not isinstance(neighbor_return, Decimal)
@@ -274,17 +310,25 @@ def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], bl
             if (
                 not isinstance(neighbor_pf, Decimal)
                 or not neighbor_pf.is_finite()
-                or neighbor_pf < max(Decimal("1.25"), thresholds["profit_factor_minimum"])
+                or neighbor_pf
+                < max(Decimal("1.25"), thresholds["profit_factor_minimum"])
             ):
                 blockers.append(f"neighbor_parameter_metrics[{index}].profit_factor")
     walk = thresholds["walk_forward"]
     expected_splits = walk["splits"]
-    if len(evidence.walk_forward_net_returns) != expected_splits or len(evidence.walk_forward_profit_factors) != expected_splits:
+    if (
+        len(evidence.walk_forward_net_returns) != expected_splits
+        or len(evidence.walk_forward_profit_factors) != expected_splits
+    ):
         blockers.append("walk_forward_metrics are incomplete")
     else:
         passing = 0
         for index, (window_return, window_pf) in enumerate(
-            zip(evidence.walk_forward_net_returns, evidence.walk_forward_profit_factors)
+            zip(
+                evidence.walk_forward_net_returns,
+                evidence.walk_forward_profit_factors,
+                strict=True,
+            )
         ):
             if (
                 not isinstance(window_return, Decimal)
@@ -325,6 +369,7 @@ def _canonical_value(value: object) -> object:
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     raise TypeError(f"unsupported fingerprint input: {type(value).__name__}")
+
 
 def _report(
     evidence: CertificationEvidence,
@@ -369,10 +414,12 @@ def _report(
         "binding_fingerprint": fingerprint,
         "binding": value(binding) if isinstance(binding, Mapping) else {},
         "certification_config": value(config) if isinstance(config, Mapping) else {},
-        "thresholds": {} if thresholds is None else {
-            key: value(item) for key, item in thresholds.items()
-        },
+        "thresholds": {}
+        if thresholds is None
+        else {key: value(item) for key, item in thresholds.items()},
         "metrics": {key: value(item) for key, item in metrics.items()},
         "blockers": blockers.copy(),
-        "disclaimer": "Historical certification is not a guarantee of future profitability.",
+        "disclaimer": (
+            "Historical certification is not a guarantee of future profitability."
+        ),
     }

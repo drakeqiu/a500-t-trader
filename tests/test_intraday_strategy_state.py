@@ -1,18 +1,17 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from a500_t_trader.strategy.intraday_state import (
-    IntradayStrategyStateStore,
     InitialHoldings,
+    IntradayStrategyStateStore,
     StrategyFill,
     StrategyRecommendation,
     StrategyState,
 )
 
-
-NOW = datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 2, 2, 0, tzinfo=UTC)
 
 
 def test_strategy_constraints_survive_store_reopen(tmp_path):
@@ -25,7 +24,7 @@ def test_strategy_constraints_survive_store_reopen(tmp_path):
         grid_round=4,
         spacing=Decimal("0.0125"),
         same_direction_bars=1,
-        cooldown_until=datetime(2026, 11, 2, 2, 10, tzinfo=timezone.utc),
+        cooldown_until=datetime(2026, 11, 2, 2, 10, tzinfo=UTC),
         reset_anchor_crossings=1,
         daily_trade_count=5,
         daily_add_count=2,
@@ -102,7 +101,9 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(tmp_path):
     sell = StrategyRecommendation("rec-2", "510300", "sell", NOW, grid_version=4)
     store.record_recommendation(sell)
     assert store.confirm_fill(
-        StrategyFill("actual-sell", "rec-2", "pair-1", "sell", 100, Decimal("3.95"), NOW),
+        StrategyFill(
+            "actual-sell", "rec-2", "pair-1", "sell", 100, Decimal("3.95"), NOW
+        ),
         confirmed=True,
         simulated=False,
         order_state="filled",
@@ -110,8 +111,6 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(tmp_path):
     )
     assert store.trade_pairs()[0]["status"] == "closed"
     assert store.trade_pairs()[0]["grid_version"] == 3
-
-
 
 
 def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(tmp_path):
@@ -128,10 +127,18 @@ def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(tmp_
         )
         return store.confirm_fill(
             StrategyFill(
-                fill_id, recommendation_id, pair_id, side, quantity,
-                Decimal("3.90"), NOW,
+                fill_id,
+                recommendation_id,
+                pair_id,
+                side,
+                quantity,
+                Decimal("3.90"),
+                NOW,
             ),
-            confirmed=True, simulated=False, order_state="filled", cooldown_minutes=0,
+            confirmed=True,
+            simulated=False,
+            order_state="filled",
+            cooldown_minutes=0,
         )
 
     assert fill("sell-1", "sell-rec-1", "pair-1", "sell", 120, 0)
@@ -144,10 +151,18 @@ def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(tmp_
     assert fill("buy-part", "buy-rec-part", "pair-1", "buy", 70, 1)
     assert store.trade_pairs()[0]["status"] == "open"
     with pytest.raises(ValueError, match="unallocated initial sellable inventory"):
-        fill("sell-after-partial-buy", "sell-rec-after-partial-buy",
-             "pair-3", "sell", 101, 3)
+        fill(
+            "sell-after-partial-buy",
+            "sell-rec-after-partial-buy",
+            "pair-3",
+            "sell",
+            101,
+            3,
+        )
     assert fill("buy-rest", "buy-rec-rest", "pair-1", "buy", 50, 2)
     assert store.trade_pairs()[0]["status"] == "closed"
+
+
 def test_recommendations_and_strategy_fills_do_not_change_account_snapshot(tmp_path):
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     holdings = InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 2000)
@@ -181,7 +196,9 @@ def test_invalid_fill_pairing_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="must match its recommendation"):
         store.confirm_fill(
-            StrategyFill("sell-1", "rec-1", "pair-1", "sell", 100, Decimal("3.91"), NOW),
+            StrategyFill(
+                "sell-1", "rec-1", "pair-1", "sell", 100, Decimal("3.91"), NOW
+            ),
             confirmed=True,
             simulated=False,
             order_state="filled",
@@ -200,6 +217,8 @@ def test_grid_layer_round_use_is_durable_and_directional(tmp_path):
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 1, 2, 2, "buy")
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 2, 2, 1, "buy")
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 1, 2, 1, "sell")
+
+
 def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(tmp_path):
     database = tmp_path / "strategy.sqlite"
     store = IntradayStrategyStateStore(database)
@@ -211,16 +230,14 @@ def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(tmp_path):
         grid_round=4,
         spacing=Decimal("0.01"),
         same_direction_bars=1,
-        cooldown_until=datetime(2026, 11, 2, 2, 10, tzinfo=timezone.utc),
+        cooldown_until=datetime(2026, 11, 2, 2, 10, tzinfo=UTC),
         reset_anchor_crossings=0,
         daily_trade_count=8,
         daily_add_count=3,
         daily_turnover=Decimal("150000"),
     )
     store.save_state(state)
-    assert store.consume_grid_slot(
-        "510300", date(2026, 11, 2), 3, 2, 4, "buy"
-    )
+    assert store.consume_grid_slot("510300", date(2026, 11, 2), 3, 2, 4, "buy")
     reopened = IntradayStrategyStateStore(database)
 
     assert reopened.check_constraints(
@@ -254,10 +271,18 @@ def test_unknown_or_pending_order_status_fails_closed(tmp_path):
     fill = StrategyFill("fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW)
 
     assert not store.confirm_fill(
-        fill, confirmed=True, simulated=False, order_state="pending", cooldown_minutes=10
+        fill,
+        confirmed=True,
+        simulated=False,
+        order_state="pending",
+        cooldown_minutes=10,
     )
     assert not store.confirm_fill(
-        fill, confirmed=True, simulated=False, order_state="unknown", cooldown_minutes=10
+        fill,
+        confirmed=True,
+        simulated=False,
+        order_state="unknown",
+        cooldown_minutes=10,
     )
     assert store.trade_pairs() == []
 
@@ -267,30 +292,48 @@ def test_grid_slot_is_consumed_only_by_confirmed_fill(tmp_path):
     store = IntradayStrategyStateStore(database)
     store.save_state(
         StrategyState(
-            "510300", NOW.date(), 2, 1, 3, Decimal("0.01"), 2, None, 0, 0, 0,
+            "510300",
+            NOW.date(),
+            2,
+            1,
+            3,
+            Decimal("0.01"),
+            2,
+            None,
+            0,
+            0,
+            0,
             Decimal("0"),
         )
     )
     recommendation = StrategyRecommendation(
-        "rec-1", "510300", "buy", NOW, grid_version=2,
-        grid_layer=1, grid_round=3,
-    )
-    store.record_recommendation(recommendation)
-
-    assert store.check_constraints(
-        symbol="510300",
-        session_date=NOW.date(),
-        side="buy",
-        now=NOW,
+        "rec-1",
+        "510300",
+        "buy",
+        NOW,
         grid_version=2,
         grid_layer=1,
         grid_round=3,
-        pending_order_state="none",
-        max_daily_trades=8,
-        max_daily_adds=3,
-        max_daily_turnover=Decimal("1000000"),
-        min_same_direction_bars=2,
-    ) == ()
+    )
+    store.record_recommendation(recommendation)
+
+    assert (
+        store.check_constraints(
+            symbol="510300",
+            session_date=NOW.date(),
+            side="buy",
+            now=NOW,
+            grid_version=2,
+            grid_layer=1,
+            grid_round=3,
+            pending_order_state="none",
+            max_daily_trades=8,
+            max_daily_adds=3,
+            max_daily_turnover=Decimal("1000000"),
+            min_same_direction_bars=2,
+        )
+        == ()
+    )
 
     assert store.check_constraints(
         symbol="510300",
@@ -313,20 +356,23 @@ def test_grid_slot_is_consumed_only_by_confirmed_fill(tmp_path):
         order_state="filled",
         cooldown_minutes=10,
     )
-    assert IntradayStrategyStateStore(database).check_constraints(
-        symbol="510300",
-        session_date=NOW.date(),
-        side="buy",
-        now=NOW,
-        grid_version=2,
-        grid_layer=1,
-        grid_round=3,
-        pending_order_state="none",
-        max_daily_trades=8,
-        max_daily_adds=3,
-        max_daily_turnover=Decimal("1000000"),
-        min_same_direction_bars=2,
-    ) == ()
+    assert (
+        IntradayStrategyStateStore(database).check_constraints(
+            symbol="510300",
+            session_date=NOW.date(),
+            side="buy",
+            now=NOW,
+            grid_version=2,
+            grid_layer=1,
+            grid_round=3,
+            pending_order_state="none",
+            max_daily_trades=8,
+            max_daily_adds=3,
+            max_daily_turnover=Decimal("1000000"),
+            min_same_direction_bars=2,
+        )
+        == ()
+    )
 
     assert store.confirm_fill(
         StrategyFill("fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
@@ -366,29 +412,52 @@ def test_grid_reset_reuses_slots_only_under_new_grid_version(tmp_path):
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     store.save_state(
         StrategyState(
-            "510300", NOW.date(), 1, 0, 0, Decimal("0.01"), 2, None, 0, 0, 0,
+            "510300",
+            NOW.date(),
+            1,
+            0,
+            0,
+            Decimal("0.01"),
+            2,
+            None,
+            0,
+            0,
+            0,
             Decimal("0"),
         )
     )
     assert store.consume_grid_slot("510300", NOW.date(), 1, 0, 0, "buy")
     store.save_state(
         StrategyState(
-            "510300", NOW.date(), 2, 0, 0, Decimal("0.02"), 2, None, 1, 0, 0,
+            "510300",
+            NOW.date(),
+            2,
+            0,
+            0,
+            Decimal("0.02"),
+            2,
+            None,
+            1,
+            0,
+            0,
             Decimal("0"),
         )
     )
 
-    assert store.check_constraints(
-        symbol="510300",
-        session_date=NOW.date(),
-        side="buy",
-        now=NOW,
-        grid_version=2,
-        grid_layer=0,
-        grid_round=0,
-        pending_order_state="none",
-        max_daily_trades=8,
-        max_daily_adds=3,
-        max_daily_turnover=Decimal("1000000"),
-        min_same_direction_bars=2,
-    ) == ()
+    assert (
+        store.check_constraints(
+            symbol="510300",
+            session_date=NOW.date(),
+            side="buy",
+            now=NOW,
+            grid_version=2,
+            grid_layer=0,
+            grid_round=0,
+            pending_order_state="none",
+            max_daily_trades=8,
+            max_daily_adds=3,
+            max_daily_turnover=Decimal("1000000"),
+            min_same_direction_bars=2,
+        )
+        == ()
+    )

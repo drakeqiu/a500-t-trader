@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 from zoneinfo import ZoneInfo
 
 from ..backtest.certification import CertificationResult, certification_is_current
@@ -71,27 +71,46 @@ def evaluate_intraday_strategy(
         except (ValueError, TypeError, ArithmeticError) as error:
             analyzer_error = f"source-exact technical analysis unavailable: {error}"
     else:
-        analyzer_error = "source-exact technical analysis unavailable without V1 configuration"
+        analyzer_error = (
+            "source-exact technical analysis unavailable without V1 configuration"
+        )
 
     results: dict[str, dict[str, object]] = {}
     for symbol in symbols:
         analysis = analyses.get(symbol)
         reasons: list[str] = []
         if config is None:
-            reasons.extend(("account snapshot and V1 configuration unavailable", f"trading rules unavailable for {symbol}"))
+            reasons.extend(
+                (
+                    "account snapshot and V1 configuration unavailable",
+                    f"trading rules unavailable for {symbol}",
+                )
+            )
         else:
             account_stamp = _timestamp(account.get("as_of"))
             if account_stamp is None:
                 reasons.append("account snapshot timestamp unavailable or invalid")
             elif _stale(account_stamp, now):
                 reasons.append("account snapshot is stale or future-dated")
-            position = account.get("positions", {}).get(symbol) if isinstance(account.get("positions"), dict) else None
+            position = (
+                account.get("positions", {}).get(symbol)
+                if isinstance(account.get("positions"), dict)
+                else None
+            )
             if not isinstance(position, dict):
                 reasons.append(f"account position unavailable for {symbol}")
             else:
-                for field in ("quantity", "protected_floor", "cost_basis", "sellable_quantity", "market_value"):
+                for field in (
+                    "quantity",
+                    "protected_floor",
+                    "cost_basis",
+                    "sellable_quantity",
+                    "market_value",
+                ):
                     if position.get(field) is None:
-                        reasons.append(f"account position {field} unavailable for {symbol}")
+                        reasons.append(
+                            f"account position {field} unavailable for {symbol}"
+                        )
             rule = securities.get(symbol)
             if rule is None:
                 reasons.append(f"trading rules unavailable for {symbol}")
@@ -100,7 +119,9 @@ def evaluate_intraday_strategy(
                 if stamp is None:
                     reasons.append(f"trading rules for {symbol} have invalid timestamp")
                 elif _stale(stamp, now):
-                    reasons.append(f"trading rules for {symbol} are stale or future-dated")
+                    reasons.append(
+                        f"trading rules for {symbol} are stale or future-dated"
+                    )
         if analyzer_error is not None:
             reasons.append(analyzer_error)
         elif analysis is None:
@@ -115,23 +136,42 @@ def evaluate_intraday_strategy(
         )
         reasons.extend(certification_reasons)
         side = (
-            "sell" if analysis is not None and analysis.candidate == "TAKE_PROFIT"
-            else "buy" if analysis is not None and analysis.candidate == "BUYBACK"
-            else analysis.candidate.lower() if analysis is not None else ""
+            "sell"
+            if analysis is not None and analysis.candidate == "TAKE_PROFIT"
+            else "buy"
+            if analysis is not None and analysis.candidate == "BUYBACK"
+            else analysis.candidate.lower()
+            if analysis is not None
+            else ""
         )
         pair_trade_pair_id: str | None = None
         pair_max_quantity = 0
         if analysis is not None and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}:
             pair_context = (paired_state or {}).get(symbol)
-            pair_key = "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
-            pair_record = pair_context.get(pair_key) if isinstance(pair_context, Mapping) else None
-            pair_id = pair_record.get("trade_pair_id") if isinstance(pair_record, Mapping) else None
+            pair_key = (
+                "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+            )
+            pair_record = (
+                pair_context.get(pair_key)
+                if isinstance(pair_context, Mapping)
+                else None
+            )
+            pair_id = (
+                pair_record.get("trade_pair_id")
+                if isinstance(pair_record, Mapping)
+                else None
+            )
             try:
-                persisted_pair = state_store.trade_pair(pair_id) if state_store is not None and isinstance(pair_id, str) else None
-            except (sqlite3.Error, TypeError, ValueError):
+                persisted_pair = (
+                    state_store.trade_pair(pair_id)
+                    if state_store is not None and isinstance(pair_id, str)
+                    else None
+                )
+            except sqlite3.Error, TypeError, ValueError:
                 persisted_pair = None
             valid_pair = (
-                isinstance(pair_id, str) and bool(pair_id.strip())
+                isinstance(pair_id, str)
+                and bool(pair_id.strip())
                 and persisted_pair is not None
                 and persisted_pair.get("symbol") == symbol
                 and persisted_pair.get("status") == "open"
@@ -139,18 +179,37 @@ def evaluate_intraday_strategy(
             if valid_pair:
                 buy_quantity = persisted_pair.get("buy_quantity")
                 sell_quantity = persisted_pair.get("sell_quantity")
-                buy_outstanding = buy_quantity - sell_quantity if isinstance(buy_quantity, int) and isinstance(sell_quantity, int) else 0
-                sell_outstanding = sell_quantity - buy_quantity if isinstance(buy_quantity, int) and isinstance(sell_quantity, int) else 0
-                if analysis.candidate == "TAKE_PROFIT" and persisted_pair.get("buy_fill_id") and buy_outstanding > 0:
+                buy_outstanding = (
+                    buy_quantity - sell_quantity
+                    if isinstance(buy_quantity, int) and isinstance(sell_quantity, int)
+                    else 0
+                )
+                sell_outstanding = (
+                    sell_quantity - buy_quantity
+                    if isinstance(buy_quantity, int) and isinstance(sell_quantity, int)
+                    else 0
+                )
+                if (
+                    analysis.candidate == "TAKE_PROFIT"
+                    and persisted_pair.get("buy_fill_id")
+                    and buy_outstanding > 0
+                ):
                     pair_max_quantity = buy_outstanding
-                elif analysis.candidate == "BUYBACK" and persisted_pair.get("sell_fill_id") and sell_outstanding > 0:
+                elif (
+                    analysis.candidate == "BUYBACK"
+                    and persisted_pair.get("sell_fill_id")
+                    and sell_outstanding > 0
+                ):
                     pair_max_quantity = sell_outstanding
                 else:
                     valid_pair = False
             if valid_pair:
                 pair_trade_pair_id = pair_id
             else:
-                reasons.append("paired intent does not match an open persisted pair with eligible fills")
+                reasons.append(
+                    "paired intent does not match an open persisted pair "
+                    "with eligible fills"
+                )
         state_parameters = _state_parameters(config)
         state_reasons: tuple[str, ...] = ()
         if state_store is None or state_parameters is None:
@@ -180,8 +239,10 @@ def evaluate_intraday_strategy(
                     max_daily_turnover=max_daily_turnover,
                     min_same_direction_bars=min_same_direction_bars,
                 )
-            except (ValueError, TypeError, ArithmeticError, sqlite3.Error):
-                state_reasons = ("persistent strategy state unavailable or unconfigured",)
+            except ValueError, TypeError, ArithmeticError, sqlite3.Error:
+                state_reasons = (
+                    "persistent strategy state unavailable or unconfigured",
+                )
         reasons.extend(state_reasons)
         bars = bars_by_symbol.get(symbol, ())
         latest = _latest_completed_bar(bars)
@@ -210,7 +271,7 @@ def evaluate_intraday_strategy(
                     certification_passed=True,
                     daily_activity=daily_activity,
                 ).symbols.get(symbol)
-            except (ValueError, TypeError, ArithmeticError):
+            except ValueError, TypeError, ArithmeticError:
                 reasons.append("V1 quantity calculation unavailable")
         if execution is None:
             if side in ("buy", "sell") and eligible:
@@ -221,22 +282,38 @@ def evaluate_intraday_strategy(
         else:
             reasons.extend(execution.reasons)
             quantity = execution.quantity if execution.allowed and not reasons else 0
-            if quantity and analysis is not None and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}:
+            if (
+                quantity
+                and analysis is not None
+                and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}
+            ):
                 context = (paired_state or {}).get(symbol, {})
-                key = "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+                key = (
+                    "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+                )
                 pair = context.get(key) if isinstance(context, Mapping) else None
-                pair_quantity = pair.get("quantity") if isinstance(pair, Mapping) else None
-                lot = _positive_int(securities.get(symbol, {}).get("lot_size")) if isinstance(securities.get(symbol), dict) else None
+                pair_quantity = (
+                    pair.get("quantity") if isinstance(pair, Mapping) else None
+                )
+                security = securities.get(symbol)
+                lot_value = (
+                    security.get("lot_size") if isinstance(security, dict) else None
+                )
+                lot = lot_value if type(lot_value) is int and lot_value > 0 else None
                 if type(pair_quantity) is not int or pair_quantity <= 0 or lot is None:
                     quantity = 0
                     reasons.append("paired quantity or lot size unavailable")
                 else:
-                    quantity = min(quantity, pair_quantity, pair_max_quantity) // lot * lot
+                    quantity = (
+                        min(quantity, pair_quantity, pair_max_quantity) // lot * lot
+                    )
                     if analysis.candidate == "BUYBACK" and analysis.trend == "BEAR":
                         quantity = min(quantity, (pair_max_quantity // 4) // lot * lot)
                     if quantity < lot:
                         quantity = 0
-                        reasons.append("eligible paired quantity is below one trading unit")
+                        reasons.append(
+                            "eligible paired quantity is below one trading unit"
+                        )
             allowed = execution.allowed and quantity > 0 and not reasons
             execution_reasons = execution.reasons
         if analysis is not None and analysis.candidate == "WAIT":
@@ -267,8 +344,10 @@ def evaluate_intraday_strategy(
                         grid_round,
                     )
                 )
-            except (ValueError, TypeError, sqlite3.Error):
-                reasons.append("persistent strategy recommendation could not be recorded")
+            except ValueError, TypeError, sqlite3.Error:
+                reasons.append(
+                    "persistent strategy recommendation could not be recorded"
+                )
                 allowed = False
                 quantity = 0
             reasons = list(dict.fromkeys(reasons))
@@ -298,6 +377,7 @@ def evaluate_intraday_strategy(
         }
     return results
 
+
 def _state_parameters(
     config: IntradayV1Config | None,
 ) -> tuple[int, int, int, int, int, Decimal, int] | None:
@@ -320,12 +400,19 @@ def _state_parameters(
         return None
     try:
         turnover = Decimal(str(values[5]))
-    except (InvalidOperation, TypeError, ValueError):
+    except InvalidOperation, TypeError, ValueError:
         return None
     if not turnover.is_finite() or turnover <= 0:
         return None
     grid_version, grid_layer, grid_round, trades, adds, _, bars = values
-    if grid_version < 1 or grid_layer < 0 or grid_round < 0 or trades < 1 or adds < 1 or bars < 0:
+    if (
+        grid_version < 1
+        or grid_layer < 0
+        or grid_round < 0
+        or trades < 1
+        or adds < 1
+        or bars < 0
+    ):
         return None
     return grid_version, grid_layer, grid_round, trades, adds, turnover, bars
 
@@ -360,7 +447,9 @@ def _timestamp(value: object) -> datetime | None:
             return None
     else:
         return None
-    return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+    return (
+        parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+    )
 
 
 def _certification_reasons(
@@ -370,7 +459,10 @@ def _certification_reasons(
 ) -> list[str]:
     if certification is None:
         return ["certification evidence unavailable"]
-    if not isinstance(certification, CertificationResult) or not certification.certified:
+    if (
+        not isinstance(certification, CertificationResult)
+        or not certification.certified
+    ):
         return ["certification is failed or not passed"]
     if config is None or binding is None:
         return ["certification binding unavailable"]
@@ -394,12 +486,21 @@ def _certification_reasons(
         "data_snapshot_sha256",
         "cost_model",
     )
-    absent = [field for field in missing if field not in binding or binding[field] in (None, "", {})]
+    absent = [
+        field
+        for field in missing
+        if field not in binding or binding[field] in (None, "", {})
+    ]
     if absent:
         return [f"certification binding missing required fields: {', '.join(absent)}"]
-    mismatched = [field for field, value in expected.items() if binding.get(field) != value]
+    mismatched = [
+        field for field, value in expected.items() if binding.get(field) != value
+    ]
     if mismatched:
-        return [f"certification binding mismatches current configuration: {', '.join(mismatched)}"]
+        return [
+            "certification binding mismatches current configuration: "
+            f"{', '.join(mismatched)}"
+        ]
     if not certification_is_current(certification, binding, config.certification):
         return ["certification is stale or mismatched with current inputs"]
     return []
@@ -414,7 +515,9 @@ def _position(account: Mapping[str, object], symbol: str) -> dict[str, object]:
         "sellable_quantity": position.get("sellable_quantity"),
         "cost_basis": position.get("cost_basis"),
         "available_cash": account.get("cash"),
-        "constraints": ["position sizing is unavailable while any V1 execution gate is blocked"],
+        "constraints": [
+            "position sizing is unavailable while any V1 execution gate is blocked"
+        ],
     }
 
 
@@ -447,7 +550,9 @@ def _signal(analysis: IntradayTechnicalAnalysis | None) -> dict[str, object]:
             "reasons": ["technical candidate unavailable"],
         }
     return {
-        "direction": analysis.candidate.lower() if analysis.candidate != "WAIT" else "none",
+        "direction": analysis.candidate.lower()
+        if analysis.candidate != "WAIT"
+        else "none",
         "candidate": analysis.candidate,
         "trend": analysis.trend,
         "scores": analysis.scores,

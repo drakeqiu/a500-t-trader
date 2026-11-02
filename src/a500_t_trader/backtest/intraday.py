@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_DOWN, Decimal
-from typing import Mapping, Protocol
+from typing import Protocol
 
 from ..market_data import MinuteBar
 from ..strategy.intraday_technical import (
@@ -39,7 +40,9 @@ class BarSignal:
 
 
 class StrategySignalProvider(Protocol):
-    def signals(self, symbol: str, bars: tuple[MinuteBar, ...]) -> tuple[BarSignal, ...]: ...
+    def signals(
+        self, symbol: str, bars: tuple[MinuteBar, ...]
+    ) -> tuple[BarSignal, ...]: ...
 
 
 class CandidateQuantityResolver(Protocol):
@@ -80,7 +83,9 @@ class TechnicalAnalysisSignalProvider:
         self._grid_context = grid_context
         self._grid_context_for = grid_context_for
 
-    def signals(self, symbol: str, bars: tuple[MinuteBar, ...]) -> tuple[BarSignal, ...]:
+    def signals(
+        self, symbol: str, bars: tuple[MinuteBar, ...]
+    ) -> tuple[BarSignal, ...]:
         signals: list[BarSignal] = []
         history: list[MinuteBar] = []
         for bar in bars:
@@ -102,9 +107,7 @@ class TechnicalAnalysisSignalProvider:
             direction = analysis.candidate.lower()
             if analysis.risk_status != "READY" or direction not in {"buy", "sell"}:
                 continue
-            quantity = self._quantity_for.quantity_for(
-                symbol, analysis, history_tuple
-            )
+            quantity = self._quantity_for.quantity_for(symbol, analysis, history_tuple)
             if quantity is not None:
                 signals.append(BarSignal(bar.timestamp, direction, quantity))
         return tuple(signals)
@@ -180,7 +183,8 @@ def run_intraday_backtest(
     """Simulate supplied strategy signals; no strategy scoring is inferred here."""
     if signals is None:
         raise StrategyRulesUnavailableError(
-            "V1 strategy signal provider is unavailable; source-defined rules are required"
+            "V1 strategy signal provider is unavailable; "
+            "source-defined rules are required"
         )
     if not implementation_version.strip():
         raise ValueError("implementation_version must not be empty")
@@ -219,33 +223,61 @@ def run_intraday_backtest(
     cancellations: list[dict[str, object]] = []
     for index, bar in enumerate(selected):
         day = bar.timestamp.date()
-        newly_sellable = sum(quantity for acquired_day, quantity in acquired if acquired_day < day)
+        newly_sellable = sum(
+            quantity for acquired_day, quantity in acquired if acquired_day < day
+        )
         sellable += newly_sellable
-        acquired = [(acquired_day, quantity) for acquired_day, quantity in acquired if acquired_day >= day]
+        acquired = [
+            (acquired_day, quantity)
+            for acquired_day, quantity in acquired
+            if acquired_day >= day
+        ]
         if index:
-            max_fill = int(Decimal(bar.volume) * params.participation_rate) // BOARD_LOT * BOARD_LOT
+            max_fill = (
+                int(Decimal(bar.volume) * params.participation_rate)
+                // BOARD_LOT
+                * BOARD_LOT
+            )
             for order in tuple(orders):
                 if index <= order.submitted_index:
                     continue
                 quantity = min(order.remaining, max_fill)
                 if order.signal.direction == "buy" and quantity:
-                    execution_price = bar.open * (Decimal(1) + params.slippage_bps / BASIS_POINTS)
-                    unit_cost = execution_price * (Decimal(1) + params.fee_bps / BASIS_POINTS)
+                    execution_price = bar.open * (
+                        Decimal(1) + params.slippage_bps / BASIS_POINTS
+                    )
+                    unit_cost = execution_price * (
+                        Decimal(1) + params.fee_bps / BASIS_POINTS
+                    )
                     reserved_for_order = order.reserved_cash
-                    max_affordable = int((min(cash, reserved_for_order, unit_cost * quantity) / (unit_cost * BOARD_LOT)).to_integral_value(rounding=ROUND_DOWN)) * BOARD_LOT
+                    max_affordable = (
+                        int(
+                            (
+                                min(cash, reserved_for_order, unit_cost * quantity)
+                                / (unit_cost * BOARD_LOT)
+                            ).to_integral_value(rounding=ROUND_DOWN)
+                        )
+                        * BOARD_LOT
+                    )
                     quantity = min(quantity, max_affordable)
                 if quantity:
                     if order.signal.direction == "buy":
-                        fill_price = bar.open * (Decimal(1) + params.slippage_bps / BASIS_POINTS)
+                        fill_price = bar.open * (
+                            Decimal(1) + params.slippage_bps / BASIS_POINTS
+                        )
                         notional = fill_price * quantity
                         fees = notional * params.fee_bps / BASIS_POINTS
                         slippage = (fill_price - bar.open) * quantity
                         cash -= notional + fees
                         holdings += quantity
                         acquired.append((day, quantity))
-                        order.reserved_cash = max(Decimal(0), order.reserved_cash - notional - fees)
+                        order.reserved_cash = max(
+                            Decimal(0), order.reserved_cash - notional - fees
+                        )
                     else:
-                        fill_price = bar.open * (Decimal(1) - params.slippage_bps / BASIS_POINTS)
+                        fill_price = bar.open * (
+                            Decimal(1) - params.slippage_bps / BASIS_POINTS
+                        )
                         notional = fill_price * quantity
                         fees = notional * params.fee_bps / BASIS_POINTS
                         slippage = (bar.open - fill_price) * quantity
@@ -270,14 +302,43 @@ def run_intraday_backtest(
                 elif index - order.submitted_index >= params.order_lifetime_bars:
                     if order.signal.direction == "sell":
                         sellable += order.remaining
-                    cancellations.append({"signal_timestamp": order.signal.timestamp, "direction": order.signal.direction, "unfilled_quantity": order.remaining, "reserved_cash_released": order.reserved_cash})
+                    cancellations.append(
+                        {
+                            "signal_timestamp": order.signal.timestamp,
+                            "direction": order.signal.direction,
+                            "unfilled_quantity": order.remaining,
+                            "reserved_cash_released": order.reserved_cash,
+                        }
+                    )
                     orders.remove(order)
         for signal in signal_at.get(bar.timestamp, ()):
             if signal.direction == "buy":
-                free_cash = max(Decimal(0), cash - sum((order.reserved_cash for order in orders if order.signal.direction == "buy"), Decimal(0)))
-                estimated_unit_cost = bar.close * (Decimal(1) + params.slippage_bps / BASIS_POINTS) * (Decimal(1) + params.fee_bps / BASIS_POINTS)
+                free_cash = max(
+                    Decimal(0),
+                    cash
+                    - sum(
+                        (
+                            order.reserved_cash
+                            for order in orders
+                            if order.signal.direction == "buy"
+                        ),
+                        Decimal(0),
+                    ),
+                )
+                estimated_unit_cost = (
+                    bar.close
+                    * (Decimal(1) + params.slippage_bps / BASIS_POINTS)
+                    * (Decimal(1) + params.fee_bps / BASIS_POINTS)
+                )
                 reserved = min(free_cash, estimated_unit_cost * signal.quantity)
-                allowed = int((reserved / (estimated_unit_cost * BOARD_LOT)).to_integral_value(rounding=ROUND_DOWN)) * BOARD_LOT
+                allowed = (
+                    int(
+                        (
+                            reserved / (estimated_unit_cost * BOARD_LOT)
+                        ).to_integral_value(rounding=ROUND_DOWN)
+                    )
+                    * BOARD_LOT
+                )
                 if allowed:
                     orders.append(_Order(signal, index, allowed, reserved))
             else:
@@ -286,7 +347,14 @@ def run_intraday_backtest(
                     sellable -= allowed
                     orders.append(_Order(signal, index, allowed, Decimal(0)))
     for order in orders:
-        cancellations.append({"signal_timestamp": order.signal.timestamp, "direction": order.signal.direction, "unfilled_quantity": order.remaining, "reserved_cash_released": order.reserved_cash})
+        cancellations.append(
+            {
+                "signal_timestamp": order.signal.timestamp,
+                "direction": order.signal.direction,
+                "unfilled_quantity": order.remaining,
+                "reserved_cash_released": order.reserved_cash,
+            }
+        )
     final_price = selected[-1].close
     strategy_value = cash + holdings * final_price
     baseline_value = initial_cash + initial_holdings * final_price
@@ -316,8 +384,12 @@ def run_intraday_backtest(
         "partial_fill": (
             "board-lot quantity limited by configured participation rate and bar volume"
         ),
-        "cancel": "unfilled remainder canceled at order lifetime; reserved cash released",
-        "baseline": "initial cash and holdings held unchanged through final completed-bar close",
+        "cancel": (
+            "unfilled remainder canceled at order lifetime; reserved cash released"
+        ),
+        "baseline": (
+            "initial cash and holdings held unchanged through final completed-bar close"
+        ),
         "initial_account_snapshot": initial_snapshot,
     }
     return IntradayBacktestResult(
@@ -343,4 +415,14 @@ def run_intraday_backtest(
 
 
 def _bar_dict(bar: MinuteBar) -> dict[str, object]:
-    return {"symbol": bar.symbol, "timestamp": bar.timestamp.isoformat(), "interval_minutes": bar.interval_minutes, "open": str(bar.open), "high": str(bar.high), "low": str(bar.low), "close": str(bar.close), "volume": bar.volume, "is_completed": bar.is_completed}
+    return {
+        "symbol": bar.symbol,
+        "timestamp": bar.timestamp.isoformat(),
+        "interval_minutes": bar.interval_minutes,
+        "open": str(bar.open),
+        "high": str(bar.high),
+        "low": str(bar.low),
+        "close": str(bar.close),
+        "volume": bar.volume,
+        "is_completed": bar.is_completed,
+    }

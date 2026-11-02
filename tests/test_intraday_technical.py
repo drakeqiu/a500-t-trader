@@ -4,12 +4,12 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar
-from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
 from a500_t_trader.strategy.intraday_technical import (
     TECHNICAL_PARAMETER_HASH,
     TECHNICAL_PARAMETERS,
     analyze_intraday_technical,
 )
+from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -62,9 +62,24 @@ def test_indicator_warmups_use_exact_period_boundaries() -> None:
     assert at_warmup.indicators["kdj_k"] is not None
     assert at_warmup.indicators["atr_14"] is not None
     assert before_ema60.indicators["ema_60"] is None
-    assert analyze_intraday_technical({"510300": _bars(count=20)})["510300"].indicators["bollinger_sigma"] is not None
-    assert analyze_intraday_technical({"510300": _bars(count=9)})["510300"].indicators["kdj_k"] is not None
-    assert analyze_intraday_technical({"510300": _bars(count=15)})["510300"].indicators["atr_14"] is not None
+    assert (
+        analyze_intraday_technical({"510300": _bars(count=20)})["510300"].indicators[
+            "bollinger_sigma"
+        ]
+        is not None
+    )
+    assert (
+        analyze_intraday_technical({"510300": _bars(count=9)})["510300"].indicators[
+            "kdj_k"
+        ]
+        is not None
+    )
+    assert (
+        analyze_intraday_technical({"510300": _bars(count=15)})["510300"].indicators[
+            "atr_14"
+        ]
+        is not None
+    )
 
 
 def test_bollinger_score_saturates_at_source_z_boundary() -> None:
@@ -86,6 +101,7 @@ def test_bollinger_score_saturates_at_source_z_boundary() -> None:
 
     assert analysis.score_breakdown["boll_sell"] == 0.0
 
+
 def test_flat_completed_history_keeps_range_baseline_scores_and_wait():
     bars = tuple(
         replace(
@@ -104,7 +120,9 @@ def test_flat_completed_history_keeps_range_baseline_scores_and_wait():
     assert analysis.scores == {"buy": 10.0, "sell": 10.0, "delta": 0.0}
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "BLOCKED"
-    assert any("dynamic grid inputs unavailable" in reason for reason in analysis.reasons)
+    assert any(
+        "dynamic grid inputs unavailable" in reason for reason in analysis.reasons
+    )
 
 
 def test_scoring_emits_config_and_version_fingerprint() -> None:
@@ -182,12 +200,17 @@ def test_dynamic_grid_width_over_v1_limit_blocks_scoring_candidate() -> None:
     assert analysis.candidate == "WAIT"
     assert analysis.grid_step is None
     assert analysis.risk_status == "BLOCKED"
-    assert "dynamic grid inputs unavailable or grid width exceeds 0.90%" in analysis.reasons
+    assert (
+        "dynamic grid inputs unavailable or grid width exceeds 0.90%"
+        in analysis.reasons
+    )
 
 
 def test_normal_signal_window_closes_after_protection_only_cutoff() -> None:
     source = _bars()
-    bars = source + (replace(source[-1], timestamp=source[-1].timestamp.replace(hour=14, minute=50)),)
+    bars = source + (
+        replace(source[-1], timestamp=source[-1].timestamp.replace(hour=14, minute=50)),
+    )
     analysis = analyze_intraday_technical(
         {"510300": bars},
         grid_context={
@@ -201,6 +224,7 @@ def test_normal_signal_window_closes_after_protection_only_cutoff() -> None:
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "READY"
     assert "outside V1.0 technical signal time windows" in analysis.reasons
+
 
 def test_incomplete_bars_do_not_satisfy_180_bar_gate() -> None:
     bars = _bars(count=180)
@@ -231,6 +255,8 @@ def test_missing_0945_anchor_is_not_replaced_with_later_vwap() -> None:
     assert analysis.indicators["vwap_0945"] is None
     assert "missing 09:45 VWAP anchor" in analysis.reasons
     assert analysis.candidate == "WAIT"
+
+
 def test_source_exact_paired_targets_emit_take_profit_and_buyback(
     monkeypatch,
 ) -> None:
@@ -330,18 +356,25 @@ def test_paired_target_does_not_override_ordinary_buy_candidate(
 def test_same_session_missing_bar_fails_closed() -> None:
     source = _bars()
     gap_index = 10
-    bars = source[:gap_index] + (
-        replace(
-            source[gap_index],
-            timestamp=source[gap_index].timestamp + timedelta(minutes=5),
-        ),
-    ) + source[gap_index + 1 :]
+    bars = (
+        source[:gap_index]
+        + (
+            replace(
+                source[gap_index],
+                timestamp=source[gap_index].timestamp + timedelta(minutes=5),
+            ),
+        )
+        + source[gap_index + 1 :]
+    )
 
     analysis = analyze_intraday_technical({"510300": bars})["510300"]
 
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "BLOCKED"
-    assert "missing completed five-minute bars within a trading session" in analysis.reasons
+    assert (
+        "missing completed five-minute bars within a trading session"
+        in analysis.reasons
+    )
 
 
 def test_configured_signal_threshold_changes_candidate(

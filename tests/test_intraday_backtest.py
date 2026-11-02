@@ -42,8 +42,13 @@ def account() -> AccountSnapshot:
     )
 
 
-def test_public_simulation_uses_later_bar_partial_fills_costs_t1_and_hold_baseline() -> None:
-    bars = (bar(30, 0, "10"), bar(30, 1, "10", 250), bar(30, 2, "10", 250), bar(31, 0, "12"))
+def test_partial_fills_costs_t1_and_hold_baseline() -> None:
+    bars = (
+        bar(30, 0, "10"),
+        bar(30, 1, "10", 250),
+        bar(30, 2, "10", 250),
+        bar(31, 0, "12"),
+    )
     result = run_intraday_backtest(
         symbol="510300",
         account=account(),
@@ -59,7 +64,10 @@ def test_public_simulation_uses_later_bar_partial_fills_costs_t1_and_hold_baseli
         implementation_version="test-v1",
     )
 
-    assert [fill.fill_timestamp for fill in result.fills] == [bars[1].timestamp, bars[2].timestamp]
+    assert [fill.fill_timestamp for fill in result.fills] == [
+        bars[1].timestamp,
+        bars[2].timestamp,
+    ]
     assert result.fills[0].fees == Decimal("1.00100")
     assert result.fills[0].slippage == Decimal("1.00")
     assert [fill.quantity for fill in result.fills] == [100, 100]
@@ -110,9 +118,7 @@ def test_public_simulation_cancels_unfilled_remainder_and_releases_reserve() -> 
 
 def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
     bars = (bar(30, 0, "10"), bar(30, 1, "10"), bar(31, 0, "10"), bar(31, 1, "10"))
-    empty_account = AccountSnapshot(
-        account().as_of, {}, {}, {}, Decimal("10000")
-    )
+    empty_account = AccountSnapshot(account().as_of, {}, {}, {}, Decimal("10000"))
     result = run_intraday_backtest(
         symbol="510300",
         account=empty_account,
@@ -157,6 +163,8 @@ def test_public_simulation_accepts_strategy_signal_provider() -> None:
 
     assert result.fills[0].signal_timestamp == bars[0].timestamp
     assert result.fills[0].fill_timestamp == bars[1].timestamp
+
+
 def test_technical_provider_fails_closed_without_sufficient_history() -> None:
     bars = tuple(
         MinuteBar(
@@ -172,6 +180,7 @@ def test_technical_provider_fails_closed_without_sufficient_history() -> None:
         )
         for index in range(2)
     )
+
     class QuantityResolver:
         def quantity_for(self, symbol, analysis, history):
             pytest.fail("blocked technical candidates must not reach quantity sizing")
