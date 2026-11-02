@@ -160,12 +160,15 @@ def _analyze_symbol(
     if len(valid) < MINIMUM_HISTORY:
         reasons.append("fewer than 180 completed valid 5-minute bars")
     indicators = _indicators(valid)
+    output_indicators: dict[str, object] = dict(indicators)
     enough_history = len(valid) >= MINIMUM_HISTORY
     trend = _trend(valid, indicators) if enough_history else None
     if indicators["vwap_0945"] is None:
         reasons.append("missing 09:45 VWAP anchor")
     breakdown = _score_components(valid, indicators, trend) if enough_history else None
-    grid_step = None
+    grid_step: Decimal | None = None
+    grid_buy_level: str | None = None
+    grid_sell_level: str | None = None
     if enough_history and breakdown is not None:
         grid = _grid(valid, indicators, trend, grid_context)
         if grid is None:
@@ -180,8 +183,8 @@ def _analyze_symbol(
             breakdown["atr_grid_sell"] = grid_sell
             indicators["grid_anchor"] = indicators["vwap_0945"]
             indicators["grid_step"] = grid_step
-            indicators["grid_buy_level"] = grid_buy_level
-            indicators["grid_sell_level"] = grid_sell_level
+            output_indicators["grid_buy_level"] = grid_buy_level
+            output_indicators["grid_sell_level"] = grid_sell_level
     else:
         breakdown = None
     scores = _scores(breakdown)
@@ -198,7 +201,9 @@ def _analyze_symbol(
             - breakdown["sell_total"]
             - breakdown.get("atr_grid_sell", 0.0)
         )
-        direction_confirmed = _confirmations(valid, indicators, breakdown)
+        direction_confirmed = _confirmations(
+            valid, indicators, breakdown, grid_buy_level, grid_sell_level
+        )
         window = _window_allows(as_of or valid[-1].timestamp)
         buy_total = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
         sell_total = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
@@ -327,7 +332,7 @@ def _analyze_symbol(
     return IntradayTechnicalAnalysis(
         symbol=symbol,
         trend=trend,
-        indicators=indicators,
+        indicators=output_indicators if grid_step is not None else indicators,
         scores=scores,
         candidate=candidate,
         risk_status=risk_status,
@@ -732,6 +737,8 @@ def _confirmations(
     bars: list[MinuteBar],
     indicators: Mapping[str, Decimal | None],
     scores: Mapping[str, float],
+    buy_level: str | None,
+    sell_level: str | None,
 ) -> tuple[bool, bool]:
     if len(bars) < 2:
         return False, False
@@ -739,18 +746,25 @@ def _confirmations(
     k, d = indicators["kdj_k"], indicators["kdj_d"]
     pk, pd = indicators["kdj_previous_k"], indicators["kdj_previous_d"]
     golden = (
-        pk is not None and pd is not None and k is not None and d is not None
-        and pk <= pd and k > d
+        pk is not None
+        and pd is not None
+        and k is not None
+        and d is not None
+        and pk <= pd
+        and k > d
     )
     death = (
-        pk is not None and pd is not None and k is not None and d is not None
-        and pk >= pd and k < d
+        pk is not None
+        and pd is not None
+        and k is not None
+        and d is not None
+        and pk >= pd
+        and k < d
     )
     lower = indicators["bollinger_lower"]
     upper = indicators["bollinger_upper"]
     boll_buy = lower is not None and previous.low <= lower and current.close > lower
     boll_sell = upper is not None and previous.high >= upper and current.close < upper
-    buy_level, sell_level = indicators["grid_buy_level"], indicators["grid_sell_level"]
     anchor, step = indicators["grid_anchor"], indicators["grid_step"]
     grid_buy = grid_sell = False
     if anchor is not None and step is not None and buy_level:

@@ -189,11 +189,13 @@ def main(
     review_parser.add_argument(
         "--database", required=True, help="SQLite trigger-evidence file"
     )
-    intraday_config = commands.add_parser(
+    intraday_config_parser = commands.add_parser(
         "intraday-config",
         help="validate explicit V1 strategy inputs and report their identity",
     )
-    intraday_config.add_argument("--config", required=True, help="V1 JSON config file")
+    intraday_config_parser.add_argument(
+        "--config", required=True, help="V1 JSON config file"
+    )
     strategy = commands.add_parser(
         "intraday-strategy", help="evaluate user-supplied intraday strategy inputs"
     )
@@ -206,7 +208,7 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "intraday-strategy":
         try:
-            intraday_config = load_intraday_v1_config(args.config)
+            loaded_config = load_intraday_v1_config(args.config)
             with open(args.bars, encoding="utf-8") as stream:
                 document = json.load(stream)
             if not isinstance(document, list):
@@ -233,7 +235,7 @@ def main(
             result = evaluate_intraday_strategy(
                 {symbol: tuple(bars) for symbol, bars in grouped.items()},
                 as_of=args.as_of,
-                config=intraday_config,
+                config=loaded_config,
             )
             rendered = json.dumps(
                 result, ensure_ascii=False, indent=2, default=_json_default
@@ -253,19 +255,19 @@ def main(
             return 2
     if args.command == "intraday-config":
         try:
-            intraday_config = load_intraday_v1_config(args.config)
+            loaded_config = load_intraday_v1_config(args.config)
         except Exception as error:
             print(f"Unable to load V1 intraday configuration: {error}", file=sys.stderr)
             return 2
         print(
             json.dumps(
                 {
-                    "strategy_id": intraday_config.strategy_id,
-                    "rule_version": intraday_config.rule_version,
-                    "implementation_version": intraday_config.implementation_version,
-                    "rule_source": intraday_config.rule_source,
-                    "rule_source_sha256": intraday_config.rule_source_sha256,
-                    "configuration_fingerprint": intraday_config.fingerprint,
+                    "strategy_id": loaded_config.strategy_id,
+                    "rule_version": loaded_config.rule_version,
+                    "implementation_version": loaded_config.implementation_version,
+                    "rule_source": loaded_config.rule_source,
+                    "rule_source_sha256": loaded_config.rule_source_sha256,
+                    "configuration_fingerprint": loaded_config.fingerprint,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -457,7 +459,9 @@ def main(
         if args.command == "backtest":
             if args.symbol is not None:
                 symbol = normalize_symbol(args.symbol)
-                matching = tuple(rule for rule in plan_config.rules if rule.symbol == symbol)
+                matching = tuple(
+                    rule for rule in plan_config.rules if rule.symbol == symbol
+                )
                 if not matching:
                     raise ValueError(f"{symbol} is not present in configured ETF rules")
                 plan_config = replace(plan_config, rules=matching)

@@ -98,7 +98,6 @@ def test_bollinger_score_saturates_at_source_z_boundary() -> None:
     )
     analysis = analyze_intraday_technical({"510300": bars})["510300"]
 
-
     score_breakdown = analysis.score_breakdown
     assert score_breakdown is not None
     assert score_breakdown["boll_buy"] == 20.0

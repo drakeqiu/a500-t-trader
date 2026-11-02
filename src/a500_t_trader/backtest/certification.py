@@ -192,8 +192,12 @@ def _thresholds(
     else:
         for name, amount in perturbation.items():
             try:
-                value = Decimal(str(amount))
-                if not name or not value.is_finite() or value <= 0:
+                perturbation_value = Decimal(str(amount))
+                if (
+                    not name
+                    or not perturbation_value.is_finite()
+                    or perturbation_value <= 0
+                ):
                     raise InvalidOperation
             except InvalidOperation, ValueError, TypeError:
                 blockers.append(
@@ -207,16 +211,16 @@ def _thresholds(
         "in_sample_profit_factor_minimum",
         "out_of_sample_profit_factor_minimum",
     ):
-        value = thresholds.get(name)
-        if value is not None and value < Decimal(1):
+        threshold_value = thresholds.get(name)
+        if threshold_value is not None and threshold_value < Decimal(1):
             blockers.append(f"{name} must be at least 1")
     for name in (
         "net_return_minimum",
         "paired_trade_average_net_profit_minimum",
         "maximum_drawdown",
     ):
-        value = thresholds.get(name)
-        if value is not None and value < 0:
+        threshold_value = thresholds.get(name)
+        if threshold_value is not None and threshold_value < 0:
             blockers.append(f"{name} cannot be negative")
     maximum_drawdown = thresholds.get("maximum_drawdown")
     if maximum_drawdown is not None and maximum_drawdown > 1:
@@ -240,9 +244,7 @@ def _evaluate(
     paired_average_minimum = cast(
         Decimal, thresholds["paired_trade_average_net_profit_minimum"]
     )
-    if net_return is not None and (
-        net_return <= 0 or net_return < net_return_minimum
-    ):
+    if net_return is not None and (net_return <= 0 or net_return < net_return_minimum):
         blockers.append("net_return")
 
     profits = evidence.paired_trade_net_profits
@@ -271,9 +273,7 @@ def _evaluate(
     drawdown = metric(evidence.maximum_drawdown, "maximum_drawdown")
     maximum_drawdown = cast(Decimal, thresholds["maximum_drawdown"])
     minimum_sample_count = cast(int, thresholds["minimum_sample_count"])
-    if drawdown is not None and (
-        drawdown < 0 or drawdown > maximum_drawdown
-    ):
+    if drawdown is not None and (drawdown < 0 or drawdown > maximum_drawdown):
         blockers.append("maximum_drawdown")
     if type(evidence.sample_count) is not int:
         blockers.append("sample_count is missing")
@@ -324,8 +324,7 @@ def _evaluate(
             if (
                 not isinstance(neighbor_pf, Decimal)
                 or not neighbor_pf.is_finite()
-                or neighbor_pf
-                < max(Decimal("1.25"), profit_factor_minimum)
+                or neighbor_pf < max(Decimal("1.25"), profit_factor_minimum)
             ):
                 blockers.append(f"neighbor_parameter_metrics[{index}].profit_factor")
     walk = cast(Mapping[str, object], thresholds["walk_forward"])

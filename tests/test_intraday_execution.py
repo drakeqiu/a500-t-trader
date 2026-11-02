@@ -4,11 +4,11 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .test_intraday_v1_config import _complete_config, _write_config
-
 from a500_t_trader.strategy.intraday_execution import calculate_intraday_execution
 from a500_t_trader.strategy.intraday_technical import IntradayTechnicalAnalysis
 from a500_t_trader.strategy.intraday_v1_config import load_intraday_v1_config
+
+from .test_intraday_v1_config import _complete_config, _write_config
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -96,8 +96,14 @@ def test_sell_quantity_is_capped_at_eight_percent_of_nav(tmp_path: Path) -> None
             "market_value": "40000",
         }
     )
-    config_data["parameters"]["signals"]["sell_threshold"] = 68
-    config_data["parameters"]["risk"].update(
+    parameters = config_data["parameters"]
+    assert isinstance(parameters, dict)
+    signals = parameters["signals"]
+    assert isinstance(signals, dict)
+    signals["sell_threshold"] = 68
+    risk = parameters["risk"]
+    assert isinstance(risk, dict)
+    risk.update(
         {
             "daily_turnover_limit": "100000",
             "daily_sell_limit": "100000",

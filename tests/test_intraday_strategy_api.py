@@ -358,9 +358,7 @@ def test_current_certification_binding_is_accepted() -> None:
     assert "certification binding unavailable" not in reasons
 
 
-def _assert_blocked(
-    result: dict[str, object], *reasons_to_check: str
-) -> None:
+def _assert_blocked(result: dict[str, object], *reasons_to_check: str) -> None:
     execution = result["execution"]
     assert isinstance(execution, dict)
     assert execution["allowed"] is False

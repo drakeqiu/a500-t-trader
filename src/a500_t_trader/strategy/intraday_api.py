@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from zoneinfo import ZoneInfo
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from ..backtest.certification import CertificationResult, certification_is_current
 from ..market_data import MinuteBar
@@ -93,11 +93,7 @@ def evaluate_intraday_strategy(
                 reasons.append("account snapshot timestamp unavailable or invalid")
             elif _stale(account_stamp, now):
                 reasons.append("account snapshot is stale or future-dated")
-            position = (
-                positions.get(symbol)
-                if isinstance(positions, dict)
-                else None
-            )
+            position = positions.get(symbol) if isinstance(positions, dict) else None
             if not isinstance(position, dict):
                 reasons.append(f"account position unavailable for {symbol}")
             else:
@@ -261,7 +257,12 @@ def evaluate_intraday_strategy(
             and latest is not None
         )
         execution = None
-        if eligible and analysis is not None and latest is not None and config is not None:
+        if (
+            eligible
+            and analysis is not None
+            and latest is not None
+            and config is not None
+        ):
             adjusted = _with_reference_price(analysis, latest)
             try:
                 execution = calculate_intraday_execution(

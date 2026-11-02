@@ -566,8 +566,7 @@ def _daily_limit_reasons(
         or max_additions is None
         or max_fills is None
         or any(
-            value < ZERO
-            for value in (max_turnover, max_sell, max_additions, max_fills)
+            value < ZERO for value in (max_turnover, max_sell, max_additions, max_fills)
         )
     ):
         return ("explicit daily risk limits are missing or invalid",)
