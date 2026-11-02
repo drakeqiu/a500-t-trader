@@ -313,13 +313,16 @@ def main(
                 args.notes,
             )
         except Exception as error:
-            print(f"Unable to record manual fill: {error}", file=sys.stderr)
+            print(
+                f"Unable to record manual fill: {error}",
+                file=sys.stderr,
+            )
             return 2
         print(
             json.dumps(
                 {
                     "id": identifier,
-                    "classification": "user-entered manual fill; not broker-verified",
+                    "classification": ("user-entered manual fill; not broker-verified"),
                 }
             )
         )
