@@ -16,7 +16,8 @@ def _complete_config() -> dict[str, object]:
         "rule_version": "V1.0",
         "implementation_version": "commit:abc123",
         "rule_source": (
-            "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.txt"
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
         ),
         "rule_source_sha256": (
             "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
@@ -100,7 +101,10 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     assert config.rule_version == "V1.0"
     assert (
         config.rule_source
-        == "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.txt"
+        == (
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
+        )
     )
     assert (
         config.rule_source_sha256
@@ -147,12 +151,12 @@ def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
         / "docs"
         / "strategy"
         / "intraday-etf-t-v1"
-        / "intraday_etf_t_quantitative_strategy_v1.0.txt"
+        / "intraday_etf_t_quantitative_strategy_v1.0.md"
     )
 
     assert (
         hashlib.sha256(source.read_bytes()).hexdigest()
-        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
     )
 
 
@@ -188,7 +192,10 @@ def test_cli_validates_and_reports_auditable_configuration(
     assert output["rule_version"] == "V1.0"
     assert (
         output["rule_source"]
-        == "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.txt"
+        == (
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
+        )
     )
     assert (
         output["rule_source_sha256"]
