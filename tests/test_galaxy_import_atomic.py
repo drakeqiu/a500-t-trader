@@ -25,7 +25,7 @@ def _write_source(path: Path, *rows: str) -> None:
     path.write_bytes((HEADER + "".join(rows)).encode("gb18030"))
 
 
-def test_invalid_row_rejects_otherwise_valid_batch_without_writes(tmp_path: Path) -> None:
+def test_invalid_row_rejects_batch_without_writes(tmp_path: Path) -> None:
     database = tmp_path / "account.sqlite3"
     AccountLedger(database)
     source = tmp_path / "fills.csv"
@@ -70,7 +70,8 @@ def test_database_write_failure_rolls_back_every_new_fill(tmp_path: Path) -> Non
     with sqlite3.connect(database) as db:
         db.execute(
             "CREATE TRIGGER reject_second_fill BEFORE INSERT ON imported_fills "
-            "WHEN NEW.trade_number = '1002' BEGIN SELECT RAISE(ABORT, 'write failed'); END"
+            "WHEN NEW.trade_number = '1002' "
+            "BEGIN SELECT RAISE(ABORT, 'write failed'); END"
         )
     source = tmp_path / "fills.csv"
     _write_source(source, _row("1001"), _row("1002"))
