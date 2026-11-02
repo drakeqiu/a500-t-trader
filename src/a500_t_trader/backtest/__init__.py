@@ -196,16 +196,14 @@ def run_backtest(
             cash_limit = min(cash, rule.max_buy_cash or cash)
             unit_cost = market_price * (1 + cost_bps / Decimal(10000))
             quantity = int(
-                (
-                    cash_limit / unit_cost / HUNDRED
-                ).to_integral_value(rounding=ROUND_DOWN)
+                (cash_limit / unit_cost / HUNDRED).to_integral_value(
+                    rounding=ROUND_DOWN
+                )
                 * 100
             )
             if quantity:
                 notional = market_price * quantity
-                costs = max(
-                    notional * cost_bps / Decimal(10000), minimum_commission
-                )
+                costs = max(notional * cost_bps / Decimal(10000), minimum_commission)
                 if notional + costs > cash_limit:
                     quantity = int(
                         (

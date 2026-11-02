@@ -124,14 +124,11 @@ class IntradayBacktestParams:
     def __post_init__(self) -> None:
         if not Decimal(0) < self.participation_rate <= Decimal(1):
             raise ValueError("participation_rate must be in (0, 1]")
-        if (
-            self.fee_bps < 0
-            or self.slippage_bps < 0
-            or self.minimum_commission < 0
-        ):
+        if self.fee_bps < 0 or self.slippage_bps < 0 or self.minimum_commission < 0:
             raise ValueError("fees and slippage cannot be negative")
         if self.order_lifetime_bars < 1:
             raise ValueError("order_lifetime_bars must be positive")
+
 
 @dataclass(frozen=True, slots=True)
 class IntradayFill:
@@ -275,8 +272,7 @@ def run_intraday_backtest(
                                 quantity,
                                 int(
                                     (
-                                        fee_budget
-                                        / (execution_price * BOARD_LOT)
+                                        fee_budget / (execution_price * BOARD_LOT)
                                     ).to_integral_value(rounding=ROUND_DOWN)
                                 )
                                 * BOARD_LOT,
@@ -352,9 +348,7 @@ def run_intraday_backtest(
                 estimated_price = bar.close * (
                     Decimal(1) + params.slippage_bps / BASIS_POINTS
                 )
-                fee_reserve = (
-                    params.minimum_commission * params.order_lifetime_bars
-                )
+                fee_reserve = params.minimum_commission * params.order_lifetime_bars
                 order_budget = max(Decimal(0), free_cash - fee_reserve)
                 unit_cost = estimated_price * (
                     Decimal(1) + params.fee_bps / BASIS_POINTS

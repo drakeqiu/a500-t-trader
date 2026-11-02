@@ -145,7 +145,9 @@ def main(
     backtest.add_argument("--cost-bps", type=Decimal, default=Decimal(0))
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal(0))
     backtest.add_argument(
-        "--minimum-commission", type=Decimal, default=Decimal(0),
+        "--minimum-commission",
+        type=Decimal,
+        default=Decimal(0),
         help="minimum commission charged independently for each fill; zero disables it",
     )
     backtest.add_argument("--implementation-version", default="1")
