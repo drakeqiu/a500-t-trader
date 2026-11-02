@@ -30,8 +30,8 @@ class FakeTgw:
 
     class SubscribeItem:
         def __init__(self) -> None:
-            self.flag = None
-            self.category_type = None
+            self._flag = 0
+            self._category_type = 0
             self.market = None
             self.security_code = None
 

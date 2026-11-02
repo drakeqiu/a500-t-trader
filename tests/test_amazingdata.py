@@ -56,6 +56,7 @@ class SnapshotAPI:
     SubscribeDataType = SimpleNamespace(
         kSnapshot=10, k1MinKline=1, kTickExecution=23
     )
+    VarietyCategory = SimpleNamespace(kNone=0)
 
     def __init__(self, *, deliver_snapshot: bool = True) -> None:
         self.deliver_snapshot = deliver_snapshot
@@ -70,17 +71,17 @@ class SnapshotAPI:
                 SimpleNamespace(
                     security_code="563360",
                     orig_time="20261102093200",
-                    last_price=1.2345,
-                    pre_close_price=1.2,
-                    open_price=1.21,
-                    high_price=1.24,
-                    low_price=1.2,
-                    total_volume_trade=3200,
-                    total_value_trade=3950.4,
-                    bid_price=[1.234],
-                    bid_volume=[18],
-                    offer_price=[1.235],
-                    offer_volume=[12],
+                    last_price=1234500,
+                    pre_close_price=1200000,
+                    open_price=1210000,
+                    high_price=1240000,
+                    low_price=1200000,
+                    total_volume_trade=320000,
+                    total_value_trade=395040000,
+                    bid_price=[1234000],
+                    bid_volume=[1800],
+                    offer_price=[1235000],
+                    offer_volume=[1200],
                 )
             )
         return 0
