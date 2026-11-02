@@ -154,6 +154,10 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 
 策略信号 API 也可直接调用 `a500_t_trader.backtest.run_intraday_backtest` 进行 bar 模拟：传入已完成 bars、`BarSignal` 序列或实现 `StrategySignalProvider` 的信号提供器、账户快照和执行参数。模拟仅在后续 bar 开盘尝试成交，并记录部分成交、撤单、预留现金、费用/滑点、T+1 库存、输入 bars 快照及其 SHA-256 标识、策略参数和假设；持有基线使用相同的初始现金/持仓。此 API 不推导策略评分或信号规则；未提供信号提供器/信号时明确报错。旧 CLI 的规则文件阈值不能代替尚未提供的 V1 源规则。
 
+回测认证由 `a500_t_trader.backtest.certify_intraday_backtest` 按显式认证配置评估。必须提供扣费后正收益、正的配对交易平均净利、总 PF 至少 1.25、样本内/外 PF 均大于 1、最大回撤、样本量、成本/滑点乘数 1.5 下的收益和 PF、每个已配置邻域扰动的收益/PF，以及每个 walk-forward 切分的收益/PF。最低收益/净利、最大回撤预算、最低样本数、扰动参数范围、walk-forward 切分数和最低通过切分数都必须由用户配置；缺失配置或指标会返回未认证和阻断原因，不存在默认风险档位。
+
+认证指纹涵盖规则源 SHA-256/规则版本/全部参数、实现版本、行情快照 SHA-256、完整成本模型和完整认证配置。每次授权前消费方必须调用 `certification_is_current` 并将当前输入提供给它；输入任何变化都会使旧认证失效。认证仅表示这些历史输入达到所配置条件，不保证未来盈利，也不构成下单授权或投资建议。
+
 ## 6. 订阅 tgw 推送
 
 `TgwPushProvider` 需要调用方提供**已初始化的 tgw API 对象**。本项目只适配它的订阅回调，不负责创建、登录或配置该对象；连接方法请使用你所接入 tgw 环境提供的说明。
