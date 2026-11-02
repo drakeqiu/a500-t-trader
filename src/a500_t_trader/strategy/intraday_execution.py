@@ -363,6 +363,9 @@ def calculate_intraday_execution(
             if side == "buy":
                 additions_allocated += ONE
             fills_allocated += ONE
+            results[symbol] = SymbolExecution(
+                symbol, True, quantity, side, score, tuple(reasons)
+            )
         except Exception as error:
             results[symbol] = SymbolExecution(
                 symbol, False, 0, None, None,
