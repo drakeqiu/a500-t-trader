@@ -244,6 +244,7 @@ else:
 - `Trade.side` 仅在来源明确提供时有意义；不要从缺失值推断买卖方向。
 
 所有查询和订阅数据均受当前数据源、连接方式及账号权限限制。能力不可用应按异常或状态处理，不应伪装成空数据或自行推断。
+
 ## Intraday strategy CLI
 
 `intraday-strategy --config <v1.json> --bars <bars.json> --as-of <timestamp> [--output <result.json>]`
