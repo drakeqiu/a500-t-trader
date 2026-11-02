@@ -154,7 +154,13 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 
 `backtest-show --latest` 可显示最新运行；`history-cleanup` 只清除可复用的共用历史，不删除回测引用的快照或记录。模拟成交明确标记为非实际成交。本工具不连接券商、不下单，也不提供投资建议。
 
-策略信号 API 也可直接调用 `a500_t_trader.backtest.run_intraday_backtest` 进行 bar 模拟：传入已完成 bars、`BarSignal` 序列或实现 `StrategySignalProvider` 的信号提供器、账户快照和执行参数。模拟仅在后续 bar 开盘尝试成交，并记录部分成交、撤单、预留现金、费用/滑点、T+1 库存、输入 bars 快照及其 SHA-256 标识、策略参数和假设；持有基线使用相同的初始现金/持仓。此 API 不推导策略评分或信号规则；未提供信号提供器/信号时明确报错。旧 CLI 的规则文件阈值不能代替尚未提供的 V1 源规则。
+策略信号 API 可直接调用 `a500_t_trader.backtest.run_intraday_backtest` 进行 bar 模拟：传入已完成 bars、`BarSignal` 序列或实现 `StrategySignalProvider` 的信号提供器、账户快照和执行参数。模拟仅在后续 bar 开盘尝试成交，并记录部分成交、撤单、预留现金、费用/滑点、T+1 库存、输入 bars 快照及其 SHA-256 标识、策略参数和假设；同时提供相同初始现金/持仓的持有基线和两者收益率。
+
+`TechnicalAnalysisSignalProvider` 将 `analyze_intraday_technical` 的因果 BUY/SELL 候选转换为模拟信号：每次分析只看当根及此前已完成 bars，可传入 V1 配置和固定/逐 bar 网格上下文。它只转换 `risk_status == READY` 的候选；必须另行提供 `CandidateQuantityResolver`，由其在账户、持仓、可卖数量、资金、流动性和策略限制等执行信息齐备时返回 100 份整数倍数量，否则返回 `None` 不发信号。网格状态需要跨 bar 更新时，应实现 `TechnicalGridContextProvider`。分析器的技术候选本身不代表账户已授权执行；缺失的外部数据仍须由解析器阻断。本 API 不会推测或补造缺失的信号、数量或账户资格。
+
+回测认证由 `a500_t_trader.backtest.certify_intraday_backtest` 按显式认证配置评估。必须提供扣费后正收益、正的配对交易平均净利、总 PF 至少 1.25、样本内/外 PF 均大于 1、最大回撤、样本量、成本/滑点乘数 1.5 下的收益和 PF、每个已配置邻域扰动的收益/PF，以及每个 walk-forward 切分的收益/PF。最低收益/净利、最大回撤预算、最低样本数、扰动参数范围、walk-forward 切分数和最低通过切分数都必须由用户配置；缺失配置或指标会返回未认证和阻断原因，不存在默认风险档位。
+
+认证指纹涵盖规则源 SHA-256/规则版本/全部参数、实现版本、行情快照 SHA-256、完整成本模型和完整认证配置。每次授权前消费方必须调用 `certification_is_current` 并将当前输入提供给它；输入任何变化都会使旧认证失效。认证仅表示这些历史输入达到所配置条件，不保证未来盈利，也不构成下单授权或投资建议。
 
 ## 6. 订阅 tgw 推送
 
@@ -205,3 +211,15 @@ else:
 - `Trade.side` 仅在来源明确提供时有意义；不要从缺失值推断买卖方向。
 
 所有查询和订阅数据均受当前数据源、连接方式及账号权限限制。能力不可用应按异常或状态处理，不应伪装成空数据或自行推断。
+## Intraday strategy CLI
+
+`intraday-strategy --config <v1.json> --bars <bars.json> --as-of <timestamp> [--output <result.json>]`
+loads the explicit V1 configuration and a JSON array of minute-bar objects
+(`symbol`, `timestamp`, `interval_minutes`, `open`, `high`, `low`, `close`,
+`volume`; optional `amount` and `is_completed`) and calls the public strategy
+API. Standard output and `--output` contain the same structured JSON result.
+The CLI does not reimplement strategy scoring or sizing. Unknown scoring and
+certification gates remain fail-closed; blocked executions do not expose a
+positive actionable quantity. This advisory system does not connect to a
+broker and cannot see pending broker orders, so unseen orders may cause
+duplicate orders.

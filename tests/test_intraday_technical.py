@@ -4,7 +4,11 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar
-from a500_t_trader.strategy.intraday_technical import analyze_intraday_technical
+from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
+from a500_t_trader.strategy.intraday_technical import (
+    TECHNICAL_PARAMETER_HASH,
+    analyze_intraday_technical,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -47,20 +51,155 @@ def _bars(symbol: str = "510300", count: int = 180) -> tuple[MinuteBar, ...]:
     return tuple(rows)
 
 
-def test_analysis_reports_trend_but_fails_closed_when_exact_scoring_rules_absent() -> None:
-    analysis = analyze_intraday_technical({"510300": _bars()})["510300"]
+def test_indicator_warmups_use_exact_period_boundaries() -> None:
+    at_warmup = analyze_intraday_technical({"510300": _bars(count=60)})["510300"]
+    before_ema60 = analyze_intraday_technical({"510300": _bars(count=59)})["510300"]
 
-    assert analysis.trend in {"BULL", "BEAR", "RANGE", "STRONG_BULL", "STRONG_BEAR"}
-    assert analysis.indicators["ema_20"] is not None
-    assert analysis.indicators["bollinger_upper"] is not None
-    assert analysis.indicators["kdj_k"] is not None
-    assert analysis.indicators["atr_14"] is not None
-    assert analysis.indicators["vwap_0945"] is not None
-    assert analysis.scores == {"buy": None, "sell": None}
+    assert at_warmup.indicators["ema_20"] is not None
+    assert at_warmup.indicators["ema_60"] is not None
+    assert at_warmup.indicators["bollinger_sigma"] is not None
+    assert at_warmup.indicators["kdj_k"] is not None
+    assert at_warmup.indicators["atr_14"] is not None
+    assert before_ema60.indicators["ema_60"] is None
+    assert analyze_intraday_technical({"510300": _bars(count=20)})["510300"].indicators["bollinger_sigma"] is not None
+    assert analyze_intraday_technical({"510300": _bars(count=9)})["510300"].indicators["kdj_k"] is not None
+    assert analyze_intraday_technical({"510300": _bars(count=15)})["510300"].indicators["atr_14"] is not None
+
+
+def test_bollinger_score_saturates_at_source_z_boundary() -> None:
+    source = _bars()
+    bars = source[:-1] + (
+        replace(
+            source[-1],
+            open=Decimal("4.000"),
+            high=Decimal("4.010"),
+            low=Decimal("3.980"),
+            close=Decimal("3.990"),
+            amount=Decimal("39900"),
+        ),
+    )
+
+    analysis = analyze_intraday_technical({"510300": bars})["510300"]
+
+    assert analysis.score_breakdown["boll_buy"] == 20.0
+
+    assert analysis.score_breakdown["boll_sell"] == 0.0
+
+def test_flat_completed_history_produces_zero_dual_score_and_wait():
+    bars = tuple(
+        replace(
+            bar,
+            open=Decimal("4.000"),
+            high=Decimal("4.010"),
+            low=Decimal("3.990"),
+            close=Decimal("4.000"),
+            amount=Decimal("40000"),
+        )
+        for bar in _bars()
+    )
+    analysis = analyze_intraday_technical({"510300": bars})["510300"]
+
+    assert analysis.trend == "RANGE"
+    assert analysis.scores == {"buy": 0.0, "sell": 0.0, "delta": 0.0}
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "BLOCKED"
-    assert any("exact V1.0 scoring rules" in reason for reason in analysis.reasons)
+    assert any("dynamic grid inputs unavailable" in reason for reason in analysis.reasons)
 
+
+def test_scoring_emits_config_and_version_fingerprint() -> None:
+    config = IntradayV1Config(
+        strategy_id="intraday-etf-t-v1",
+        rule_version="V1.0",
+        implementation_version="commit:test",
+        rule_source="tracked V1 rules",
+        rule_source_sha256="6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689",
+        parameters={},
+        certification={},
+        fees={},
+        account={},
+        securities={},
+        fingerprint="a" * 64,
+    )
+    analysis = analyze_intraday_technical({"510300": _bars()}, config=config)["510300"]
+
+    assert analysis.parameter_version == "intraday-etf-t-v1"
+    assert analysis.parameter_hash == config.fingerprint
+
+
+def test_grid_anchor_uses_session_context_and_retains_step_between_rechecks() -> None:
+    bars = tuple(
+        replace(
+            bar,
+            open=Decimal("4.000"),
+            high=Decimal("4.010"),
+            low=Decimal("3.990"),
+            close=Decimal("4.000"),
+            amount=Decimal("40000"),
+        )
+        for bar in _bars()
+    )
+    analysis = analyze_intraday_technical(
+        {"510300": bars},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+                "grid_date": bars[-1].timestamp.date(),
+                "current_step": Decimal("0.020"),
+            }
+        },
+    )["510300"]
+
+    assert analysis.indicators["grid_anchor"] == Decimal("4.000")
+    assert analysis.grid_step == Decimal("0.020")
+    assert analysis.parameter_hash == TECHNICAL_PARAMETER_HASH
+
+
+def test_dynamic_grid_width_over_v1_limit_blocks_scoring_candidate() -> None:
+    bars = tuple(
+        replace(
+            bar,
+            open=Decimal("4.000"),
+            high=Decimal("4.050"),
+            low=Decimal("3.950"),
+            close=Decimal("4.000"),
+            amount=Decimal("40000"),
+        )
+        for bar in _bars()
+    )
+
+    analysis = analyze_intraday_technical(
+        {"510300": bars},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+    )["510300"]
+
+    assert analysis.candidate == "WAIT"
+    assert analysis.grid_step is None
+    assert analysis.risk_status == "BLOCKED"
+    assert "dynamic grid inputs unavailable or grid width exceeds 0.90%" in analysis.reasons
+
+
+def test_normal_signal_window_closes_after_protection_only_cutoff() -> None:
+    source = _bars()
+    bars = source + (replace(source[-1], timestamp=source[-1].timestamp.replace(hour=14, minute=50)),)
+    analysis = analyze_intraday_technical(
+        {"510300": bars},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+    )["510300"]
+
+    assert analysis.candidate == "WAIT"
+    assert analysis.risk_status == "READY"
+    assert "outside V1.0 technical signal time windows" in analysis.reasons
 
 def test_incomplete_bars_do_not_satisfy_180_bar_gate() -> None:
     bars = _bars(count=180)

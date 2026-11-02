@@ -9,6 +9,7 @@ from a500_t_trader.backtest import (
     BarSignal,
     IntradayBacktestParams,
     StrategyRulesUnavailableError,
+    TechnicalAnalysisSignalProvider,
     run_intraday_backtest,
 )
 from a500_t_trader.market_data import MinuteBar
@@ -156,3 +157,25 @@ def test_public_simulation_accepts_strategy_signal_provider() -> None:
 
     assert result.fills[0].signal_timestamp == bars[0].timestamp
     assert result.fills[0].fill_timestamp == bars[1].timestamp
+def test_technical_provider_fails_closed_without_sufficient_history() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + 5 * index, tzinfo=TZ),
+            5,
+            Decimal("4"),
+            Decimal("4.01"),
+            Decimal("3.99"),
+            Decimal("4"),
+            10000,
+            Decimal("40000"),
+        )
+        for index in range(2)
+    )
+    class QuantityResolver:
+        def quantity_for(self, symbol, analysis, history):
+            pytest.fail("blocked technical candidates must not reach quantity sizing")
+
+    provider = TechnicalAnalysisSignalProvider(quantity_for=QuantityResolver())
+
+    assert provider.signals("510300", bars) == ()

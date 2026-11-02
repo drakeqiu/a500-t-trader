@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,9 @@ class StrategyRecommendation:
     side: str
     created_at: datetime
     grid_version: int
+    grid_layer: int = 0
+    grid_round: int = 0
+
 
 @dataclass(frozen=True, slots=True)
 class StrategyFill:
@@ -58,6 +62,8 @@ class StrategyFill:
     price: Decimal
     timestamp: datetime
 
+
+_SETTLED_ORDER_STATES = frozenset({"none", "filled", "cancelled", "rejected"})
 
 class IntradayStrategyStateStore:
     """Persist advisory strategy state without treating it as account truth."""
@@ -91,7 +97,9 @@ class IntradayStrategyStateStore:
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL CHECK(side IN ('buy','sell')),
                     created_at TEXT NOT NULL,
-                    grid_version INTEGER NOT NULL
+                    grid_version INTEGER NOT NULL,
+                    grid_layer INTEGER NOT NULL,
+                    grid_round INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS strategy_trade_pairs (
                     trade_pair_id TEXT PRIMARY KEY,
@@ -127,12 +135,34 @@ class IntradayStrategyStateStore:
                 );
                 """
             )
+            state_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(intraday_strategy_state)")
+            }
+            for name in ("grid_layer", "grid_round"):
+                if name not in state_columns:
+                    db.execute(
+                        f"ALTER TABLE intraday_strategy_state ADD COLUMN {name} "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+            recommendation_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(strategy_recommendations)")
+            }
+            for name in ("grid_layer", "grid_round"):
+                if name not in recommendation_columns:
+                    db.execute(
+                        f"ALTER TABLE strategy_recommendations ADD COLUMN {name} "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
 
     def save_state(self, state: StrategyState) -> None:
         _validate_state(state)
         with sqlite3.connect(self.path) as db:
             db.execute(
-                """INSERT INTO intraday_strategy_state VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO intraday_strategy_state (
+                    symbol,session_date,grid_version,grid_layer,grid_round,spacing,
+                    same_direction_bars,cooldown_until,reset_anchor_crossings,
+                    daily_trade_count,daily_add_count,daily_turnover
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(symbol,session_date) DO UPDATE SET
                     grid_version=excluded.grid_version,
                     grid_layer=excluded.grid_layer,
@@ -145,25 +175,22 @@ class IntradayStrategyStateStore:
                     daily_add_count=excluded.daily_add_count,
                     daily_turnover=excluded.daily_turnover""",
                 (
-                    state.symbol,
-                    state.session_date.isoformat(),
-                    state.grid_version,
-                    state.grid_layer,
-                    state.grid_round,
-                    str(state.spacing),
+                    state.symbol, state.session_date.isoformat(), state.grid_version,
+                    state.grid_layer, state.grid_round, str(state.spacing),
                     state.same_direction_bars,
                     _timestamp(state.cooldown_until) if state.cooldown_until else None,
-                    state.reset_anchor_crossings,
-                    state.daily_trade_count,
-                    state.daily_add_count,
-                    str(state.daily_turnover),
+                    state.reset_anchor_crossings, state.daily_trade_count,
+                    state.daily_add_count, str(state.daily_turnover),
                 ),
             )
 
     def state(self, symbol: str, session_date: date) -> StrategyState | None:
         with sqlite3.connect(self.path) as db:
             row = db.execute(
-                "SELECT * FROM intraday_strategy_state WHERE symbol=? AND session_date=?",
+                """SELECT symbol,session_date,grid_version,grid_layer,grid_round,
+                    spacing,same_direction_bars,cooldown_until,reset_anchor_crossings,
+                    daily_trade_count,daily_add_count,daily_turnover
+                    FROM intraday_strategy_state WHERE symbol=? AND session_date=?""",
                 (symbol, session_date.isoformat()),
             ).fetchone()
         if row is None:
@@ -206,18 +233,88 @@ class IntradayStrategyStateStore:
             values["total_quantity"], values["sellable_quantity"],
         )
 
+
+    def check_constraints(
+        self,
+        *,
+        symbol: str,
+        session_date: date,
+        side: str,
+        now: datetime,
+        grid_version: int,
+        grid_layer: int,
+        grid_round: int,
+        pending_order_state: str | None,
+        max_daily_trades: int,
+        max_daily_adds: int,
+        max_daily_turnover: Decimal,
+        min_same_direction_bars: int,
+    ) -> tuple[str, ...]:
+        """Return durable vetoes; missing strategy/order state never passes."""
+        _validate_side(side)
+        _validate_timestamp(now, "constraint timestamp")
+        if (
+            not symbol.strip() or grid_version < 1 or grid_layer < 0 or grid_round < 0
+            or max_daily_trades < 1 or max_daily_adds < 1
+            or not max_daily_turnover.is_finite() or max_daily_turnover <= 0
+            or min_same_direction_bars < 0
+        ):
+            raise ValueError("explicit positive strategy limits and grid coordinates are required")
+        reasons: list[str] = []
+        if pending_order_state not in _SETTLED_ORDER_STATES:
+            reasons.append("order state unavailable or pending")
+        state = self.state(symbol, session_date)
+        if state is None:
+            reasons.append("strategy state unavailable")
+            return tuple(reasons)
+        if state.grid_version != grid_version:
+            reasons.append("grid version mismatch")
+        with sqlite3.connect(self.path) as db:
+            used = db.execute(
+                """SELECT 1 FROM consumed_grid_slots
+                WHERE symbol=? AND session_date=? AND grid_version=?
+                    AND grid_layer=? AND grid_round=? AND side=?""",
+                (symbol, session_date.isoformat(), grid_version, grid_layer, grid_round, side),
+            ).fetchone()
+        if used is not None:
+            reasons.append("grid slot already used")
+        if state.cooldown_until is not None and now.astimezone(state.cooldown_until.tzinfo) < state.cooldown_until:
+            reasons.append("direction cooldown is active")
+        if state.same_direction_bars < min_same_direction_bars:
+            reasons.append("same-direction bar interval not met")
+        if state.daily_trade_count >= max_daily_trades:
+            reasons.append("daily trade limit reached")
+        if side == "buy" and state.daily_add_count >= max_daily_adds:
+            reasons.append("daily add limit reached")
+        if state.daily_turnover >= max_daily_turnover:
+            reasons.append("daily turnover limit reached")
+        return tuple(reasons)
+
     def record_recommendation(self, recommendation: StrategyRecommendation) -> None:
         _validate_side(recommendation.side)
         _validate_timestamp(recommendation.created_at, "recommendation timestamp")
-        if (not recommendation.recommendation_id.strip() or not recommendation.symbol.strip()
-                or recommendation.grid_version < 1):
-            raise ValueError("recommendation id, symbol and positive grid version are required")
+        if (
+            not recommendation.recommendation_id.strip()
+            or not recommendation.symbol.strip()
+            or recommendation.grid_version < 1
+            or recommendation.grid_layer < 0
+            or recommendation.grid_round < 0
+        ):
+            raise ValueError("recommendation id, symbol and non-negative grid coordinates are required")
         with sqlite3.connect(self.path) as db:
             db.execute(
-                "INSERT INTO strategy_recommendations VALUES(?,?,?,?,?)",
-                (recommendation.recommendation_id, recommendation.symbol,
-                 recommendation.side, _timestamp(recommendation.created_at),
-                 recommendation.grid_version),
+                """INSERT OR IGNORE INTO strategy_recommendations (
+                    recommendation_id,symbol,side,created_at,grid_version,grid_layer,grid_round
+                ) VALUES(?,?,?,?,?,?,?)""",
+                (
+                    recommendation.recommendation_id,
+                    recommendation.symbol,
+                    recommendation.side,
+                    _timestamp(recommendation.created_at),
+                    recommendation.grid_version,
+                    recommendation.grid_layer,
+                    recommendation.grid_round,
+                ),
             )
 
     def consume_grid_slot(
@@ -236,28 +333,47 @@ class IntradayStrategyStateStore:
             return cursor.rowcount == 1
 
     def confirm_fill(
-        self, fill: StrategyFill, *, confirmed: bool, simulated: bool
+        self,
+        fill: StrategyFill,
+        *,
+        confirmed: bool,
+        simulated: bool,
+        order_state: str | None = None,
+        cooldown_minutes: int,
     ) -> bool:
-        """Record only confirmed, non-simulated fills linked to a matching recommendation."""
+        """Apply a user-confirmed linked real fill; all other order states veto."""
         if not confirmed or simulated or fill.recommendation_id is None:
             return False
+        if order_state != "filled":
+            return False
+        if cooldown_minutes < 0:
+            raise ValueError("cooldown duration must be non-negative")
         _validate_side(fill.side)
         _validate_timestamp(fill.timestamp, "fill timestamp")
-        if (not fill.fill_id.strip() or not fill.trade_pair_id.strip()
-                or fill.quantity <= 0 or not fill.price.is_finite() or fill.price <= 0):
+        if (
+            not fill.fill_id.strip() or not fill.trade_pair_id.strip()
+            or fill.quantity <= 0 or not fill.price.is_finite() or fill.price <= 0
+        ):
             raise ValueError("fill id, pair id, positive quantity and price are required")
+        session_date = fill.timestamp.astimezone(ZoneInfo("Asia/Shanghai")).date()
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA foreign_keys=ON")
             recommendation = db.execute(
-                "SELECT symbol,side,grid_version FROM strategy_recommendations "
-                "WHERE recommendation_id=?",
+                "SELECT symbol,side,grid_version,grid_layer,grid_round "
+                "FROM strategy_recommendations WHERE recommendation_id=?",
                 (fill.recommendation_id,),
             ).fetchone()
             if recommendation is None:
                 return False
-            symbol, side, recommendation_grid_version = recommendation
+            symbol, side, grid_version, grid_layer, grid_round = recommendation
             if side != fill.side:
                 raise ValueError("fill side must match its recommendation")
+            consumed = db.execute(
+                "INSERT OR IGNORE INTO consumed_grid_slots VALUES(?,?,?,?,?,?)",
+                (symbol, session_date.isoformat(), grid_version, grid_layer, grid_round, side),
+            )
+            if consumed.rowcount != 1:
+                return False
             pair = db.execute(
                 "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,buy_quantity,sell_quantity "
                 "FROM strategy_trade_pairs WHERE trade_pair_id=?",
@@ -268,8 +384,7 @@ class IntradayStrategyStateStore:
                     raise ValueError("a strategy trade pair must begin with a linked buy fill")
                 db.execute(
                     "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,NULL,?,0,'open')",
-                    (fill.trade_pair_id, symbol, recommendation_grid_version,
-                     fill.fill_id, fill.quantity),
+                    (fill.trade_pair_id, symbol, grid_version, fill.fill_id, fill.quantity),
                 )
             else:
                 pair_symbol, _, _, sell_fill, buy_qty, sell_qty = pair
@@ -296,6 +411,23 @@ class IntradayStrategyStateStore:
                 (fill.fill_id, fill.recommendation_id, fill.trade_pair_id, fill.side,
                  fill.quantity, str(fill.price), _timestamp(fill.timestamp)),
             )
+            existing = db.execute(
+                "SELECT daily_turnover FROM intraday_strategy_state "
+                "WHERE symbol=? AND session_date=?",
+                (symbol, session_date.isoformat()),
+            ).fetchone()
+            if existing is not None:
+                value = Decimal(existing[0]) + fill.price * fill.quantity
+                cooldown_until = fill.timestamp + timedelta(minutes=cooldown_minutes)
+                db.execute(
+                    """UPDATE intraday_strategy_state SET same_direction_bars=0,
+                        cooldown_until=?,daily_trade_count=daily_trade_count+1,
+                        daily_add_count=daily_add_count+?,daily_turnover=?
+                    WHERE symbol=? AND session_date=?""",
+                    (_timestamp(cooldown_until), int(fill.side == "buy"), str(value),
+                     symbol, session_date.isoformat()),
+                )
+
         return True
 
     def trade_pairs(self) -> list[dict[str, object]]:

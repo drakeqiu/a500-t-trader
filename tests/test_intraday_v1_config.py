@@ -1,5 +1,5 @@
+import hashlib
 import json
-from pathlib import Path
 
 import pytest
 
@@ -12,10 +12,10 @@ from a500_t_trader.strategy.intraday_v1_config import (
 def _complete_config() -> dict[str, object]:
     return {
         "strategy_id": "intraday-etf-t-v1",
-        "rule_version": "1.0.0",
+        "rule_version": "V1.0",
         "implementation_version": "commit:abc123",
-        "rule_source": "user-supplied V1.0 strategy rule source",
-        "rule_source_sha256": "a" * 64,
+        "rule_source": "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt",
+        "rule_source_sha256": "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689",
         "parameters": {
             "indicators": {"ema": [20, 60], "bollinger": [20, 2]},
             "trend": {"bull_d": "0.20", "bull_m": "0.05"},
@@ -86,8 +86,15 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
 
     assert isinstance(config, IntradayV1Config)
     assert config.strategy_id == "intraday-etf-t-v1"
-    assert config.rule_version == "1.0.0"
-    assert config.rule_source_sha256 == "a" * 64
+    assert config.rule_version == "V1.0"
+    assert (
+        config.rule_source
+        == "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt"
+    )
+    assert (
+        config.rule_source_sha256
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
     assert len(config.fingerprint) == 64
     assert config.securities["510300"]["t_plus"] == "T+1"
 
@@ -115,6 +122,19 @@ def test_security_price_bands_are_explicit_configuration(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="securities.510300.upper_price_limit"):
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
+    source = (
+        Path(__file__).parents[1]
+        / "docs"
+        / "strategy"
+        / "intraday-etf-t-v1"
+        / "场内ETF日内做T量化策略_V1.0.txt"
+    )
+
+    assert (
+        hashlib.sha256(source.read_bytes()).hexdigest()
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
 
 
 def test_rule_source_must_have_verifiable_sha256(tmp_path: Path) -> None:
@@ -146,6 +166,55 @@ def test_cli_validates_and_reports_auditable_configuration(
     output = json.loads(capsys.readouterr().out)
 
     assert output["strategy_id"] == "intraday-etf-t-v1"
-    assert output["rule_version"] == "1.0.0"
-    assert output["rule_source_sha256"] == "a" * 64
+    assert output["rule_version"] == "V1.0"
+    assert (
+        output["rule_source"]
+        == "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt"
+    )
+    assert (
+        output["rule_source_sha256"]
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
     assert len(output["configuration_fingerprint"]) == 64
+
+
+def test_cli_evaluates_exports_api_result_and_reports_execution_gate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from a500_t_trader.cli.main import main
+    from a500_t_trader.market_data import MinuteBar
+    from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
+    from datetime import datetime
+    from decimal import Decimal
+    from zoneinfo import ZoneInfo
+
+    config_path = _write_config(tmp_path / "rules.json", _complete_config())
+    bars_path = tmp_path / "bars.json"
+    bars_path.write_text(json.dumps([{
+        "symbol": "510300", "timestamp": "2026-11-02T09:59:00+08:00",
+        "interval_minutes": 5, "open": "4.02", "high": "4.03",
+        "low": "4.01", "close": "4.02", "volume": 10000,
+    }]), encoding="utf-8")
+    export_path = tmp_path / "result.json"
+    assert main([
+        "intraday-strategy", "--config", str(config_path), "--bars", str(bars_path),
+        "--as-of", "2026-11-02T10:00:00+08:00", "--output", str(export_path),
+    ]) == 0
+    captured = capsys.readouterr()
+    displayed = json.loads(captured.out)
+    assert json.loads(export_path.read_text(encoding="utf-8")) == displayed
+    api_result = evaluate_intraday_strategy(
+        {"510300": (MinuteBar(
+            "510300", datetime.fromisoformat("2026-11-02T09:59:00+08:00"),
+            5, Decimal("4.02"), Decimal("4.03"), Decimal("4.01"),
+            Decimal("4.02"), 10000,
+        ),)},
+        as_of=datetime.fromisoformat("2026-11-02T10:00:00+08:00"),
+        config=load_intraday_v1_config(config_path),
+    )
+    assert displayed == json.loads(json.dumps(api_result, default=str))
+    execution = displayed["510300"]["execution"]
+    assert execution["allowed"] is False
+    assert execution["quantity"] in (None, 0)
+    assert "does not connect to a broker" in captured.err
+    assert "duplicate orders" in captured.err

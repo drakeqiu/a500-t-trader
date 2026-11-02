@@ -18,6 +18,7 @@ from ..market_data import (
     CapabilityUnavailableError,
     DailyBar,
     MarketDataService,
+    MinuteBar,
     normalize_symbol,
 )
 from ..strategy.daily_indicators import calculate_indicators
@@ -192,7 +193,52 @@ def main(
         help="validate explicit V1 strategy inputs and report their identity",
     )
     intraday_config.add_argument("--config", required=True, help="V1 JSON config file")
+    strategy = commands.add_parser(
+        "intraday-strategy", help="evaluate user-supplied intraday strategy inputs"
+    )
+    strategy.add_argument("--config", required=True, help="explicit V1 strategy input JSON")
+    strategy.add_argument("--bars", required=True, help="minute bars JSON input")
+    strategy.add_argument("--as-of", required=True, type=datetime.fromisoformat)
+    strategy.add_argument("--output", help="export the exact structured result as JSON")
     args = parser.parse_args(argv)
+    if args.command == "intraday-strategy":
+        try:
+            config = load_intraday_v1_config(args.config)
+            with open(args.bars, encoding="utf-8") as stream:
+                document = json.load(stream)
+            if not isinstance(document, list):
+                raise ValueError("bars input must be a JSON array")
+            grouped: dict[str, list[MinuteBar]] = {}
+            for item in document:
+                if not isinstance(item, dict):
+                    raise ValueError("each bar must be a JSON object")
+                bar = MinuteBar(
+                    item["symbol"], datetime.fromisoformat(item["timestamp"]),
+                    item["interval_minutes"], Decimal(str(item["open"])),
+                    Decimal(str(item["high"])), Decimal(str(item["low"])),
+                    Decimal(str(item["close"])), item["volume"],
+                    None if item.get("amount") is None else Decimal(str(item["amount"])),
+                    item.get("is_completed", True),
+                )
+                grouped.setdefault(bar.symbol, []).append(bar)
+            result = evaluate_intraday_strategy(
+                {symbol: tuple(bars) for symbol, bars in grouped.items()},
+                as_of=args.as_of, config=config,
+            )
+            rendered = json.dumps(result, ensure_ascii=False, indent=2, default=_json_default)
+            print(rendered)
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as stream:
+                    stream.write(rendered + "\n")
+            print(
+                "Advisory only: this system does not connect to a broker; pending broker "
+                "orders are unseen and may cause duplicate orders.",
+                file=sys.stderr,
+            )
+            return 0
+        except Exception as error:
+            print(f"Unable to evaluate intraday strategy: {error}", file=sys.stderr)
+            return 2
     if args.command == "intraday-config":
         try:
             config = load_intraday_v1_config(args.config)

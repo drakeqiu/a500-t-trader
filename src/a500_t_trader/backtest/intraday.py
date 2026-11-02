@@ -7,9 +7,14 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_DOWN, Decimal
-from typing import Protocol
+from typing import Mapping, Protocol
 
 from ..market_data import MinuteBar
+from ..strategy.intraday_technical import (
+    IntradayTechnicalAnalysis,
+    analyze_intraday_technical,
+)
+from ..strategy.intraday_v1_config import IntradayV1Config
 from ..strategy.premarket import AccountSnapshot
 
 BASIS_POINTS = Decimal(10000)
@@ -35,6 +40,74 @@ class BarSignal:
 
 class StrategySignalProvider(Protocol):
     def signals(self, symbol: str, bars: tuple[MinuteBar, ...]) -> tuple[BarSignal, ...]: ...
+
+
+class CandidateQuantityResolver(Protocol):
+    """Resolve order quantity from explicit downstream account/risk inputs."""
+
+    def quantity_for(
+        self,
+        symbol: str,
+        analysis: IntradayTechnicalAnalysis,
+        bars: tuple[MinuteBar, ...],
+    ) -> int | None: ...
+
+
+class TechnicalGridContextProvider(Protocol):
+    def context_for(
+        self, symbol: str, bars: tuple[MinuteBar, ...]
+    ) -> Mapping[str, object] | None: ...
+
+
+class TechnicalAnalysisSignalProvider:
+    """Adapt causal V1 technical candidates to simulator signals.
+
+    A quantity resolver is mandatory because the technical analyzer does not
+    authorize position sizing or account eligibility. Blocked/WAIT results
+    never reach it, and each candidate uses only bars available at that time.
+    """
+
+    def __init__(
+        self,
+        *,
+        quantity_for: CandidateQuantityResolver,
+        config: IntradayV1Config | None = None,
+        grid_context: Mapping[str, Mapping[str, object]] | None = None,
+        grid_context_for: TechnicalGridContextProvider | None = None,
+    ) -> None:
+        self._quantity_for = quantity_for
+        self._config = config
+        self._grid_context = grid_context
+        self._grid_context_for = grid_context_for
+
+    def signals(self, symbol: str, bars: tuple[MinuteBar, ...]) -> tuple[BarSignal, ...]:
+        signals: list[BarSignal] = []
+        history: list[MinuteBar] = []
+        for bar in bars:
+            if not bar.is_completed:
+                continue
+            history.append(bar)
+            history_tuple = tuple(history)
+            context = (
+                self._grid_context_for.context_for(symbol, history_tuple)
+                if self._grid_context_for is not None
+                else (self._grid_context or {}).get(symbol)
+            )
+            analysis = analyze_intraday_technical(
+                {symbol: history_tuple},
+                config=self._config,
+                grid_context=None if context is None else {symbol: context},
+                as_of=bar.timestamp,
+            )[symbol]
+            direction = analysis.candidate.lower()
+            if analysis.risk_status != "READY" or direction not in {"buy", "sell"}:
+                continue
+            quantity = self._quantity_for.quantity_for(
+                symbol, analysis, history_tuple
+            )
+            if quantity is not None:
+                signals.append(BarSignal(bar.timestamp, direction, quantity))
+        return tuple(signals)
 
 
 @dataclass(frozen=True, slots=True)
