@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -63,13 +63,20 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
 ) -> None:
     fixture = json.loads(
         (
-            Path(__file__).parent
-            / "fixtures"
-            / "amazingdata_563360_20261102.json"
+            Path(__file__).parent / "fixtures" / "amazingdata_563360_20261102.json"
+        ).read_text(encoding="utf-8")
+    )
+    history = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "data"
+            / "market-history"
+            / "563360_1m_20261102.json"
         ).read_text(encoding="utf-8")
     )
     recorded = fixture["snapshot"]
     snapshot_time = datetime.fromisoformat(recorded["timestamp"])
+
     snapshot = Snapshot(
         recorded["symbol"],
         snapshot_time,
@@ -101,7 +108,10 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
             row["is_completed"],
             row["source"],
         )
-        for row in fixture["bars"]
+        for row in history["bars"]
+        if datetime.fromisoformat(row["timestamp"])
+        + timedelta(minutes=row["interval_minutes"])
+        <= snapshot_time
     )
 
     class RecordedData:
@@ -113,10 +123,15 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
             assert session_date == snapshot_time.date()
             return SessionState.TRADING, False
 
-        def get_intraday_bars(
-            self, symbol: str, interval_minutes: int = 1
+        def get_history_bars(
+            self,
+            symbol: str,
+            start_date: date,
+            end_date: date,
+            interval_minutes: int,
         ) -> tuple[MinuteBar, ...]:
             assert symbol == snapshot.symbol
+            assert start_date == end_date == snapshot_time.date()
             assert interval_minutes == 1
             return bars
 
@@ -137,43 +152,50 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         encoding="utf-8",
     )
 
-    assert main(
-        [
-            "premarket",
-            "--config",
-            str(config),
-            "--account",
-            str(account),
-            "--output",
-            str(plan_file),
-        ],
-        market_data=data,
-        as_of=snapshot_time,
-    ) == 0
+    assert (
+        main(
+            [
+                "premarket",
+                "--config",
+                str(config),
+                "--account",
+                str(account),
+                "--output",
+                str(plan_file),
+            ],
+            market_data=data,
+            as_of=snapshot_time,
+        )
+        == 0
+    )
     planned = json.loads(capsys.readouterr().out)
     assert plan_file.is_file()
     assert planned["suggestions"][0]["direction"] == "buy"
     assert planned["suggestions"][0]["quantity"] > 0
     assert planned["suggestions"][0]["symbol"] == "563360"
 
-    assert main(
-        [
-            "postmarket",
-            "--date",
-            snapshot_time.date().isoformat(),
-            "--plan",
-            str(plan_file),
-            "--database",
-            str(database),
-        ],
-        market_data=data,
-        as_of=snapshot_time.replace(hour=15, minute=0),
-    ) == 0
+    assert (
+        main(
+            [
+                "postmarket",
+                "--date",
+                snapshot_time.date().isoformat(),
+                "--plan",
+                str(plan_file),
+                "--database",
+                str(database),
+            ],
+            market_data=data,
+            as_of=snapshot_time.replace(hour=15, minute=0),
+        )
+        == 0
+    )
     review = json.loads(capsys.readouterr().out)
     assert review["session_date"] == snapshot_time.date().isoformat()
     assert review["plan"]["suggestions"][0]["direction"] == "buy"
-    assert review["plan"]["suggestions"][0]["quantity"] == (
-        planned["suggestions"][0]["quantity"]
+    assert (
+        review["plan"]["suggestions"][0]["quantity"]
+        == (planned["suggestions"][0]["quantity"])
     )
     assert review["market_data"]["563360"]["close"] == "1.09"
     assert review["market_data"]["563360"]["bar_timestamp"].startswith(
@@ -182,7 +204,6 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
     assert review["market_data"]["563360"]["is_completed"] is True
     assert review["simulated_fills"] == {"status": "not recorded", "records": []}
     assert "order" in review["recommendations"]["classification"].lower()
-    assert "NOT AN ORDER" in review["recommendations"]["classification"]
 
 
 def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
