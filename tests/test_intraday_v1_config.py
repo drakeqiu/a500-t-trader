@@ -14,6 +14,8 @@ def _complete_config() -> dict[str, object]:
         "strategy_id": "intraday-etf-t-v1",
         "rule_version": "1.0.0",
         "implementation_version": "commit:abc123",
+        "rule_source": "user-supplied V1.0 strategy rule source",
+        "rule_source_sha256": "a" * 64,
         "parameters": {
             "indicators": {"ema": [20, 60], "bollinger": [20, 2]},
             "trend": {"bull_d": "0.20", "bull_m": "0.05"},
@@ -83,6 +85,7 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     assert isinstance(config, IntradayV1Config)
     assert config.strategy_id == "intraday-etf-t-v1"
     assert config.rule_version == "1.0.0"
+    assert config.rule_source_sha256 == "a" * 64
     assert len(config.fingerprint) == 64
     assert config.securities["510300"]["t_plus"] == "T+1"
 
@@ -101,6 +104,14 @@ def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -
     del document["securities"]["510300"]["t_plus"]  # type: ignore[index]
 
     with pytest.raises(ValueError, match="fees.minimum_commission"):
+        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+
+
+def test_rule_source_must_have_verifiable_sha256(tmp_path: Path) -> None:
+    document = _complete_config()
+    document["rule_source_sha256"] = "unversioned"
+
+    with pytest.raises(ValueError, match="rule_source_sha256"):
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
 
 
@@ -126,4 +137,5 @@ def test_cli_validates_and_reports_auditable_configuration(
 
     assert output["strategy_id"] == "intraday-etf-t-v1"
     assert output["rule_version"] == "1.0.0"
+    assert output["rule_source_sha256"] == "a" * 64
     assert len(output["configuration_fingerprint"]) == 64

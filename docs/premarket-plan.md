@@ -24,9 +24,9 @@
 
 ## V1 策略配置核验
 
-为确认 V1 日内 ETF 做 T 的显式输入及审计身份，可运行 `python -m a500_t_trader intraday-config --config <配置文件>`。配置必须提供 `strategy_id`（固定为 `intraday-etf-t-v1`）、`rule_version`、`implementation_version`、完整 `parameters`、`certification` 门槛、带来源和时点的 `fees`、带时点的 `account` 输入，以及逐证券 `securities` 交易规则。参数项、认证阈值、费率、账户值及证券规则均须由操作者填写；程序不会补入示例、典型值或默认假设。缺失项会以字段路径报错。
+为确认 V1 日内 ETF 做 T 的显式输入及审计身份，可运行 `python -m a500_t_trader intraday-config --config <配置文件>`。配置必须提供 `strategy_id`（固定为 `intraday-etf-t-v1`）、`rule_version`、`implementation_version`、`rule_source` 和可校验的 64 位 `rule_source_sha256`、完整 `parameters`、`certification` 门槛、带来源和时点的 `fees`、带时点的 `account` 输入，以及逐证券 `securities` 交易规则。参数项、认证阈值、费率、账户值及证券规则均须由操作者填写；程序不会补入示例、典型值或默认假设。缺失项会以字段路径报错。
 
-核验成功时输出策略标识、规则版本、实现版本和规范化完整配置的 SHA-256 指纹。显式配置值变化会改变指纹；仅 JSON 空白或键顺序变化不会改变指纹。记录这四项输出即可追溯所用的 V1 规则和输入。本命令只验证与识别配置，不运行策略或认证回测。
+核验成功时输出策略标识、规则版本、实现版本、规则源标识与 SHA-256、以及规范化完整配置的 SHA-256 指纹。显式配置值变化会改变指纹；仅 JSON 空白或键顺序变化不会改变指纹。记录输出即可追溯所用 V1 规则来源和输入。本命令只验证与识别配置，不运行策略或认证回测。
 
 ## 账户快照
 

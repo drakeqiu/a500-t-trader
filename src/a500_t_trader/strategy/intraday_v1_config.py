@@ -15,6 +15,8 @@ _REQUIRED_TOP_LEVEL = (
     "strategy_id",
     "rule_version",
     "implementation_version",
+    "rule_source",
+    "rule_source_sha256",
     "parameters",
     "certification",
     "fees",
@@ -68,6 +70,8 @@ class IntradayV1Config:
     strategy_id: str
     rule_version: str
     implementation_version: str
+    rule_source: str
+    rule_source_sha256: str
     parameters: dict[str, object]
     certification: dict[str, object]
     fees: dict[str, object]
@@ -89,6 +93,13 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     implementation_version = _text(
         root["implementation_version"], "implementation_version"
     )
+    rule_source = _text(root["rule_source"], "rule_source")
+    rule_source_sha256 = _text(root["rule_source_sha256"], "rule_source_sha256")
+    if (
+        len(rule_source_sha256) != 64
+        or any(char not in "0123456789abcdefABCDEF" for char in rule_source_sha256)
+    ):
+        raise ValueError("rule_source_sha256 must be a 64-character SHA-256 digest")
     parameters = _object(root["parameters"], "parameters")
     _require(parameters, _REQUIRED_PARAMETER_SECTIONS, "parameters")
     for section in _REQUIRED_PARAMETER_SECTIONS:
@@ -136,6 +147,8 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
         strategy_id,
         rule_version,
         implementation_version,
+        rule_source,
+        rule_source_sha256.lower(),
         parameters,
         certification,
         fees,

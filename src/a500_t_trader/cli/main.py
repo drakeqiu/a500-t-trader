@@ -205,6 +205,8 @@ def main(
                     "strategy_id": config.strategy_id,
                     "rule_version": config.rule_version,
                     "implementation_version": config.implementation_version,
+                    "rule_source": config.rule_source,
+                    "rule_source_sha256": config.rule_source_sha256,
                     "configuration_fingerprint": config.fingerprint,
                 },
                 ensure_ascii=False,
