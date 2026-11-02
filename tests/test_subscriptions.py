@@ -108,22 +108,32 @@ def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
         SimpleNamespace(
             security_code="563360",
             orig_time=20261102093000,
-            last_price=1.23,
-            pre_close_price=1.2,
-            open_price=1.21,
-            high_price=1.24,
-            low_price=1.2,
-            total_volume_trade=20,
-            total_value_trade=24.6,
-            bid_price=[1.22],
-            bid_volume=[3],
-            offer_price=[1.23],
-            offer_volume=[4],
+            last_price=1230000,
+            pre_close_price=1200000,
+            open_price=1210000,
+            high_price=1240000,
+            low_price=1200000,
+            total_volume_trade=2000,
+            total_value_trade=2460000,
+            bid_price=[1220000],
+            bid_volume=[300],
+            offer_price=[1230000],
+            offer_volume=[400],
         )
     )
     event = next(sub)
     assert isinstance(event, Snapshot)
     assert event.last_price == Decimal("1.23")
+    assert event.previous_close == Decimal("1.2")
+    assert event.open == Decimal("1.21")
+    assert event.high == Decimal("1.24")
+    assert event.low == Decimal("1.2")
+    assert event.cumulative_volume == 20
+    assert event.cumulative_amount == Decimal("24.6")
+    assert event.bid_price == Decimal("1.22")
+    assert event.bid_volume == 3
+    assert event.ask_price == Decimal("1.23")
+    assert event.ask_volume == 4
     sub.close()
     provider.close()
 
