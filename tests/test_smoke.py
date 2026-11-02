@@ -15,4 +15,5 @@ def test_module_entry_point_exposes_premarket_and_monitoring_workflows() -> None
     assert result.returncode == 0
     assert "premarket" in result.stdout
     assert "monitor" in result.stdout
+    assert "intraday-config" in result.stdout
     assert result.stderr == ""
