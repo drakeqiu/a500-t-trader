@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Protocol, cast
 from zoneinfo import ZoneInfo
 
-from ..account_ledger import AccountLedger
+from ..account_ledger import AccountLedger, import_galaxy_fills
 from ..backtest import BacktestMarketData, BacktestRepository, run_backtest
 from ..market_data import (
     CapabilityUnavailableError,
@@ -88,6 +88,14 @@ def main(
     fill_record.add_argument("--price", required=True, type=Decimal)
     fill_record.add_argument("--notes", default="")
     fill_record.add_argument("--database", required=True, help="SQLite account ledger")
+    fill_import = commands.add_parser(
+        "import-fills", help="preview or import Galaxy Securities CSV fills"
+    )
+    fill_import.add_argument("--file", required=True, help="GB18030 Galaxy CSV file")
+    fill_import.add_argument("--database", required=True, help="SQLite account ledger")
+    fill_import.add_argument(
+        "--confirm", action="store_true", help="persist valid new imported fills"
+    )
     ledger_show = commands.add_parser(
         "account-ledger", help="show saved account snapshots and fills"
     )
@@ -179,6 +187,17 @@ def main(
         "--database", required=True, help="SQLite trigger-evidence file"
     )
     args = parser.parse_args(argv)
+    if args.command == "import-fills":
+        try:
+            report = import_galaxy_fills(args.database, args.file, confirm=args.confirm)
+        except Exception:
+            print(
+                "Unable to import Galaxy fills: ledger operation failed.",
+                file=sys.stderr,
+            )
+            return 2
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2 if report["errors"] else 0
     if args.command == "account-snapshot":
         try:
             identifier = AccountLedger(args.database).record_snapshot(
@@ -222,7 +241,11 @@ def main(
         ledger = AccountLedger(args.database)
         print(
             json.dumps(
-                {"snapshots": ledger.snapshots(), "manual_fills": ledger.fills()},
+                {
+                    "snapshots": ledger.snapshots(),
+                    "manual_fills": ledger.fills(),
+                    "imported_fills": ledger.imported_fills(),
+                },
                 ensure_ascii=False,
                 indent=2,
                 default=_json_default,

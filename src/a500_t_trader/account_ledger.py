@@ -1,16 +1,44 @@
-"""SQLite persistence for user-entered account snapshots and manual fills."""
+"""SQLite persistence for user-reported account and fill evidence."""
 
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .market_data import normalize_symbol
 from .strategy.premarket import AccountSnapshot
+
+GALAXY_SOURCE = "galaxy-securities-csv"
+GALAXY_CLASSIFICATION = "user-provided Galaxy Securities file; not system-verified"
+GALAXY_HEADER = (
+    "成交日期",
+    "成交时间",
+    "证券代码",
+    "证券名称",
+    "操作",
+    "成交数量",
+    "成交均价",
+    "成交金额",
+    "合同编号",
+    "成交编号",
+    "手续费",
+    "印花税",
+    "其他杂费",
+    "发生金额",
+    "资金余额",
+    "交易市场",
+    "股东帐户",
+    "交收日期",
+    "证券中文全称",
+    "",
+)
 
 
 class AccountLedger:
@@ -39,6 +67,7 @@ class AccountLedger:
                 );
                 """
             )
+            _create_imported_fills(db)
 
     def record_snapshot(self, snapshot: AccountSnapshot) -> int:
         record = asdict(snapshot)
@@ -114,6 +143,325 @@ class AccountLedger:
                     (session_date,),
                 )
             return [dict(row) for row in rows]
+
+    def imported_fills(
+        self, session_date: str | None = None
+    ) -> list[dict[str, object]]:
+        with sqlite3.connect(self.path) as db:
+            db.row_factory = sqlite3.Row
+            if not _table_exists(db, "imported_fills"):
+                return []
+            if session_date is None:
+                rows = db.execute("SELECT * FROM imported_fills ORDER BY timestamp,id")
+            else:
+                rows = db.execute(
+                    "SELECT * FROM imported_fills WHERE substr(timestamp,1,10)=? "
+                    "ORDER BY timestamp,id",
+                    (session_date,),
+                )
+            return [dict(row) for row in rows]
+
+
+def import_galaxy_fills(
+    database: str | Path, csv_file: str | Path, *, confirm: bool = False
+) -> dict[str, object]:
+    """Validate a Galaxy export and optionally atomically persist its fills."""
+    records, errors = _read_galaxy_fills(csv_file)
+    inserted_ids: list[int] = []
+    candidates: list[dict[str, object]] = []
+    duplicates = 0
+
+    def classify(
+        existing: dict[str, dict[str, object]],
+    ) -> tuple[list[dict[str, object]], int]:
+        seen: dict[str, dict[str, object]] = {}
+        new_records: list[dict[str, object]] = []
+        repeated = 0
+        for record in records:
+            trade_number = str(record["trade_number"])
+            previous = seen.get(trade_number) or existing.get(trade_number)
+            if previous is not None:
+                if _same_trade(previous, record):
+                    repeated += 1
+                else:
+                    errors.append(
+                        {
+                            "row": record["_row"],
+                            "field": "成交编号",
+                            "reason": (
+                                "conflicts with another record using this trade number"
+                            ),
+                        }
+                    )
+                continue
+            seen[trade_number] = record
+            new_records.append(record)
+        if errors:
+            return [], 0
+        return new_records, repeated
+
+    if not errors and confirm:
+        with sqlite3.connect(str(database)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN IMMEDIATE")
+            _create_imported_fills(db)
+            existing = {
+                str(row["trade_number"]): dict(row)
+                for row in db.execute(
+                    "SELECT * FROM imported_fills WHERE source=?",
+                    (GALAXY_SOURCE,),
+                )
+            }
+            candidates, duplicates = classify(existing)
+            for record in candidates:
+                cursor = db.execute(
+                    """INSERT INTO imported_fills(
+                        timestamp,symbol,side,quantity,price,trade_amount,fees,
+                        stamp_duty,other_charges,occurrence_amount,source,
+                        trade_number,contract_number,classification
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    tuple(
+                        record[key]
+                        for key in (
+                            "timestamp",
+                            "symbol",
+                            "side",
+                            "quantity",
+                            "price",
+                            "trade_amount",
+                            "fees",
+                            "stamp_duty",
+                            "other_charges",
+                            "occurrence_amount",
+                            "source",
+                            "trade_number",
+                            "contract_number",
+                            "classification",
+                        )
+                    ),
+                )
+                if cursor.lastrowid is None:
+                    raise TypeError("SQLite insert did not return a row id")
+                inserted_ids.append(cursor.lastrowid)
+    elif not errors:
+        preview_existing: dict[str, dict[str, object]] = {}
+        if Path(database).exists():
+            with closing(_readonly_database(database)) as db:
+                if _table_exists(db, "imported_fills"):
+                    preview_existing = {
+                        str(row["trade_number"]): dict(row)
+                        for row in db.execute(
+                            "SELECT * FROM imported_fills WHERE source=?",
+                            (GALAXY_SOURCE,),
+                        )
+                    }
+        candidates, duplicates = classify(preview_existing)
+
+    return {
+        "valid": len(records),
+        "new": len(candidates),
+        "duplicates": duplicates,
+        "errors": len(errors),
+        "error_details": errors,
+        "inserted_ids": inserted_ids,
+        "confirmed": confirm,
+    }
+
+
+def _read_galaxy_fills(
+    csv_file: str | Path,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    try:
+        text = Path(csv_file).read_bytes().decode("gb18030", errors="strict")
+    except OSError, UnicodeError:
+        return [], [
+            {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
+        ]
+    rows = csv.reader(text.splitlines(), strict=True)
+    try:
+        header = next(rows)
+    except StopIteration:
+        return [], [{"row": 1, "field": "header", "reason": "CSV is empty"}]
+    except csv.Error:
+        return [], [
+            {
+                "row": rows.line_num or 1,
+                "field": "header",
+                "reason": "malformed CSV header",
+            }
+        ]
+    if header != list(GALAXY_HEADER):
+        return [], [
+            {"row": 1, "field": "header", "reason": "unsupported Galaxy CSV header"}
+        ]
+
+    parsed: list[dict[str, object]] = []
+    errors: list[dict[str, object]] = []
+    try:
+        for row_number, row in enumerate(rows, 2):
+            if not row or all(not value.strip() for value in row):
+                continue
+            if len(row) != len(GALAXY_HEADER) or row[-1] != "":
+                errors.append(
+                    {
+                        "row": row_number,
+                        "field": "row",
+                        "reason": "unexpected column structure",
+                    }
+                )
+                continue
+            try:
+                parsed.append(_galaxy_record(row, row_number))
+            except ValueError as error:
+                field, reason = str(error).split(":", 1)
+                errors.append({"row": row_number, "field": field, "reason": reason})
+    except csv.Error:
+        errors.append(
+            {
+                "row": rows.line_num + 1,
+                "field": "row",
+                "reason": "malformed CSV record",
+            }
+        )
+    return parsed, errors
+
+
+def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
+    def fail(field: str, reason: str) -> None:
+        raise ValueError(f"{field}:{reason}")
+
+    def decimal(index: int, field: str, *, positive: bool = False) -> Decimal:
+        try:
+            value = Decimal(row[index].strip())
+        except InvalidOperation:
+            fail(field, "must be a decimal number")
+        if (
+            not value.is_finite()
+            or (positive and value <= 0)
+            or (not positive and field != "发生金额" and value < 0)
+        ):
+            fail(
+                field,
+                "must be finite and " + ("positive" if positive else "non-negative"),
+            )
+        return value
+
+    trade_date, trade_time = row[0].strip(), row[1].strip()
+    try:
+        if (
+            len(trade_date) != 8
+            or not trade_date.isascii()
+            or not trade_date.isdecimal()
+            or len(trade_time) != 8
+            or not trade_time.isascii()
+            or trade_time[2] != ":"
+            or trade_time[5] != ":"
+        ):
+            raise ValueError
+        timestamp = datetime.strptime(
+            f"{trade_date} {trade_time}", "%Y%m%d %H:%M:%S"
+        ).replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    except ValueError:
+        fail("成交日期/成交时间", "must be a valid YYYYMMDD date and HH:MM:SS time")
+    side = {"买入": "buy", "卖出": "sell"}.get(row[4].strip())
+    if side is None:
+        fail("操作", "only 买入 and 卖出 are supported")
+    quantity_text = row[5].strip()
+    try:
+        quantity = int(quantity_text)
+    except ValueError:
+        fail("成交数量", "must be a positive integer")
+    if quantity <= 0 or not quantity_text.isdecimal():
+        fail("成交数量", "must be a positive integer")
+    try:
+        symbol = normalize_symbol(row[2].strip())
+    except ValueError:
+        fail("证券代码", "must be a valid six-digit security code")
+    trade_number = row[9].strip()
+    if not trade_number:
+        fail("成交编号", "is required")
+    trade_amount = decimal(7, "成交金额", positive=True)
+    price = decimal(6, "成交均价", positive=True)
+    fees = decimal(10, "手续费")
+    stamp_duty = decimal(11, "印花税")
+    other_charges = decimal(12, "其他杂费")
+    occurrence_amount = decimal(13, "发生金额")
+    return {
+        "timestamp": timestamp.isoformat(),
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "price": str(price),
+        "trade_amount": str(trade_amount),
+        "fees": str(fees),
+        "stamp_duty": str(stamp_duty),
+        "other_charges": str(other_charges),
+        "occurrence_amount": str(occurrence_amount),
+        "source": GALAXY_SOURCE,
+        "trade_number": trade_number,
+        "contract_number": row[8].strip(),
+        "classification": GALAXY_CLASSIFICATION,
+        "_row": row_number,
+    }
+
+
+def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
+    decimal_fields = (
+        "price",
+        "trade_amount",
+        "fees",
+        "stamp_duty",
+        "other_charges",
+        "occurrence_amount",
+    )
+    exact_fields = (
+        "timestamp",
+        "symbol",
+        "side",
+        "quantity",
+        "contract_number",
+    )
+    return all(str(left[key]) == str(right[key]) for key in exact_fields) and all(
+        Decimal(str(left[key])) == Decimal(str(right[key])) for key in decimal_fields
+    )
+
+
+def _create_imported_fills(db: sqlite3.Connection) -> None:
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS imported_fills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+            quantity INTEGER NOT NULL CHECK (quantity > 0),
+            price TEXT NOT NULL,
+            trade_amount TEXT NOT NULL,
+            fees TEXT NOT NULL,
+            stamp_duty TEXT NOT NULL,
+            other_charges TEXT NOT NULL,
+            occurrence_amount TEXT NOT NULL,
+            source TEXT NOT NULL,
+            trade_number TEXT NOT NULL,
+            contract_number TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            UNIQUE(source, trade_number)
+        )"""
+    )
+
+
+def _table_exists(db: sqlite3.Connection, name: str) -> bool:
+    return (
+        db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _readonly_database(path: str | Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
 def _json_default(value: object) -> str:
