@@ -51,53 +51,8 @@ class VendorAPI:
         return {"563360.SH": pd.DataFrame(self.kline_rows)}
 
 
-class SnapshotAPI:
-    MarketType = SimpleNamespace(kSSE=1, kSZSE=2)
-    SubscribeDataType = SimpleNamespace(
-        kSnapshot=10, k1MinKline=1, kTickExecution=23
-    )
-    VarietyCategory = SimpleNamespace(kNone=0)
 
-    def __init__(self, *, deliver_snapshot: bool = True) -> None:
-        self.deliver_snapshot = deliver_snapshot
-        self.unsubscribed: list[object] = []
-
-    def SubscribeItem(self) -> SimpleNamespace:
-        return SimpleNamespace()
-
-    def Subscribe(self, item: object, spi: object) -> int:
-        if self.deliver_snapshot:
-            spi.OnMDSnapshot(
-                SimpleNamespace(
-                    security_code="563360",
-                    orig_time="20261102093200",
-                    last_price=1234500,
-                    pre_close_price=1200000,
-                    open_price=1210000,
-                    high_price=1240000,
-                    low_price=1200000,
-                    total_volume_trade=320000,
-                    total_value_trade=395040000,
-                    bid_price=[1234000],
-                    bid_volume=[1800],
-                    offer_price=[1235000],
-                    offer_volume=[1200],
-                )
-            )
-        return 0
-
-    def UnSubscribe(self, item: object, _spi: object) -> int:
-        self.unsubscribed.append(item)
-        return 0
-
-
-def _provider(
-    api: VendorAPI,
-    now: datetime,
-    *,
-    tgw_api: SnapshotAPI | None = None,
-    snapshot_timeout: float = 5,
-) -> AmazingDataProvider:
+def _provider(api: VendorAPI, now: datetime) -> AmazingDataProvider:
     return AmazingDataProvider(
         "trader",
         "secret",
@@ -105,8 +60,6 @@ def _provider(
         9876,
         login_fn=lambda *_args, **_kwargs: True,
         market_data=api,
-        tgw_api=tgw_api,
-        snapshot_timeout=snapshot_timeout,
         clock=lambda: now,
     )
 
@@ -232,43 +185,17 @@ def test_empty_query_and_unavailable_capability_are_distinct() -> None:
         ).get_intraday_bars()
 
 
-def test_service_maps_live_callback_snapshot_and_unsubscribes() -> None:
-    calls: list[tuple[object, ...]] = []
+def test_service_maps_query_snapshot() -> None:
     api = VendorAPI()
-    subscription_api = SnapshotAPI()
-
-    def login(
-        username: str,
-        password: str,
-        host: str,
-        port: int,
-        **kwargs: object,
-    ) -> bool:
-        calls.append((username, password, host, port, kwargs))
-        return True
-
     now = datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
-    provider = AmazingDataProvider(
-        "trader",
-        "secret",
-        "localhost",
-        9876,
-        login_fn=login,
-        market_data=api,
-        tgw_api=subscription_api,
-        clock=lambda: now,
-    )
+    provider = _provider(api, now)
 
     snapshot = MarketDataService(provider).get_snapshot("SH.563360")
 
-    assert calls == [
-        ("trader", "secret", "localhost", 9876, {"api_mode": "kInternetMode"})
-    ]
     assert snapshot is not None
-    assert api.calls == []
-    assert len(subscription_api.unsubscribed) == 1
+    assert api.calls == [("snapshot", ["563360.SH"], 20261102, 20261102)]
     assert snapshot.symbol == "563360"
-    assert snapshot.timestamp == datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
+    assert snapshot.timestamp == datetime(2026, 11, 2, 9, 31, tzinfo=SHANGHAI)
     assert snapshot.received_at == now
     assert snapshot.last_price == Decimal("1.2345")
     assert snapshot.previous_close == Decimal("1.2")
@@ -279,23 +206,19 @@ def test_service_maps_live_callback_snapshot_and_unsubscribes() -> None:
     assert snapshot.source == "AmazingData"
 
 
-def test_service_snapshot_timeout_is_explicit_and_unsubscribes() -> None:
-    api = VendorAPI()
-    subscription_api = SnapshotAPI(deliver_snapshot=False)
+def test_snapshot_query_without_data_is_unavailable() -> None:
+    class EmptySnapshot(VendorAPI):
+        def query_snapshot(
+            self, codes: list[str], start: int, end: int
+        ) -> dict[str, object]:
+            self.calls.append(("snapshot", codes, start, end))
+            return {}
+
     provider = _provider(
-        api,
-        datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI),
-        tgw_api=subscription_api,
-        snapshot_timeout=0.01,
+        EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
     )
-
-    with pytest.raises(CapabilityUnavailableError, match="snapshot callback timed out"):
+    with pytest.raises(CapabilityUnavailableError, match="returned no data"):
         MarketDataService(provider).get_snapshot()
-
-    assert api.calls == []
-    assert len(subscription_api.unsubscribed) == 1
-
-
 def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
     with pytest.raises(CapabilityUnavailableError, match="login was rejected"):
         AmazingDataProvider(
