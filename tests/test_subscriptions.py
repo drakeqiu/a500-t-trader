@@ -79,7 +79,7 @@ def test_provider_sets_sdk_subscribe_item_fields() -> None:
 
     for event_type, expected in (("snapshot", 10), ("bar", 1), ("tick", 23)):
         subscription = provider.subscribe("563360", event_type)
-        item = api.calls[-1][1]
+        item = cast(FakeTgw.SubscribeItem, api.calls[-1][1])
         assert item.flag == expected
         assert item.category_type == api.VarietyCategory.kNone
         assert item.security_code == "563360"
