@@ -16,14 +16,28 @@ from .market_data import normalize_symbol
 from .strategy.premarket import AccountSnapshot
 
 GALAXY_SOURCE = "galaxy-securities-csv"
-GALAXY_CLASSIFICATION = (
-    "user-provided Galaxy Securities file; not system-verified"
-)
+GALAXY_CLASSIFICATION = "user-provided Galaxy Securities file; not system-verified"
 GALAXY_HEADER = (
-    "成交日期", "成交时间", "证券代码", "证券名称", "操作", "成交数量",
-    "成交均价", "成交金额", "合同编号", "成交编号", "手续费", "印花税",
-    "其他杂费", "发生金额", "资金余额", "交易市场", "股东帐户", "交收日期",
-    "证券中文全称", "",
+    "成交日期",
+    "成交时间",
+    "证券代码",
+    "证券名称",
+    "操作",
+    "成交数量",
+    "成交均价",
+    "成交金额",
+    "合同编号",
+    "成交编号",
+    "手续费",
+    "印花税",
+    "其他杂费",
+    "发生金额",
+    "资金余额",
+    "交易市场",
+    "股东帐户",
+    "交收日期",
+    "证券中文全称",
+    "",
 )
 
 
@@ -170,13 +184,15 @@ def import_galaxy_fills(
                 if _same_trade(previous, record):
                     repeated += 1
                 else:
-                    errors.append({
-                        "row": record["_row"],
-                        "field": "成交编号",
-                        "reason": (
-                            "conflicts with another record using this trade number"
-                        ),
-                    })
+                    errors.append(
+                        {
+                            "row": record["_row"],
+                            "field": "成交编号",
+                            "reason": (
+                                "conflicts with another record using this trade number"
+                            ),
+                        }
+                    )
                 continue
             seen[trade_number] = record
             new_records.append(record)
@@ -204,29 +220,42 @@ def import_galaxy_fills(
                         stamp_duty,other_charges,occurrence_amount,source,
                         trade_number,contract_number,classification
                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    tuple(record[key] for key in (
-                        "timestamp", "symbol", "side", "quantity", "price",
-                        "trade_amount", "fees", "stamp_duty", "other_charges",
-                        "occurrence_amount", "source", "trade_number",
-                        "contract_number", "classification",
-                    )),
+                    tuple(
+                        record[key]
+                        for key in (
+                            "timestamp",
+                            "symbol",
+                            "side",
+                            "quantity",
+                            "price",
+                            "trade_amount",
+                            "fees",
+                            "stamp_duty",
+                            "other_charges",
+                            "occurrence_amount",
+                            "source",
+                            "trade_number",
+                            "contract_number",
+                            "classification",
+                        )
+                    ),
                 )
                 if cursor.lastrowid is None:
                     raise TypeError("SQLite insert did not return a row id")
                 inserted_ids.append(cursor.lastrowid)
     elif not errors:
-        existing: dict[str, dict[str, object]] = {}
+        preview_existing: dict[str, dict[str, object]] = {}
         if Path(database).exists():
             with closing(_readonly_database(database)) as db:
                 if _table_exists(db, "imported_fills"):
-                    existing = {
+                    preview_existing = {
                         str(row["trade_number"]): dict(row)
                         for row in db.execute(
                             "SELECT * FROM imported_fills WHERE source=?",
                             (GALAXY_SOURCE,),
                         )
                     }
-        candidates, duplicates = classify(existing)
+        candidates, duplicates = classify(preview_existing)
 
     return {
         "valid": len(records),
@@ -244,24 +273,27 @@ def _read_galaxy_fills(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     try:
         text = Path(csv_file).read_bytes().decode("gb18030", errors="strict")
-    except (OSError, UnicodeError):
-        return [], [{
-            "row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"
-        }]
+    except OSError, UnicodeError:
+        return [], [
+            {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
+        ]
     rows = csv.reader(text.splitlines(), strict=True)
     try:
         header = next(rows)
     except StopIteration:
         return [], [{"row": 1, "field": "header", "reason": "CSV is empty"}]
     except csv.Error:
-        return [], [{
-            "row": rows.line_num or 1, "field": "header",
-            "reason": "malformed CSV header",
-        }]
+        return [], [
+            {
+                "row": rows.line_num or 1,
+                "field": "header",
+                "reason": "malformed CSV header",
+            }
+        ]
     if header != list(GALAXY_HEADER):
-        return [], [{
-            "row": 1, "field": "header", "reason": "unsupported Galaxy CSV header"
-        }]
+        return [], [
+            {"row": 1, "field": "header", "reason": "unsupported Galaxy CSV header"}
+        ]
 
     parsed: list[dict[str, object]] = []
     errors: list[dict[str, object]] = []
@@ -270,10 +302,13 @@ def _read_galaxy_fills(
             if not row or all(not value.strip() for value in row):
                 continue
             if len(row) != len(GALAXY_HEADER) or row[-1] != "":
-                errors.append({
-                    "row": row_number, "field": "row",
-                    "reason": "unexpected column structure",
-                })
+                errors.append(
+                    {
+                        "row": row_number,
+                        "field": "row",
+                        "reason": "unexpected column structure",
+                    }
+                )
                 continue
             try:
                 parsed.append(_galaxy_record(row, row_number))
@@ -281,11 +316,13 @@ def _read_galaxy_fills(
                 field, reason = str(error).split(":", 1)
                 errors.append({"row": row_number, "field": field, "reason": reason})
     except csv.Error:
-        errors.append({
-            "row": rows.line_num + 1,
-            "field": "row",
-            "reason": "malformed CSV record",
-        })
+        errors.append(
+            {
+                "row": rows.line_num + 1,
+                "field": "row",
+                "reason": "malformed CSV record",
+            }
+        )
     return parsed, errors
 
 
@@ -298,8 +335,10 @@ def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
             value = Decimal(row[index].strip())
         except InvalidOperation:
             fail(field, "must be a decimal number")
-        if not value.is_finite() or (positive and value <= 0) or (
-            not positive and field != "发生金额" and value < 0
+        if (
+            not value.is_finite()
+            or (positive and value <= 0)
+            or (not positive and field != "发生金额" and value < 0)
         ):
             fail(
                 field,
@@ -348,30 +387,42 @@ def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
     other_charges = decimal(12, "其他杂费")
     occurrence_amount = decimal(13, "发生金额")
     return {
-        "timestamp": timestamp.isoformat(), "symbol": symbol, "side": side,
-        "quantity": quantity, "price": str(price), "trade_amount": str(trade_amount),
-        "fees": str(fees), "stamp_duty": str(stamp_duty),
+        "timestamp": timestamp.isoformat(),
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "price": str(price),
+        "trade_amount": str(trade_amount),
+        "fees": str(fees),
+        "stamp_duty": str(stamp_duty),
         "other_charges": str(other_charges),
-        "occurrence_amount": str(occurrence_amount), "source": GALAXY_SOURCE,
-        "trade_number": trade_number, "contract_number": row[8].strip(),
-        "classification": GALAXY_CLASSIFICATION, "_row": row_number,
+        "occurrence_amount": str(occurrence_amount),
+        "source": GALAXY_SOURCE,
+        "trade_number": trade_number,
+        "contract_number": row[8].strip(),
+        "classification": GALAXY_CLASSIFICATION,
+        "_row": row_number,
     }
 
 
 def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
     decimal_fields = (
-        "price", "trade_amount", "fees", "stamp_duty", "other_charges",
+        "price",
+        "trade_amount",
+        "fees",
+        "stamp_duty",
+        "other_charges",
         "occurrence_amount",
     )
     exact_fields = (
-        "timestamp", "symbol", "side", "quantity", "contract_number",
+        "timestamp",
+        "symbol",
+        "side",
+        "quantity",
+        "contract_number",
     )
-    return (
-        all(str(left[key]) == str(right[key]) for key in exact_fields)
-        and all(
-            Decimal(str(left[key])) == Decimal(str(right[key]))
-            for key in decimal_fields
-        )
+    return all(str(left[key]) == str(right[key]) for key in exact_fields) and all(
+        Decimal(str(left[key])) == Decimal(str(right[key])) for key in decimal_fields
     )
 
 
@@ -399,9 +450,12 @@ def _create_imported_fills(db: sqlite3.Connection) -> None:
 
 
 def _table_exists(db: sqlite3.Connection, name: str) -> bool:
-    return db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone() is not None
+    return (
+        db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
 
 
 def _readonly_database(path: str | Path) -> sqlite3.Connection:

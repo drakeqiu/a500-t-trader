@@ -24,16 +24,27 @@ def test_import_preserves_exact_decimal_values_and_ignores_blank_rows(
     )
     source.write_bytes((HEADER + "," * 20 + "\n\n" + row).encode("gb18030"))
 
-    assert main([
-        "import-fills", "--file", str(source), "--database", str(database), "--confirm"
-    ]) == 0
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 0
+    )
     output = capsys.readouterr()
     report = json.loads(output.out)
     assert report["valid"] == 1
     assert report["errors"] == 0
-    assert all(secret not in output.out + output.err for secret in (
-        "SENSITIVE_BALANCE", "SENSITIVE_ACCOUNT", "秘密证券全称"
-    ))
+    assert all(
+        secret not in output.out + output.err
+        for secret in ("SENSITIVE_BALANCE", "SENSITIVE_ACCOUNT", "秘密证券全称")
+    )
 
     assert main(["account-ledger", "--database", str(database)]) == 0
     fill = json.loads(capsys.readouterr().out)["imported_fills"][0]
@@ -57,8 +68,7 @@ def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
         (HEADER.replace("成交时间", "时间", 1) + "private row\n").encode("gb18030")
     )
     assert (
-        main(["import-fills", "--file", str(source), "--database", str(database)])
-        == 2
+        main(["import-fills", "--file", str(source), "--database", str(database)]) == 2
     )
     output = capsys.readouterr()
     assert "unsupported Galaxy CSV header" in output.out
@@ -67,8 +77,7 @@ def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
 
     source.write_bytes(HEADER.encode("gb18030") + b"\xff\n")
     assert (
-        main(["import-fills", "--file", str(source), "--database", str(database)])
-        == 2
+        main(["import-fills", "--file", str(source), "--database", str(database)]) == 2
     )
     output = capsys.readouterr()
     assert "cannot read strict GB18030 CSV" in output.out
@@ -86,9 +95,19 @@ def test_import_rejects_noncanonical_timestamp_and_malformed_row_privately(
         "0,0,0,-1,SENSITIVE_BALANCE,沪Ａ,SENSITIVE_ACCOUNT,20261030,名称,\n"
     )
     source.write_bytes((HEADER + row).encode("gb18030"))
-    assert main([
-        "import-fills", "--file", str(source), "--database", str(database), "--confirm"
-    ]) == 2
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 2
+    )
     output = capsys.readouterr()
     report = json.loads(output.out)
     assert report["error_details"][0]["row"] == 2
@@ -96,6 +115,7 @@ def test_import_rejects_noncanonical_timestamp_and_malformed_row_privately(
     assert "SENSITIVE_BALANCE" not in output.out + output.err
     assert "SENSITIVE_ACCOUNT" not in output.out + output.err
     assert not database.exists()
+
 
 def test_import_rejects_nonfinite_values_and_invalid_security_codes(
     tmp_path: Path, capsys: Any
@@ -110,14 +130,25 @@ def test_import_rejects_nonfinite_values_and_invalid_security_codes(
     )
     source.write_bytes((HEADER + rows).encode("gb18030"))
 
-    assert main([
-        "import-fills", "--file", str(source), "--database", str(database), "--confirm"
-    ]) == 2
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 2
+    )
     output = capsys.readouterr()
     report = json.loads(output.out)
     assert report["errors"] == 2
     assert [(error["row"], error["field"]) for error in report["error_details"]] == [
-        (2, "成交均价"), (3, "证券代码")
+        (2, "成交均价"),
+        (3, "证券代码"),
     ]
     assert "NaN" not in output.out + output.err
     assert "SENSITIVE_BALANCE" not in output.out + output.err

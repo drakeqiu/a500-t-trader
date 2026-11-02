@@ -83,8 +83,7 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
     )
 
     assert (
-        main(["import-fills", "--file", str(source), "--database", str(database)])
-        == 0
+        main(["import-fills", "--file", str(source), "--database", str(database)]) == 0
     )
     preview = json.loads(capsys.readouterr().out)
     assert preview["valid"] == 1
@@ -97,12 +96,19 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
     assert empty_ledger["imported_fills"] == []
     assert empty_ledger["snapshots"] == []
 
-    assert main(
-        [
-            "import-fills", "--file", str(source), "--database", str(database),
-            "--confirm",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 0
+    )
     imported = json.loads(capsys.readouterr().out)
     assert imported["inserted_ids"] == [1]
     assert main(["account-ledger", "--database", str(database)]) == 0
@@ -123,12 +129,20 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
         '"account_snapshot":{"available_cash":"5000"}}',
         encoding="utf-8",
     )
-    assert main(
-        [
-            "postmarket", "--date", "2026-10-30", "--plan", str(plan),
-            "--database", str(database),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "postmarket",
+                "--date",
+                "2026-10-30",
+                "--plan",
+                str(plan),
+                "--database",
+                str(database),
+            ]
+        )
+        == 0
+    )
     review = json.loads(capsys.readouterr().out)
     assert review["manual_fills"]["records"] == []
     reviewed = review["imported_fills"]["records"][0]
@@ -136,23 +150,37 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
     assert "not system-verified" in review["imported_fills"]["classification"]
     assert review["account_snapshot"]["available_cash"] == "5000"
 
-    assert main(
-        [
-            "import-fills", "--file", str(source), "--database", str(database),
-            "--confirm",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 0
+    )
     repeated = json.loads(capsys.readouterr().out)
     assert repeated["new"] == 0
     assert repeated["duplicates"] == 1
 
     source.write_bytes(source.read_bytes().replace(b"1.264", b"1.265"))
-    assert main(
-        [
-            "import-fills", "--file", str(source), "--database", str(database),
-            "--confirm",
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 2
+    )
     conflict = json.loads(capsys.readouterr().out)
     assert conflict["new"] == 0
     assert conflict["duplicates"] == 0
@@ -179,12 +207,19 @@ def test_galaxy_import_rejects_whole_batch_without_echoing_sensitive_fields(
     )
     source.write_bytes((header + rows).encode("gb18030"))
 
-    assert main(
-        [
-            "import-fills", "--file", str(source), "--database", str(database),
-            "--confirm",
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+                "--confirm",
+            ]
+        )
+        == 2
+    )
     output = capsys.readouterr()
     report = json.loads(output.out)
     assert report["valid"] == 1

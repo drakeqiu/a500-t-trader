@@ -189,9 +189,7 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "import-fills":
         try:
-            report = import_galaxy_fills(
-                args.database, args.file, confirm=args.confirm
-            )
+            report = import_galaxy_fills(args.database, args.file, confirm=args.confirm)
         except Exception:
             print(
                 "Unable to import Galaxy fills: ledger operation failed.",
