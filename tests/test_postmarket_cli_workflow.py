@@ -63,9 +63,7 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
 ) -> None:
     fixture = json.loads(
         (
-            Path(__file__).parent
-            / "fixtures"
-            / "amazingdata_563360_20261102.json"
+            Path(__file__).parent / "fixtures" / "amazingdata_563360_20261102.json"
         ).read_text(encoding="utf-8")
     )
     recorded = fixture["snapshot"]
@@ -149,43 +147,50 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         encoding="utf-8",
     )
 
-    assert main(
-        [
-            "premarket",
-            "--config",
-            str(config),
-            "--account",
-            str(account),
-            "--output",
-            str(plan_file),
-        ],
-        market_data=data,
-        as_of=snapshot_time,
-    ) == 0
+    assert (
+        main(
+            [
+                "premarket",
+                "--config",
+                str(config),
+                "--account",
+                str(account),
+                "--output",
+                str(plan_file),
+            ],
+            market_data=data,
+            as_of=snapshot_time,
+        )
+        == 0
+    )
     planned = json.loads(capsys.readouterr().out)
     assert plan_file.is_file()
     assert planned["suggestions"][0]["direction"] == "buy"
     assert planned["suggestions"][0]["quantity"] > 0
     assert planned["suggestions"][0]["symbol"] == "563360"
 
-    assert main(
-        [
-            "postmarket",
-            "--date",
-            snapshot_time.date().isoformat(),
-            "--plan",
-            str(plan_file),
-            "--database",
-            str(database),
-        ],
-        market_data=data,
-        as_of=snapshot_time.replace(hour=15, minute=0),
-    ) == 0
+    assert (
+        main(
+            [
+                "postmarket",
+                "--date",
+                snapshot_time.date().isoformat(),
+                "--plan",
+                str(plan_file),
+                "--database",
+                str(database),
+            ],
+            market_data=data,
+            as_of=snapshot_time.replace(hour=15, minute=0),
+        )
+        == 0
+    )
     review = json.loads(capsys.readouterr().out)
     assert review["session_date"] == snapshot_time.date().isoformat()
     assert review["plan"]["suggestions"][0]["direction"] == "buy"
-    assert review["plan"]["suggestions"][0]["quantity"] == (
-        planned["suggestions"][0]["quantity"]
+    assert (
+        review["plan"]["suggestions"][0]["quantity"]
+        == (planned["suggestions"][0]["quantity"])
     )
     closing_bar = bars[-1]
     assert review["market_data"]["563360"]["close"] == str(closing_bar.close)

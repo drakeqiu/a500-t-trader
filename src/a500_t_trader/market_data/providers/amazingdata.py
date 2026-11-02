@@ -312,9 +312,7 @@ def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
     return _records(frame)
 
 
-def _snapshot_rows(
-    raw: Any, symbol: str, session_date: int
-) -> list[Mapping[str, Any]]:
+def _snapshot_rows(raw: Any, symbol: str, session_date: int) -> list[Mapping[str, Any]]:
     if not isinstance(raw, Mapping):
         return []
     dated = raw.get(str(session_date), raw.get(session_date))

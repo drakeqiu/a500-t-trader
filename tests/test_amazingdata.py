@@ -50,7 +50,6 @@ class VendorAPI:
         return {"563360.SH": pd.DataFrame(self.kline_rows)}
 
 
-
 def _provider(api: VendorAPI, now: datetime) -> AmazingDataProvider:
     return AmazingDataProvider(
         "trader",
@@ -213,11 +212,11 @@ def test_snapshot_query_without_data_is_unavailable() -> None:
             self.calls.append(("snapshot", codes, start, end))
             return {}
 
-    provider = _provider(
-        EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
-    )
+    provider = _provider(EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI))
     with pytest.raises(CapabilityUnavailableError, match="returned no data"):
         MarketDataService(provider).get_snapshot()
+
+
 def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
     with pytest.raises(CapabilityUnavailableError, match="login was rejected"):
         AmazingDataProvider(
