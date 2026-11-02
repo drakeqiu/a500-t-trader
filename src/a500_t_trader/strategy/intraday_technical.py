@@ -70,28 +70,24 @@ def analyze_intraday_technical(
     grid_context: Mapping[str, Mapping[str, object]] | None = None,
     as_of: datetime | None = None,
 ) -> dict[str, IntradayTechnicalAnalysis]:
-    """Score each symbol independently using tracked V1 rules.
-
-    ``grid_context[symbol]`` requires ``tick_size`` and quantity-specific
-    ``round_trip_cost_rate``. Optional ``grid_date``, ``current_step``,
-    ``pending_grid_orders``, and ``used_levels`` preserve grid state across calls;
-    persist the returned ``grid_step`` for the session. A supplied V1 config is
-    validated against the tracked source and its fingerprint is returned as
-    ``parameter_hash``. Without a config, results carry the hash of the explicit
-    built-in technical-rule parameters. Candidates are technical-only; holdings,
-    legal sellability, and other execution eligibility remain downstream.
-    """
+    """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
         config.strategy_id != TECHNICAL_PARAMETER_VERSION
         or config.rule_version != "V1.0"
         or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
     ):
         raise ValueError("technical analysis requires the tracked intraday ETF T V1.0 configuration")
+    parameters = TECHNICAL_PARAMETERS if config is None else config.parameters
     parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
     return {
-        symbol: _analyze_symbol(symbol, bars, (grid_context or {}).get(symbol), as_of, parameter_hash)
+        symbol: _analyze_symbol(
+            symbol, bars, (grid_context or {}).get(symbol), as_of,
+            parameter_hash, parameters,
+        )
         for symbol, bars in bars_by_symbol.items()
     }
+
+
 
 
 def _analyze_symbol(
@@ -100,6 +96,7 @@ def _analyze_symbol(
     grid_context: Mapping[str, object] | None,
     as_of: datetime | None,
     parameter_hash: str,
+    parameters: Mapping[str, object],
 ) -> IntradayTechnicalAnalysis:
     reasons: list[str] = []
     valid: list[MinuteBar] = []
@@ -159,10 +156,20 @@ def _analyze_symbol(
         window = _window_allows(as_of or valid[-1].timestamp)
         buy_total = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
         sell_total = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
-        if grid_step is not None and direction_confirmed[0] and window[0] and trend not in {"BEAR", "STRONG_BEAR"} and buy_total >= 72 and delta >= 12:
-            candidate = "BUY"
-        elif grid_step is not None and direction_confirmed[1] and window[1] and sell_total >= 68 and delta <= -12:
-            candidate = "SELL"
+        score_parameters = parameters.get("scores")
+        signal_parameters = parameters.get("signals")
+        if not isinstance(score_parameters, Mapping) or not isinstance(signal_parameters, Mapping):
+            reasons.append("configured signal thresholds are unavailable")
+        else:
+            buy_threshold = score_parameters.get("buy")
+            sell_threshold = score_parameters.get("sell")
+            delta_threshold = score_parameters.get("direction_delta")
+            if not all(isinstance(value, (int, float)) for value in (buy_threshold, sell_threshold, delta_threshold)):
+                reasons.append("configured signal thresholds are invalid")
+            elif grid_step is not None and direction_confirmed[0] and window[0] and trend not in {"BEAR", "STRONG_BEAR"} and buy_total >= buy_threshold and delta >= delta_threshold:
+                candidate = "BUY"
+            elif grid_step is not None and direction_confirmed[1] and window[1] and sell_total >= sell_threshold and delta <= -delta_threshold:
+                candidate = "SELL"
         if not window[0] and not window[1]:
             reasons.append("outside V1.0 technical signal time windows")
         if trend == "STRONG_BEAR":

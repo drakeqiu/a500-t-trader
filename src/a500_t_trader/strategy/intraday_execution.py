@@ -243,6 +243,7 @@ def calculate_intraday_execution(
             else:
                 inventory = min(sellable, max(0, holding - floor))
                 capacity = min(
+                    nav * MAX_INTENT_NAV,
                     nav * MAX_SELL_TURNOVER_NAV,
                     market_value,
                     max(
