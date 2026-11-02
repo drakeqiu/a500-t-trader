@@ -55,6 +55,9 @@ from .intraday import (
 from .intraday import (
     run_intraday_backtest as run_intraday_backtest,
 )
+from .intraday_signals import (
+    replay_fixed_quantity_signals as replay_fixed_quantity_signals,
+)
 
 HUNDRED = Decimal(100)
 
