@@ -36,6 +36,7 @@ def evaluate_intraday_strategy(
     state_store: IntradayStrategyStateStore | None = None,
     pending_order_state: str | None = None,
     grid_context: Mapping[str, Mapping[str, object]] | None = None,
+    paired_state: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, dict[str, object]]:
     """Evaluate source-exact candidates, then apply durable and sizing vetoes.
 
@@ -43,7 +44,10 @@ def evaluate_intraday_strategy(
     quantity-specific. Missing context blocks a candidate in the analyzer.
     Certification is current only when its fingerprint verifies against the
     exact V1 rules, parameters, implementation, data snapshot, costs, and
-    certification thresholds supplied to this call.
+    certification thresholds supplied to this call. ``paired_state`` is a
+    per-symbol mapping with optional ``take_profit`` and ``buyback`` records;
+    each record supplies a cost-adjusted ``target_price`` and outstanding
+    pair ``quantity``. Missing or malformed pair data never creates an intent.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
@@ -62,6 +66,7 @@ def evaluate_intraday_strategy(
                 config=config,
                 grid_context=grid_context,
                 as_of=as_of,
+                paired_state=paired_state,
             )
         except (ValueError, TypeError, ArithmeticError) as error:
             analyzer_error = f"source-exact technical analysis unavailable: {error}"
@@ -109,7 +114,43 @@ def evaluate_intraday_strategy(
             config,
         )
         reasons.extend(certification_reasons)
-        side = analysis.candidate.lower() if analysis is not None else ""
+        side = (
+            "sell" if analysis is not None and analysis.candidate == "TAKE_PROFIT"
+            else "buy" if analysis is not None and analysis.candidate == "BUYBACK"
+            else analysis.candidate.lower() if analysis is not None else ""
+        )
+        pair_trade_pair_id: str | None = None
+        pair_max_quantity = 0
+        if analysis is not None and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}:
+            pair_context = (paired_state or {}).get(symbol)
+            pair_key = "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+            pair_record = pair_context.get(pair_key) if isinstance(pair_context, Mapping) else None
+            pair_id = pair_record.get("trade_pair_id") if isinstance(pair_record, Mapping) else None
+            try:
+                persisted_pair = state_store.trade_pair(pair_id) if state_store is not None and isinstance(pair_id, str) else None
+            except (sqlite3.Error, TypeError, ValueError):
+                persisted_pair = None
+            valid_pair = (
+                isinstance(pair_id, str) and bool(pair_id.strip())
+                and persisted_pair is not None
+                and persisted_pair.get("symbol") == symbol
+                and persisted_pair.get("status") == "open"
+            )
+            if valid_pair:
+                buy_quantity = persisted_pair.get("buy_quantity")
+                sell_quantity = persisted_pair.get("sell_quantity")
+                buy_outstanding = buy_quantity - sell_quantity if isinstance(buy_quantity, int) and isinstance(sell_quantity, int) else 0
+                sell_outstanding = sell_quantity - buy_quantity if isinstance(buy_quantity, int) and isinstance(sell_quantity, int) else 0
+                if analysis.candidate == "TAKE_PROFIT" and persisted_pair.get("buy_fill_id") and buy_outstanding > 0:
+                    pair_max_quantity = buy_outstanding
+                elif analysis.candidate == "BUYBACK" and persisted_pair.get("sell_fill_id") and sell_outstanding > 0:
+                    pair_max_quantity = sell_outstanding
+                else:
+                    valid_pair = False
+            if valid_pair:
+                pair_trade_pair_id = pair_id
+            else:
+                reasons.append("paired intent does not match an open persisted pair with eligible fills")
         state_parameters = _state_parameters(config)
         state_reasons: tuple[str, ...] = ()
         if state_store is None or state_parameters is None:
@@ -180,7 +221,23 @@ def evaluate_intraday_strategy(
         else:
             reasons.extend(execution.reasons)
             quantity = execution.quantity if execution.allowed and not reasons else 0
-            allowed = execution.allowed and not reasons
+            if quantity and analysis is not None and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}:
+                context = (paired_state or {}).get(symbol, {})
+                key = "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+                pair = context.get(key) if isinstance(context, Mapping) else None
+                pair_quantity = pair.get("quantity") if isinstance(pair, Mapping) else None
+                lot = _positive_int(securities.get(symbol, {}).get("lot_size")) if isinstance(securities.get(symbol), dict) else None
+                if type(pair_quantity) is not int or pair_quantity <= 0 or lot is None:
+                    quantity = 0
+                    reasons.append("paired quantity or lot size unavailable")
+                else:
+                    quantity = min(quantity, pair_quantity, pair_max_quantity) // lot * lot
+                    if analysis.candidate == "BUYBACK" and analysis.trend == "BEAR":
+                        quantity = min(quantity, (pair_max_quantity // 4) // lot * lot)
+                    if quantity < lot:
+                        quantity = 0
+                        reasons.append("eligible paired quantity is below one trading unit")
+            allowed = execution.allowed and quantity > 0 and not reasons
             execution_reasons = execution.reasons
         if analysis is not None and analysis.candidate == "WAIT":
             allowed = False
@@ -215,8 +272,11 @@ def evaluate_intraday_strategy(
                 allowed = False
                 quantity = 0
             reasons = list(dict.fromkeys(reasons))
+        signal = _signal(analysis)
+        if pair_trade_pair_id is not None:
+            signal["trade_pair_id"] = pair_trade_pair_id
         results[symbol] = {
-            "signal": _signal(analysis),
+            "signal": signal,
             "position": _position(account, symbol),
             "execution": {
                 "allowed": allowed,

@@ -71,7 +71,12 @@ def calculate_intraday_execution(
     for symbol, analysis in ordered:
         reasons: list[str] = []
         try:
-            side = analysis.candidate.lower()
+            candidate = analysis.candidate.upper()
+            side = (
+                "sell" if candidate in {"SELL", "TAKE_PROFIT"}
+                else "buy" if candidate in {"BUY", "BUYBACK"}
+                else candidate.lower()
+            )
             if not certification_passed:
                 reasons.append("V1 strategy certification has not passed")
             score = analysis.scores.get("buy" if side == "buy" else "sell")
@@ -83,9 +88,27 @@ def calculate_intraday_execution(
                 reasons.append("candidate is not actionable")
             if score is None:
                 reasons.append("candidate score is unavailable")
-            threshold = BUY_SCORE_THRESHOLD if side == "buy" else SELL_SCORE_THRESHOLD
+            score_parameters = config.parameters.get("scores")
+            signal_parameters = config.parameters.get("signals", {})
+            if not isinstance(score_parameters, Mapping) or not isinstance(signal_parameters, Mapping):
+                reasons.append("configured signal thresholds are unavailable")
+                threshold = float("inf")
+            elif candidate == "TAKE_PROFIT":
+                threshold = score_parameters.get("take_profit", float("inf"))
+            elif candidate == "BUYBACK":
+                threshold = score_parameters.get("buyback", float("inf"))
+                if analysis.trend == "BEAR":
+                    threshold = score_parameters.get("weak_bear_buyback", float("inf"))
+            else:
+                threshold = signal_parameters.get(
+                    "buy_threshold" if side == "buy" else "sell_threshold",
+                    score_parameters.get("buy" if side == "buy" else "sell", float("inf")),
+                )
+            if not isinstance(threshold, (int, float)):
+                threshold = float("inf")
+                reasons.append("configured signal threshold is invalid")
             if score is not None and score < threshold:
-                reasons.append(f"{side} score is below the V1 threshold {threshold}")
+                reasons.append(f"{candidate} score is below its configured threshold")
             reasons.extend(analysis.reasons)
             position_value = config.account["positions"].get(symbol, {})
             position = position_value if isinstance(position_value, dict) else {}

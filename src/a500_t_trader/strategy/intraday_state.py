@@ -380,26 +380,80 @@ class IntradayStrategyStateStore:
                 (fill.trade_pair_id,),
             ).fetchone()
             if pair is None:
-                if fill.side != "buy":
-                    raise ValueError("a strategy trade pair must begin with a linked buy fill")
-                db.execute(
-                    "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,NULL,?,0,'open')",
-                    (fill.trade_pair_id, symbol, grid_version, fill.fill_id, fill.quantity),
-                )
+                if fill.side == "buy":
+                    db.execute(
+                        "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,NULL,?,0,'open')",
+                        (fill.trade_pair_id, symbol, grid_version, fill.fill_id, fill.quantity),
+                    )
+                else:
+                    holdings_row = db.execute(
+                        "SELECT record_json FROM strategy_initial_holdings WHERE symbol=?",
+                        (symbol,),
+                    ).fetchone()
+                    if holdings_row is None:
+                        raise ValueError("sell-first pair requires recorded initial sellable inventory")
+                    sellable_quantity = json.loads(holdings_row[0])["sellable_quantity"]
+                    allocated = db.execute(
+                        "SELECT COALESCE(SUM(p.sell_quantity),0) FROM strategy_trade_pairs p "
+                        "WHERE p.symbol=? AND EXISTS ("
+                        "SELECT 1 FROM strategy_actual_fills first_fill "
+                        "WHERE first_fill.trade_pair_id=p.trade_pair_id AND first_fill.side='sell' "
+                        "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
+                        "WHERE earlier.trade_pair_id=p.trade_pair_id "
+                        "AND earlier.rowid<first_fill.rowid))",
+                        (symbol,),
+                    ).fetchone()[0]
+                    if allocated + fill.quantity > sellable_quantity:
+                        raise ValueError("sell fill exceeds unallocated initial sellable inventory")
+                    db.execute(
+                        "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,?,?,?,'open')",
+                        (fill.trade_pair_id, symbol, grid_version, None, fill.fill_id, 0, fill.quantity),
+                    )
             else:
-                pair_symbol, _, _, sell_fill, buy_qty, sell_qty = pair
+                pair_symbol, _, buy_fill, sell_fill, buy_qty, sell_qty = pair
                 if pair_symbol != symbol:
                     raise ValueError("trade pair symbol must match the recommendation")
                 if fill.side == "buy":
-                    if sell_fill is not None:
-                        raise ValueError("cannot add a buy fill after the pair has begun closing")
-                    db.execute(
-                        "UPDATE strategy_trade_pairs SET buy_quantity=buy_quantity+? "
-                        "WHERE trade_pair_id=?", (fill.quantity, fill.trade_pair_id)
-                    )
+                    if sell_fill is None and buy_fill is not None:
+                        db.execute(
+                            "UPDATE strategy_trade_pairs SET buy_quantity=buy_quantity+? "
+                            "WHERE trade_pair_id=?", (fill.quantity, fill.trade_pair_id)
+                        )
+                    else:
+                        if buy_qty + fill.quantity > sell_qty:
+                            raise ValueError("buy fill exceeds outstanding linked strategy sell quantity")
+                        db.execute(
+                            "UPDATE strategy_trade_pairs SET buy_fill_id=COALESCE(buy_fill_id,?),"
+                            "buy_quantity=buy_quantity+?,status=CASE WHEN buy_quantity+?=sell_quantity "
+                            "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=?",
+                            (fill.fill_id, fill.quantity, fill.quantity, fill.trade_pair_id)
+                        )
                 else:
-                    if buy_qty < sell_qty + fill.quantity:
-                        raise ValueError("sell fill exceeds linked strategy buy quantity")
+                    if buy_fill is not None:
+                        if buy_qty < sell_qty + fill.quantity:
+                            raise ValueError("sell fill exceeds linked strategy buy quantity")
+                    else:
+                        if buy_qty > 0:
+                            raise ValueError("cannot add a sell fill after the pair has begun closing")
+                        holdings_row = db.execute(
+                            "SELECT record_json FROM strategy_initial_holdings WHERE symbol=?",
+                            (symbol,),
+                        ).fetchone()
+                        if holdings_row is None:
+                            raise ValueError("sell-first pair requires recorded initial sellable inventory")
+                        sellable_quantity = json.loads(holdings_row[0])["sellable_quantity"]
+                        allocated = db.execute(
+                            "SELECT COALESCE(SUM(p.sell_quantity),0) FROM strategy_trade_pairs p "
+                            "WHERE p.symbol=? AND p.trade_pair_id<>? AND EXISTS ("
+                            "SELECT 1 FROM strategy_actual_fills first_fill "
+                            "WHERE first_fill.trade_pair_id=p.trade_pair_id AND first_fill.side='sell' "
+                            "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
+                            "WHERE earlier.trade_pair_id=p.trade_pair_id "
+                            "AND earlier.rowid<first_fill.rowid))",
+                            (symbol, fill.trade_pair_id),
+                        ).fetchone()[0]
+                        if allocated + sell_qty + fill.quantity > sellable_quantity:
+                            raise ValueError("sell fill exceeds unallocated initial sellable inventory")
                     db.execute(
                         "UPDATE strategy_trade_pairs SET sell_fill_id=COALESCE(sell_fill_id,?),"
                         "sell_quantity=sell_quantity+?,status=CASE WHEN buy_quantity=sell_quantity+? "
@@ -438,6 +492,20 @@ class IntradayStrategyStateStore:
                 "FROM strategy_trade_pairs ORDER BY trade_pair_id"
             )
             return [dict(row) for row in rows]
+
+    def trade_pair(self, trade_pair_id: str) -> dict[str, object] | None:
+        """Return persisted fill linkage and outstanding quantities for one pair."""
+        if not isinstance(trade_pair_id, str) or not trade_pair_id.strip():
+            return None
+        with sqlite3.connect(self.path) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                """SELECT trade_pair_id,symbol,grid_version,buy_fill_id,sell_fill_id,
+                    buy_quantity,sell_quantity,status
+                FROM strategy_trade_pairs WHERE trade_pair_id=?""",
+                (trade_pair_id,),
+            ).fetchone()
+        return None if row is None else dict(row)
 
 
 def _validate_state(state: StrategyState) -> None:

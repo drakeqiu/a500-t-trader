@@ -59,6 +59,8 @@ class IntradayTechnicalAnalysis:
     completed_valid_bars: int
     score_breakdown: dict[str, float] | None = None
     grid_step: Decimal | None = None
+    confirmations: tuple[bool, bool] = (False, False)
+    signal_windows: tuple[bool, bool] = (False, False)
     parameter_version: str = TECHNICAL_PARAMETER_VERSION
     parameter_hash: str = TECHNICAL_PARAMETER_HASH
 
@@ -69,6 +71,7 @@ def analyze_intraday_technical(
     config: IntradayV1Config | None = None,
     grid_context: Mapping[str, Mapping[str, object]] | None = None,
     as_of: datetime | None = None,
+    paired_state: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, IntradayTechnicalAnalysis]:
     """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
@@ -82,7 +85,7 @@ def analyze_intraday_technical(
     return {
         symbol: _analyze_symbol(
             symbol, bars, (grid_context or {}).get(symbol), as_of,
-            parameter_hash, parameters,
+            parameter_hash, parameters, (paired_state or {}).get(symbol),
         )
         for symbol, bars in bars_by_symbol.items()
     }
@@ -97,7 +100,10 @@ def _analyze_symbol(
     as_of: datetime | None,
     parameter_hash: str,
     parameters: Mapping[str, object],
+    paired_context: Mapping[str, object] | None,
 ) -> IntradayTechnicalAnalysis:
+    direction_confirmed = (False, False)
+    window = (False, False)
     reasons: list[str] = []
     valid: list[MinuteBar] = []
     prior_timestamp = None
@@ -160,12 +166,12 @@ def _analyze_symbol(
         buy_total = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
         sell_total = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
         score_parameters = parameters.get("scores")
-        signal_parameters = parameters.get("signals")
+        signal_parameters = parameters.get("signals", {})
         if not isinstance(score_parameters, Mapping) or not isinstance(signal_parameters, Mapping):
             reasons.append("configured signal thresholds are unavailable")
         else:
-            buy_threshold = score_parameters.get("buy")
-            sell_threshold = score_parameters.get("sell")
+            buy_threshold = signal_parameters.get("buy_threshold", score_parameters.get("buy"))
+            sell_threshold = signal_parameters.get("sell_threshold", score_parameters.get("sell"))
             delta_threshold = score_parameters.get("direction_delta")
             if not all(isinstance(value, (int, float)) for value in (buy_threshold, sell_threshold, delta_threshold)):
                 reasons.append("configured signal thresholds are invalid")
@@ -173,6 +179,43 @@ def _analyze_symbol(
                 candidate = "BUY"
             elif grid_step is not None and direction_confirmed[1] and window[1] and sell_total >= sell_threshold and delta <= -delta_threshold:
                 candidate = "SELL"
+            if isinstance(paired_context, Mapping):
+                take_profit = paired_context.get("take_profit")
+                buyback = paired_context.get("buyback")
+                tp_score = score_parameters.get("take_profit")
+                bb_score = score_parameters.get("buyback")
+                tp_price = _decimal_parameter(take_profit.get("target_price")) if isinstance(take_profit, Mapping) else None
+                bb_price = _decimal_parameter(buyback.get("target_price")) if isinstance(buyback, Mapping) else None
+                tp_quantity = take_profit.get("quantity") if isinstance(take_profit, Mapping) else None
+                bb_quantity = buyback.get("quantity") if isinstance(buyback, Mapping) else None
+                if (
+                    tp_price is not None and type(tp_quantity) is int and tp_quantity > 0
+                    and isinstance(tp_score, (int, float))
+                    and sell_total >= tp_score and delta <= -delta_threshold
+                    and direction_confirmed[1] and window[1]
+                    and valid[-1].close >= tp_price
+                ):
+                    candidate = "TAKE_PROFIT"
+                elif (
+                    bb_price is not None and type(bb_quantity) is int and bb_quantity > 0
+                    and isinstance(bb_score, (int, float))
+                    and buy_total >= bb_score and delta >= delta_threshold
+                    and direction_confirmed[0] and window[0]
+                    and valid[-1].close <= bb_price
+                    and trend != "STRONG_BEAR"
+                ):
+                    if trend == "BEAR":
+                        weak_score = score_parameters.get("weak_bear_buyback")
+                        if (
+                            isinstance(weak_score, (int, float))
+                            and buy_total >= weak_score
+                            and _golden_cross(indicators)
+                            and len(valid) >= 3
+                            and valid[-1].close > valid[-2].close > valid[-3].close
+                        ):
+                            candidate = "BUYBACK"
+                    else:
+                        candidate = "BUYBACK"
         if not window[0] and not window[1]:
             reasons.append("outside V1.0 technical signal time windows")
         if trend == "STRONG_BEAR":
@@ -200,7 +243,28 @@ def _analyze_symbol(
             )
         },
         grid_step=grid_step,
+        confirmations=direction_confirmed,
+        signal_windows=window,
         parameter_hash=parameter_hash,
+    )
+
+
+def _decimal_parameter(value: object) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() and parsed > ZERO else None
+
+
+def _golden_cross(indicators: Mapping[str, object]) -> bool:
+    k, d = indicators.get("kdj_k"), indicators.get("kdj_d")
+    previous_k = indicators.get("kdj_previous_k")
+    previous_d = indicators.get("kdj_previous_d")
+    return (
+        isinstance(k, Decimal) and isinstance(d, Decimal)
+        and isinstance(previous_k, Decimal) and isinstance(previous_d, Decimal)
+        and previous_k <= previous_d and k > d
     )
 
 
