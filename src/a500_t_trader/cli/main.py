@@ -18,10 +18,13 @@ from ..market_data import (
     CapabilityUnavailableError,
     DailyBar,
     MarketDataService,
+    MinuteBar,
     normalize_symbol,
 )
 from ..strategy.daily_indicators import calculate_indicators
 from ..strategy.intraday import MonitorMarketData, run_monitor
+from ..strategy.intraday_api import evaluate_intraday_strategy
+from ..strategy.intraday_v1_config import load_intraday_v1_config
 from ..strategy.postmarket import (
     ReviewMarketData,
     generate_review,
@@ -186,7 +189,91 @@ def main(
     review_parser.add_argument(
         "--database", required=True, help="SQLite trigger-evidence file"
     )
+    intraday_config_parser = commands.add_parser(
+        "intraday-config",
+        help="validate explicit V1 strategy inputs and report their identity",
+    )
+    intraday_config_parser.add_argument(
+        "--config", required=True, help="V1 JSON config file"
+    )
+    strategy = commands.add_parser(
+        "intraday-strategy", help="evaluate user-supplied intraday strategy inputs"
+    )
+    strategy.add_argument(
+        "--config", required=True, help="explicit V1 strategy input JSON"
+    )
+    strategy.add_argument("--bars", required=True, help="minute bars JSON input")
+    strategy.add_argument("--as-of", required=True, type=datetime.fromisoformat)
+    strategy.add_argument("--output", help="export the exact structured result as JSON")
     args = parser.parse_args(argv)
+    if args.command == "intraday-strategy":
+        try:
+            loaded_config = load_intraday_v1_config(args.config)
+            with open(args.bars, encoding="utf-8") as stream:
+                document = json.load(stream)
+            if not isinstance(document, list):
+                raise ValueError("bars input must be a JSON array")
+            grouped: dict[str, list[MinuteBar]] = {}
+            for item in document:
+                if not isinstance(item, dict):
+                    raise ValueError("each bar must be a JSON object")
+                bar = MinuteBar(
+                    item["symbol"],
+                    datetime.fromisoformat(item["timestamp"]),
+                    item["interval_minutes"],
+                    Decimal(str(item["open"])),
+                    Decimal(str(item["high"])),
+                    Decimal(str(item["low"])),
+                    Decimal(str(item["close"])),
+                    item["volume"],
+                    None
+                    if item.get("amount") is None
+                    else Decimal(str(item["amount"])),
+                    item.get("is_completed", True),
+                )
+                grouped.setdefault(bar.symbol, []).append(bar)
+            result = evaluate_intraday_strategy(
+                {symbol: tuple(bars) for symbol, bars in grouped.items()},
+                as_of=args.as_of,
+                config=loaded_config,
+            )
+            rendered = json.dumps(
+                result, ensure_ascii=False, indent=2, default=_json_default
+            )
+            print(rendered)
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as stream:
+                    stream.write(rendered + "\n")
+            print(
+                "Advisory only: this system does not connect to a broker; pending "
+                "broker orders are unseen and may cause duplicate orders.",
+                file=sys.stderr,
+            )
+            return 0
+        except Exception as error:
+            print(f"Unable to evaluate intraday strategy: {error}", file=sys.stderr)
+            return 2
+    if args.command == "intraday-config":
+        try:
+            loaded_config = load_intraday_v1_config(args.config)
+        except Exception as error:
+            print(f"Unable to load V1 intraday configuration: {error}", file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "strategy_id": loaded_config.strategy_id,
+                    "rule_version": loaded_config.rule_version,
+                    "implementation_version": loaded_config.implementation_version,
+                    "rule_source": loaded_config.rule_source,
+                    "rule_source_sha256": loaded_config.rule_source_sha256,
+                    "configuration_fingerprint": loaded_config.fingerprint,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if args.command == "import-fills":
         try:
             report = import_galaxy_fills(args.database, args.file, confirm=args.confirm)
@@ -340,12 +427,12 @@ def main(
         return 0
     if args.command == "monitor":
         try:
-            config = load_config(args.config)
+            monitor_config = load_config(args.config)
             account = load_account(args.account)
             if market_data is None:
                 market_data = MarketDataService(create_provider_from_env())
             run_monitor(
-                config,
+                monitor_config,
                 account,
                 cast(MonitorMarketData, market_data),
                 args.database,
@@ -367,16 +454,18 @@ def main(
         return 0
 
     try:
-        config = load_config(args.config)
+        plan_config = load_config(args.config)
         account = load_account(args.account)
         if args.command == "backtest":
             if args.symbol is not None:
                 symbol = normalize_symbol(args.symbol)
-                matching = tuple(rule for rule in config.rules if rule.symbol == symbol)
+                matching = tuple(
+                    rule for rule in plan_config.rules if rule.symbol == symbol
+                )
                 if not matching:
                     raise ValueError(f"{symbol} is not present in configured ETF rules")
-                config = replace(config, rules=matching)
-            if len(config.rules) != 1:
+                plan_config = replace(plan_config, rules=matching)
+            if len(plan_config.rules) != 1:
                 raise ValueError(
                     "select --symbol when the configuration contains multiple ETFs"
                 )
@@ -390,7 +479,7 @@ def main(
                 )
                 return 2
             repository = BacktestRepository(args.database)
-            symbol = config.rules[0].symbol
+            symbol = plan_config.rules[0].symbol
             selected_bars = repository.get_shared_history(
                 symbol, args.start_date, args.end_date, args.interval_minutes
             )
@@ -433,7 +522,7 @@ def main(
                     )
                     return 2
             backtest_result = run_backtest(
-                config,
+                plan_config,
                 account,
                 selected_bars,
                 start_date=args.start_date,
@@ -457,7 +546,7 @@ def main(
             market_data = MarketDataService(create_provider_from_env())
         now = as_of or datetime.now(ZoneInfo("Asia/Shanghai"))
         plan = generate_plan(
-            config, account, cast(PlanMarketData, market_data), as_of=now
+            plan_config, account, cast(PlanMarketData, market_data), as_of=now
         )
     except CapabilityUnavailableError as error:
         print(

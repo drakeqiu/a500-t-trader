@@ -78,6 +78,54 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 `MarketDataService.get_trades()` 在接口上存在，但当前 AmazingData provider不支持按需成交查询，会抛出 `CapabilityUnavailableError`。逐笔成交仅通过具备相应能力的 tgw 推送订阅获取。
 
+### 已完成 5 分钟技术分析与策略评估 API
+
+`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。候选包括 BUY、SELL、TAKE_PROFIT、BUYBACK 和 WAIT；评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成交易候选。
+
+`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、完整 `IntradayV1Config`（含本次账户快照和逐证券规则）及带时区的 `as_of`，数量建议需提供逐证券流动性数据、费用匹配的当前回测认证及其完整 binding、持久状态库、已结订单状态和动态网格上下文。认证使用 `certification_is_current` 对照 V1 源 SHA-256、规则版本、完整参数、实现版本、回测数据快照 SHA-256、费用模型和认证阈值；任何字段缺失、失败或变化均阻断数量。网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
+
+`paired_state` 是可选的逐证券配对映射，键为 `take_profit` / `buyback`，值必须提供基于对应真实成交及冻结网格、费用计算的 `target_price`、尚未完成的配对 `quantity` 和持久状态中的 `trade_pair_id`。TAKE_PROFIT 还要求合法可卖账户库存；BUYBACK 只允许回补该配对的未回补数量，BEAR 趋势下还受 25% 原卖出量上限约束。缺失或无效的配对目标/数量/ID 不会创造意图或数量；API 不会把账户持仓、总可卖量或历史建议猜成配对状态。信号返回配对 ID，调用方确认真实成交时应将该 ID 连同建议 ID传给 `StrategyFill`，不能生成合成配对 ID。V1 股票 ETF 的初始成熟可卖份额可通过状态库 `InitialHoldings` 显式登记，日内实际成交须经用户确认并关联配对 ID；当日新买份额不得因配对映射而绕过 T+1。
+
+策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL/TAKE_PROFIT/BUYBACK 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
+V1.0 的候选分数门槛与方向差门槛均取自调用方的完整策略参数（源规则基准：BUY 72、SELL 68、TAKE_PROFIT 60、BUYBACK 68，弱 BEAR 下 BUYBACK 78；方向差为 ±12），不会在执行环节退回硬编码默认值。同一交易时段内漏失已完成 5 分钟线会阻断候选，午休时段除外。通过其他限制的单笔委托数量仍受净资产 8% 上限、证券库存/仓位、可卖量、流动性及费用约束；配对意图还须受已持久化配对未完成数量约束。
+
+```python
+from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
+
+result = evaluate_intraday_strategy(
+    {"563360": completed_five_minute_bars},
+    as_of=aware_timestamp,
+    config=v1_config,
+    grid_context={
+        "563360": {
+            "tick_size": security_rules["tick_size"],
+            "round_trip_cost_rate": quantity_specific_cost_rate,
+        }
+    },
+    paired_state={
+        "563360": {
+            "take_profit": {
+                "target_price": paired_buyback_target,
+                "quantity": outstanding_paired_quantity,
+                "trade_pair_id": take_profit_pair_id,
+            },
+            "buyback": {
+                "target_price": paired_sell_target,
+                "quantity": outstanding_paired_quantity,
+                "trade_pair_id": buyback_pair_id,
+            },
+        }
+    },
+    state_store=state_store,
+    pending_order_state=current_order_state,
+    certification=certification_result,
+    certification_binding=current_backtest_binding,
+    liquidity=liquidity_by_symbol,
+)
+```
+
+`analyze_intraday_technical` 也可独立调用，用于只读研究；其 `risk_status == READY` 仅表示技术规则允许候选，不表示账户或认证允许执行。账户约束、流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率和日内上限均由执行层另行检查。不得将技术候选视为订单或真实成交。
+
 ## 4. 盘前计划 CLI
 
 按[盘前计划指南](premarket-plan.md)创建 ETF 规则文件和用户录入的账户快照，再运行：
@@ -139,6 +187,14 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 
 `backtest-show --latest` 可显示最新运行；`history-cleanup` 只清除可复用的共用历史，不删除回测引用的快照或记录。模拟成交明确标记为非实际成交。本工具不连接券商、不下单，也不提供投资建议。
 
+策略信号 API 可直接调用 `a500_t_trader.backtest.run_intraday_backtest` 进行 bar 模拟：传入已完成 bars、`BarSignal` 序列或实现 `StrategySignalProvider` 的信号提供器、账户快照和执行参数。模拟仅在后续 bar 开盘尝试成交，并记录部分成交、撤单、预留现金、费用/滑点、T+1 库存、输入 bars 快照及其 SHA-256 标识、策略参数和假设；同时提供相同初始现金/持仓的持有基线和两者收益率。
+
+`TechnicalAnalysisSignalProvider` 将 `analyze_intraday_technical` 的因果 BUY/SELL 候选转换为模拟信号：每次分析只看当根及此前已完成 bars，可传入 V1 配置和固定/逐 bar 网格上下文。它只转换 `risk_status == READY` 的候选；必须另行提供 `CandidateQuantityResolver`，由其在账户、持仓、可卖数量、资金、流动性和策略限制等执行信息齐备时返回 100 份整数倍数量，否则返回 `None` 不发信号。网格状态需要跨 bar 更新时，应实现 `TechnicalGridContextProvider`。分析器的技术候选本身不代表账户已授权执行；缺失的外部数据仍须由解析器阻断。本 API 不会推测或补造缺失的信号、数量或账户资格。
+
+回测认证由 `a500_t_trader.backtest.certify_intraday_backtest` 按显式认证配置评估。必须提供扣费后正收益、正的配对交易平均净利、总 PF 至少 1.25、样本内/外 PF 均大于 1、最大回撤、样本量、成本/滑点乘数 1.5 下的收益和 PF、每个已配置邻域扰动的收益/PF，以及每个 walk-forward 切分的收益/PF。最低收益/净利、最大回撤预算、最低样本数、扰动参数范围、walk-forward 切分数和最低通过切分数都必须由用户配置；缺失配置或指标会返回未认证和阻断原因，不存在默认风险档位。
+
+认证指纹涵盖规则源 SHA-256/规则版本/全部参数、实现版本、行情快照 SHA-256、完整成本模型和完整认证配置。每次授权前消费方必须调用 `certification_is_current` 并将当前输入提供给它；输入任何变化都会使旧认证失效。认证仅表示这些历史输入达到所配置条件，不保证未来盈利，也不构成下单授权或投资建议。
+
 ## 6. 订阅 tgw 推送
 
 `TgwPushProvider` 需要调用方提供**已初始化的 tgw API 对象**。本项目只适配它的订阅回调，不负责创建、登录或配置该对象；连接方法请使用你所接入 tgw 环境提供的说明。
@@ -188,3 +244,16 @@ else:
 - `Trade.side` 仅在来源明确提供时有意义；不要从缺失值推断买卖方向。
 
 所有查询和订阅数据均受当前数据源、连接方式及账号权限限制。能力不可用应按异常或状态处理，不应伪装成空数据或自行推断。
+
+## Intraday strategy CLI
+
+`intraday-strategy --config <v1.json> --bars <bars.json> --as-of <timestamp> [--output <result.json>]`
+loads the explicit V1 configuration and a JSON array of minute-bar objects
+(`symbol`, `timestamp`, `interval_minutes`, `open`, `high`, `low`, `close`,
+`volume`; optional `amount` and `is_completed`) and calls the public strategy
+API. Standard output and `--output` contain the same structured JSON result.
+The CLI does not reimplement strategy scoring or sizing. Unknown scoring and
+certification gates remain fail-closed; blocked executions do not expose a
+positive actionable quantity. This advisory system does not connect to a
+broker and cannot see pending broker orders, so unseen orders may cause
+duplicate orders.
