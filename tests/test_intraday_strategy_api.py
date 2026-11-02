@@ -2,16 +2,29 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from a500_t_trader.backtest.certification import (
     CertificationEvidence,
     CertificationResult,
     certify_intraday_backtest,
 )
 from a500_t_trader.market_data import MinuteBar
-from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
-from a500_t_trader.strategy.intraday_state import IntradayStrategyStateStore
-from a500_t_trader.strategy.intraday_technical import RULE_SOURCE_SHA256, TECHNICAL_PARAMETERS
 from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
+import a500_t_trader.strategy.intraday_api as intraday_api
+from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
+from a500_t_trader.strategy.intraday_state import (
+    InitialHoldings,
+    IntradayStrategyStateStore,
+    StrategyFill,
+    StrategyRecommendation,
+)
+from a500_t_trader.strategy.intraday_technical import (
+    IntradayTechnicalAnalysis,
+    RULE_SOURCE_SHA256,
+    TECHNICAL_PARAMETERS,
+)
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI)
@@ -144,6 +157,108 @@ def _evaluate(**overrides: object) -> dict[str, dict[str, object]]:
     }
     arguments.update(overrides)
     return evaluate_intraday_strategy(**arguments)  # type: ignore[arg-type]
+
+
+def _seed_pair(
+    store: IntradayStrategyStateStore,
+    pair_id: str,
+    *,
+    symbol: str = "510300",
+    first_side: str = "buy",
+    close_pair: bool = False,
+) -> None:
+    created_at = datetime(2026, 11, 1, 9, 30, tzinfo=SHANGHAI)
+    if first_side == "sell":
+        store.record_initial_holdings(
+            InitialHoldings(
+                symbol, created_at, 300, Decimal("4.00"), 500, 200
+            )
+        )
+    first_recommendation_id = f"{pair_id}-{first_side}-recommendation"
+    store.record_recommendation(
+        StrategyRecommendation(
+            first_recommendation_id, symbol, first_side, created_at, 1
+        )
+    )
+    assert store.confirm_fill(
+        StrategyFill(
+            f"{pair_id}-{first_side}-fill",
+            first_recommendation_id,
+            pair_id,
+            first_side,
+            100,
+            Decimal("4.00"),
+            created_at,
+        ),
+        confirmed=True,
+        simulated=False,
+        order_state="filled",
+        cooldown_minutes=0,
+    )
+    if close_pair:
+        second_side = "sell" if first_side == "buy" else "buy"
+        recommendation_id = f"{pair_id}-{second_side}-recommendation"
+        store.record_recommendation(
+            StrategyRecommendation(recommendation_id, symbol, second_side, created_at, 1)
+        )
+        assert store.confirm_fill(
+            StrategyFill(
+                f"{pair_id}-{second_side}-fill",
+                recommendation_id,
+                pair_id,
+                second_side,
+                100,
+                Decimal("4.10"),
+                created_at + timedelta(minutes=5),
+            ),
+            confirmed=True,
+            simulated=False,
+            order_state="filled",
+            cooldown_minutes=0,
+        )
+
+
+def _candidate_analysis(candidate: str) -> IntradayTechnicalAnalysis:
+    return IntradayTechnicalAnalysis(
+        symbol="510300",
+        trend="RANGE",
+        indicators={"close": Decimal("4.00")},
+        scores={"buy": 80.0, "sell": 80.0, "delta": 20.0},
+        candidate=candidate,
+        risk_status="READY",
+        reasons=(),
+        completed_valid_bars=180,
+    )
+
+
+def _paired_api_result(
+    monkeypatch,
+    store: IntradayStrategyStateStore,
+    candidate: str,
+    pair_id: str | None,
+) -> dict[str, object]:
+    analysis = _candidate_analysis(candidate)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+    pair_type = "take_profit" if candidate == "TAKE_PROFIT" else "buyback"
+    result = _evaluate(
+        state_store=store,
+        paired_state={
+            "510300": {
+                pair_type: {
+                    "target_price": "4.00",
+                    "quantity": 100,
+                    **({"trade_pair_id": pair_id} if pair_id is not None else {}),
+                }
+            }
+        },
+    )["510300"]
+    return result
+
+
 def _current_binding(config: IntradayV1Config) -> dict[str, object]:
     return {
         "rule_source_sha256": config.rule_source_sha256,
@@ -293,6 +408,110 @@ def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> None
     assert isinstance(execution, dict)
     assert execution["suggested_price"] is None
     assert execution["order_type"] is None
+
+
+def test_paired_targets_do_not_bypass_source_candidate_rules() -> None:
+    result = _evaluate(
+        paired_state={
+            "510300": {
+                "take_profit": {
+                    "target_price": "4.00",
+                    "quantity": 700,
+                    "trade_pair_id": "pair-tp",
+                },
+                "buyback": {
+                    "target_price": "4.00",
+                    "quantity": 700,
+                    "trade_pair_id": "pair-bb",
+                },
+            }
+        }
+    )["510300"]
+
+    signal = result["signal"]
+    execution = result["execution"]
+    assert isinstance(signal, dict)
+    assert isinstance(execution, dict)
+    assert signal["candidate"] == "WAIT"
+    assert execution["allowed"] is False
+    assert execution["quantity"] == 0
+
+@pytest.mark.parametrize(
+    ("candidate", "first_side"),
+    (("TAKE_PROFIT", "buy"), ("BUYBACK", "sell")),
+)
+def test_valid_open_pair_id_is_returned_for_candidate(
+    tmp_path, monkeypatch, candidate: str, first_side: str
+) -> None:
+    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    pair_id = f"open-{candidate.lower()}"
+    _seed_pair(store, pair_id, first_side=first_side)
+
+    result = _paired_api_result(monkeypatch, store, candidate, pair_id)
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == candidate
+    assert signal["trade_pair_id"] == pair_id
+
+
+@pytest.mark.parametrize(
+    ("candidate", "first_side", "symbol", "close_pair"),
+    (
+        ("TAKE_PROFIT", "buy", "510300", False),
+        ("TAKE_PROFIT", "buy", "510500", False),
+        ("TAKE_PROFIT", "sell", "510300", False),
+        ("TAKE_PROFIT", "buy", "510300", True),
+        ("BUYBACK", "buy", "510300", False),
+        ("BUYBACK", "sell", "510500", False),
+        ("BUYBACK", "buy", "510300", True),
+    ),
+)
+def test_invalid_pair_provenance_or_status_blocks_pair_id(
+    tmp_path,
+    monkeypatch,
+    candidate: str,
+    first_side: str,
+    symbol: str,
+    close_pair: bool,
+) -> None:
+    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    pair_id = f"invalid-{candidate.lower()}-{first_side}-{symbol}-{close_pair}"
+    _seed_pair(
+        store,
+        pair_id,
+        symbol=symbol,
+        first_side=first_side,
+        close_pair=close_pair,
+    )
+
+    result = _paired_api_result(monkeypatch, store, candidate, pair_id)
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == candidate
+    assert "trade_pair_id" not in signal
+    _assert_blocked(
+        result,
+        "paired intent does not match an open persisted pair with eligible fills",
+    )
+
+@pytest.mark.parametrize("pair_id", ("unknown-pair", None))
+def test_missing_or_unknown_pair_id_fails_closed(
+    tmp_path, monkeypatch, pair_id: str | None
+) -> None:
+    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+
+    result = _paired_api_result(monkeypatch, store, "TAKE_PROFIT", pair_id)
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert "trade_pair_id" not in signal
+    _assert_blocked(
+        result,
+        "paired intent does not match an open persisted pair with eligible fills",
+    )
+
 
 def test_evaluation_requires_existing_persistent_state(tmp_path) -> None:
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")

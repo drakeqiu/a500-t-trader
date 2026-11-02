@@ -112,6 +112,42 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(tmp_path):
     assert store.trade_pairs()[0]["grid_version"] == 3
 
 
+
+
+def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(tmp_path):
+    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store.record_initial_holdings(
+        InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 300)
+    )
+
+    def fill(fill_id, recommendation_id, pair_id, side, quantity, layer):
+        store.record_recommendation(
+            StrategyRecommendation(
+                recommendation_id, "510300", side, NOW, grid_version=1, grid_layer=layer
+            )
+        )
+        return store.confirm_fill(
+            StrategyFill(
+                fill_id, recommendation_id, pair_id, side, quantity,
+                Decimal("3.90"), NOW,
+            ),
+            confirmed=True, simulated=False, order_state="filled", cooldown_minutes=0,
+        )
+
+    assert fill("sell-1", "sell-rec-1", "pair-1", "sell", 120, 0)
+    assert fill("sell-2", "sell-rec-2", "pair-2", "sell", 80, 1)
+    with pytest.raises(ValueError, match="unallocated initial sellable inventory"):
+        fill("sell-3", "sell-rec-3", "pair-3", "sell", 101, 2)
+
+    with pytest.raises(ValueError, match="outstanding linked strategy sell quantity"):
+        fill("buy-too-much", "buy-rec-too-much", "pair-1", "buy", 121, 0)
+    assert fill("buy-part", "buy-rec-part", "pair-1", "buy", 70, 1)
+    assert store.trade_pairs()[0]["status"] == "open"
+    with pytest.raises(ValueError, match="unallocated initial sellable inventory"):
+        fill("sell-after-partial-buy", "sell-rec-after-partial-buy",
+             "pair-3", "sell", 101, 3)
+    assert fill("buy-rest", "buy-rec-rest", "pair-1", "buy", 50, 2)
+    assert store.trade_pairs()[0]["status"] == "closed"
 def test_recommendations_and_strategy_fills_do_not_change_account_snapshot(tmp_path):
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     holdings = InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 2000)

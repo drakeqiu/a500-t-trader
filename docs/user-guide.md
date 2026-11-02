@@ -80,11 +80,14 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 ### 已完成 5 分钟技术分析与策略评估 API
 
-`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成 BUY/SELL 候选。
+`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。候选包括 BUY、SELL、TAKE_PROFIT、BUYBACK 和 WAIT；评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成交易候选。
 
-`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、配置和 `as_of`，数量建议需提供逐证券流动性数据、费用匹配的当前回测认证及其完整 binding、持久状态库、已结订单状态和动态网格上下文。认证使用 `certification_is_current` 对照 V1 源 SHA-256、规则版本、完整参数、实现版本、回测数据快照 SHA-256、费用模型和认证阈值；任何字段缺失、失败或变化均阻断数量。网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
+`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、完整 `IntradayV1Config`（含本次账户快照和逐证券规则）及带时区的 `as_of`，数量建议需提供逐证券流动性数据、费用匹配的当前回测认证及其完整 binding、持久状态库、已结订单状态和动态网格上下文。认证使用 `certification_is_current` 对照 V1 源 SHA-256、规则版本、完整参数、实现版本、回测数据快照 SHA-256、费用模型和认证阈值；任何字段缺失、失败或变化均阻断数量。网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
 
-策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
+`paired_state` 是可选的逐证券配对映射，键为 `take_profit` / `buyback`，值必须提供基于对应真实成交及冻结网格、费用计算的 `target_price`、尚未完成的配对 `quantity` 和持久状态中的 `trade_pair_id`。TAKE_PROFIT 还要求合法可卖账户库存；BUYBACK 只允许回补该配对的未回补数量，BEAR 趋势下还受 25% 原卖出量上限约束。缺失或无效的配对目标/数量/ID 不会创造意图或数量；API 不会把账户持仓、总可卖量或历史建议猜成配对状态。信号返回配对 ID，调用方确认真实成交时应将该 ID 连同建议 ID传给 `StrategyFill`，不能生成合成配对 ID。V1 股票 ETF 的初始成熟可卖份额可通过状态库 `InitialHoldings` 显式登记，日内实际成交须经用户确认并关联配对 ID；当日新买份额不得因配对映射而绕过 T+1。
+
+策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL/TAKE_PROFIT/BUYBACK 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
+V1.0 的候选分数门槛与方向差门槛均取自调用方的完整策略参数（源规则基准：BUY 72、SELL 68、TAKE_PROFIT 60、BUYBACK 68，弱 BEAR 下 BUYBACK 78；方向差为 ±12），不会在执行环节退回硬编码默认值。同一交易时段内漏失已完成 5 分钟线会阻断候选，午休时段除外。通过其他限制的单笔委托数量仍受净资产 8% 上限、证券库存/仓位、可卖量、流动性及费用约束；配对意图还须受已持久化配对未完成数量约束。
 
 ```python
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
@@ -97,6 +100,20 @@ result = evaluate_intraday_strategy(
         "563360": {
             "tick_size": security_rules["tick_size"],
             "round_trip_cost_rate": quantity_specific_cost_rate,
+        }
+    },
+    paired_state={
+        "563360": {
+            "take_profit": {
+                "target_price": paired_buyback_target,
+                "quantity": outstanding_paired_quantity,
+                "trade_pair_id": take_profit_pair_id,
+            },
+            "buyback": {
+                "target_price": paired_sell_target,
+                "quantity": outstanding_paired_quantity,
+                "trade_pair_id": buyback_pair_id,
+            },
         }
     },
     state_store=state_store,

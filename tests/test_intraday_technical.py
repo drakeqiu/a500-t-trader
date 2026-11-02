@@ -7,6 +7,7 @@ from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
 from a500_t_trader.strategy.intraday_technical import (
     TECHNICAL_PARAMETER_HASH,
+    TECHNICAL_PARAMETERS,
     analyze_intraday_technical,
 )
 
@@ -230,3 +231,166 @@ def test_missing_0945_anchor_is_not_replaced_with_later_vwap() -> None:
     assert analysis.indicators["vwap_0945"] is None
     assert "missing 09:45 VWAP anchor" in analysis.reasons
     assert analysis.candidate == "WAIT"
+def test_source_exact_paired_targets_emit_take_profit_and_buyback(
+    monkeypatch,
+) -> None:
+    import a500_t_trader.strategy.intraday_technical as technical
+
+    monkeypatch.setattr(
+        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+    )
+    monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
+    monkeypatch.setattr(
+        technical,
+        "_grid",
+        lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
+    )
+    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, True))
+    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+
+    for buy_score, sell_score, pair_key, target, expected in (
+        (50.0, 80.0, "take_profit", Decimal("4.00"), "TAKE_PROFIT"),
+        (80.0, 50.0, "buyback", Decimal("4.04"), "BUYBACK"),
+    ):
+        monkeypatch.setattr(
+            technical,
+            "_score_components",
+            lambda *_args, buy=buy_score, sell=sell_score: {
+                "buy_total": buy,
+                "sell_total": sell,
+            },
+        )
+        analysis = analyze_intraday_technical(
+            {"510300": _bars()},
+            grid_context={
+                "510300": {
+                    "tick_size": Decimal("0.001"),
+                    "round_trip_cost_rate": Decimal("0.0001"),
+                }
+            },
+            as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
+            paired_state={
+                "510300": {
+                    pair_key: {
+                        "target_price": target,
+                        "quantity": 100,
+                        "trade_pair_id": "pair-1",
+                    }
+                }
+            },
+        )["510300"]
+        assert analysis.candidate == expected
+
+
+def test_paired_target_cannot_override_price_or_direction_score(
+    monkeypatch,
+) -> None:
+    import a500_t_trader.strategy.intraday_technical as technical
+
+    monkeypatch.setattr(
+        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+    )
+    monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
+    monkeypatch.setattr(
+        technical,
+        "_score_components",
+        lambda *_args: {"buy_total": 80.0, "sell_total": 50.0},
+    )
+    monkeypatch.setattr(
+        technical,
+        "_grid",
+        lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
+    )
+    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, True))
+    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+
+    analysis = analyze_intraday_technical(
+        {"510300": _bars()},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+        paired_state={
+            "510300": {
+                "take_profit": {
+                    "target_price": Decimal("4.03"),
+                    "quantity": 100,
+                    "trade_pair_id": "pair-1",
+                }
+            }
+        },
+    )["510300"]
+
+    assert analysis.candidate == "WAIT"
+
+
+def test_same_session_missing_bar_fails_closed() -> None:
+    source = _bars()
+    gap_index = 10
+    bars = source[:gap_index] + (
+        replace(
+            source[gap_index],
+            timestamp=source[gap_index].timestamp + timedelta(minutes=5),
+        ),
+    ) + source[gap_index + 1 :]
+
+    analysis = analyze_intraday_technical({"510300": bars})["510300"]
+
+    assert analysis.candidate == "WAIT"
+    assert analysis.risk_status == "BLOCKED"
+    assert "missing completed five-minute bars within a trading session" in analysis.reasons
+
+
+def test_configured_signal_threshold_changes_candidate(
+    monkeypatch,
+) -> None:
+    import a500_t_trader.strategy.intraday_technical as technical
+
+    monkeypatch.setattr(
+        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+    )
+    monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
+    monkeypatch.setattr(
+        technical,
+        "_score_components",
+        lambda *_args: {"buy_total": 70.0, "sell_total": 40.0},
+    )
+    monkeypatch.setattr(
+        technical,
+        "_grid",
+        lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
+    )
+    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, False))
+    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+    config = IntradayV1Config(
+        strategy_id="intraday-etf-t-v1",
+        rule_version="V1.0",
+        implementation_version="commit:test",
+        rule_source="tracked V1 rules",
+        rule_source_sha256="6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689",
+        parameters={
+            **TECHNICAL_PARAMETERS,
+            "signals": {"buy_threshold": 60, "sell_threshold": 68},
+        },
+        certification={},
+        fees={},
+        account={},
+        securities={},
+        fingerprint="a" * 64,
+    )
+
+    analysis = analyze_intraday_technical(
+        {"510300": _bars()},
+        config=config,
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+        as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
+    )["510300"]
+
+    assert analysis.candidate == "BUY"
