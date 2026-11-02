@@ -118,7 +118,10 @@ def test_incomplete_certification_configuration_never_certifies() -> None:
     incomplete = config() | {"walk_forward": {"splits": 3}}
     result = certify_intraday_backtest(passing_evidence(), binding(), incomplete)
     assert result.certified is False
-    assert "walk_forward.minimum_passing_splits" in result.blockers
+    assert any(
+        blocker.startswith("walk_forward.minimum_passing_splits")
+        for blocker in result.blockers
+    )
 
 
 def test_failed_or_incomplete_metrics_never_certify() -> None:

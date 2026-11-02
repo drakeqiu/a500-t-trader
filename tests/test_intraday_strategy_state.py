@@ -218,6 +218,9 @@ def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(tmp_path):
         daily_turnover=Decimal("150000"),
     )
     store.save_state(state)
+    assert store.consume_grid_slot(
+        "510300", date(2026, 11, 2), 3, 2, 4, "buy"
+    )
     reopened = IntradayStrategyStateStore(database)
 
     assert reopened.check_constraints(

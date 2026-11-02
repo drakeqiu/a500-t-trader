@@ -246,6 +246,7 @@ def _analyze_symbol(
         confirmations=direction_confirmed,
         signal_windows=window,
         parameter_hash=parameter_hash,
+        completed_valid_bars=len(valid),
     )
 
 

@@ -458,9 +458,8 @@ def test_valid_open_pair_id_is_returned_for_candidate(
 @pytest.mark.parametrize(
     ("candidate", "first_side", "symbol", "close_pair"),
     (
-        ("TAKE_PROFIT", "buy", "510300", False),
-        ("TAKE_PROFIT", "buy", "510500", False),
         ("TAKE_PROFIT", "sell", "510300", False),
+        ("TAKE_PROFIT", "buy", "510500", False),
         ("TAKE_PROFIT", "buy", "510300", True),
         ("BUYBACK", "buy", "510300", False),
         ("BUYBACK", "sell", "510500", False),

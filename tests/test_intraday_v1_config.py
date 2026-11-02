@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -22,9 +23,15 @@ def _complete_config() -> dict[str, object]:
             "scores": {"weights": {"ema": 20, "bollinger": 20}},
             "signals": {"buy_threshold": 72},
             "grid": {"anchor": "09:45", "maximum_width": "0.009"},
-            "risk": {"portfolio_limit": "0.75"},
+            "risk": {
+                "portfolio_limit": "0.75",
+                "daily_turnover_limit": "150000",
+                "daily_sell_limit": "5400",
+                "max_daily_additions": "3",
+                "max_daily_fills": "8",
+            },
             "liquidity": {"minimum_amount": "30000000"},
-            "timing": {"bar_interval_minutes": 5},
+            "timing": {"bar_interval_minutes": 5, "max_input_age_seconds": 7200},
         },
         "certification": {
             "net_return_minimum": "0",
