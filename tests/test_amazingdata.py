@@ -1,6 +1,5 @@
 from datetime import date, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd  # type: ignore[import-untyped]
