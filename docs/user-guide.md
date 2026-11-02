@@ -78,6 +78,19 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 `MarketDataService.get_trades()` 在接口上存在，但当前 AmazingData provider不支持按需成交查询，会抛出 `CapabilityUnavailableError`。逐笔成交仅通过具备相应能力的 tgw 推送订阅获取。
 
+### 已完成 5 分钟技术分析 API
+
+
+`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 接受按证券隔离的已完成 `MinuteBar` 序列，并返回各证券指标、趋势、分数、候选和阻断理由。它只计入已完成 5 分钟 bar；不足 180 根或缺少当日 09:45 VWAP 锚点会单独阻断对应证券，不以其他证券数据或替代锚点补齐。
+
+V1.0 源规则尚未提供精确评分分项条件，因此 API 保留 `scores.buy/sell = null`、`candidate = WAIT` 和 `risk_status = BLOCKED`，并说明评分规则不可用；分数不是收益概率。不要将技术结果视为允许执行的建议。
+
+```python
+from a500_t_trader.strategy.intraday_technical import analyze_intraday_technical
+
+analysis_by_symbol = analyze_intraday_technical({"563360": completed_five_minute_bars})
+```
+
 ## 4. 盘前计划 CLI
 
 按[盘前计划指南](premarket-plan.md)创建 ETF 规则文件和用户录入的账户快照，再运行：
