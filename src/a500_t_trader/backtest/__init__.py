@@ -15,11 +15,14 @@ from ..market_data import DailyBar, MinuteBar
 from ..strategy.premarket import AccountSnapshot, PlanConfig
 from .intraday import (
     BarSignal,
+    CandidateQuantityResolver,
     IntradayBacktestParams,
     IntradayBacktestResult,
     IntradayFill,
     StrategyRulesUnavailableError,
     StrategySignalProvider,
+    TechnicalAnalysisSignalProvider,
+    TechnicalGridContextProvider,
     run_intraday_backtest,
 )
 from .certification import (
