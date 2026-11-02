@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 import hashlib
 import json
@@ -121,6 +121,9 @@ def _analyze_symbol(
             continue
         prior_timestamp = bar.timestamp
         valid.append(bar)
+    if _has_session_gap(valid):
+        invalid_data = True
+        reasons.append("missing completed five-minute bars within a trading session")
     if invalid_data:
         reasons.append("invalid or mismatched five-minute bar data")
     if len(valid) < MINIMUM_HISTORY:
@@ -199,6 +202,19 @@ def _analyze_symbol(
         grid_step=grid_step,
         parameter_hash=parameter_hash,
     )
+
+
+def _has_session_gap(bars: list[MinuteBar]) -> bool:
+    for previous, current in zip(bars, bars[1:]):
+        before = previous.timestamp.astimezone(SHANGHAI)
+        after = current.timestamp.astimezone(SHANGHAI)
+        if before.date() != after.date():
+            continue
+        if before.time() <= time(11, 30) and after.time() >= time(13, 0):
+            continue
+        if after - before != timedelta(minutes=BAR_INTERVAL):
+            return True
+    return False
 
 
 def _indicators(bars: list[MinuteBar]) -> dict[str, Decimal | None]:
