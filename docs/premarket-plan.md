@@ -26,6 +26,8 @@
 
 为确认 V1 日内 ETF 做 T 的显式输入及审计身份，可运行 `python -m a500_t_trader intraday-config --config <配置文件>`。配置必须提供 `strategy_id`（固定为 `intraday-etf-t-v1`）、`rule_version`、`implementation_version`、`rule_source` 和可校验的 64 位 `rule_source_sha256`、完整 `parameters`、`certification` 门槛、带来源和时点的 `fees`、带时点的 `account` 输入，以及逐证券 `securities` 交易规则。参数项、认证阈值、费率、账户值及证券规则均须由操作者填写；程序不会补入示例、典型值或默认假设。缺失项会以字段路径报错。
 
+V1.0 规则原文按字节保存在 `docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt`（SHA-256：`6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689`）。使用该原文时，配置应显式填写 `rule_version` 为 `V1.0`、`rule_source` 为上述仓库路径、`rule_source_sha256` 为上述摘要。这些仍是必填配置；仓库中的规则文本仅供审计，不会作为隐式运行配置，也不会据此推断或补入默认值。
+
 核验成功时输出策略标识、规则版本、实现版本、规则源标识与 SHA-256、以及规范化完整配置的 SHA-256 指纹。显式配置值变化会改变指纹；仅 JSON 空白或键顺序变化不会改变指纹。记录输出即可追溯所用 V1 规则来源和输入。本命令只验证与识别配置，不运行策略或认证回测。
 
 ## 账户快照

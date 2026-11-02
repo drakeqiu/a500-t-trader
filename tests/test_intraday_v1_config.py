@@ -1,5 +1,5 @@
+import hashlib
 import json
-from pathlib import Path
 
 import pytest
 
@@ -12,10 +12,10 @@ from a500_t_trader.strategy.intraday_v1_config import (
 def _complete_config() -> dict[str, object]:
     return {
         "strategy_id": "intraday-etf-t-v1",
-        "rule_version": "1.0.0",
+        "rule_version": "V1.0",
         "implementation_version": "commit:abc123",
-        "rule_source": "user-supplied V1.0 strategy rule source",
-        "rule_source_sha256": "a" * 64,
+        "rule_source": "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt",
+        "rule_source_sha256": "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689",
         "parameters": {
             "indicators": {"ema": [20, 60], "bollinger": [20, 2]},
             "trend": {"bull_d": "0.20", "bull_m": "0.05"},
@@ -84,8 +84,15 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
 
     assert isinstance(config, IntradayV1Config)
     assert config.strategy_id == "intraday-etf-t-v1"
-    assert config.rule_version == "1.0.0"
-    assert config.rule_source_sha256 == "a" * 64
+    assert config.rule_version == "V1.0"
+    assert (
+        config.rule_source
+        == "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt"
+    )
+    assert (
+        config.rule_source_sha256
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
     assert len(config.fingerprint) == 64
     assert config.securities["510300"]["t_plus"] == "T+1"
 
@@ -105,6 +112,21 @@ def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="fees.minimum_commission"):
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+
+
+def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
+    source = (
+        Path(__file__).parents[1]
+        / "docs"
+        / "strategy"
+        / "intraday-etf-t-v1"
+        / "场内ETF日内做T量化策略_V1.0.txt"
+    )
+
+    assert (
+        hashlib.sha256(source.read_bytes()).hexdigest()
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
 
 
 def test_rule_source_must_have_verifiable_sha256(tmp_path: Path) -> None:
@@ -136,8 +158,15 @@ def test_cli_validates_and_reports_auditable_configuration(
     output = json.loads(capsys.readouterr().out)
 
     assert output["strategy_id"] == "intraday-etf-t-v1"
-    assert output["rule_version"] == "1.0.0"
-    assert output["rule_source_sha256"] == "a" * 64
+    assert output["rule_version"] == "V1.0"
+    assert (
+        output["rule_source"]
+        == "docs/strategy/intraday-etf-t-v1/场内ETF日内做T量化策略_V1.0.txt"
+    )
+    assert (
+        output["rule_source_sha256"]
+        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+    )
     assert len(output["configuration_fingerprint"]) == 64
 
 
