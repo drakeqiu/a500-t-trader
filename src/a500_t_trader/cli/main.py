@@ -22,6 +22,7 @@ from ..market_data import (
 )
 from ..strategy.daily_indicators import calculate_indicators
 from ..strategy.intraday import MonitorMarketData, run_monitor
+from ..strategy.intraday_v1_config import load_intraday_v1_config
 from ..strategy.postmarket import (
     ReviewMarketData,
     generate_review,
@@ -186,7 +187,31 @@ def main(
     review_parser.add_argument(
         "--database", required=True, help="SQLite trigger-evidence file"
     )
+    intraday_config = commands.add_parser(
+        "intraday-config",
+        help="validate explicit V1 strategy inputs and report their identity",
+    )
+    intraday_config.add_argument("--config", required=True, help="V1 JSON config file")
     args = parser.parse_args(argv)
+    if args.command == "intraday-config":
+        try:
+            config = load_intraday_v1_config(args.config)
+        except Exception as error:
+            print(f"Unable to load V1 intraday configuration: {error}", file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "strategy_id": config.strategy_id,
+                    "rule_version": config.rule_version,
+                    "implementation_version": config.implementation_version,
+                    "configuration_fingerprint": config.fingerprint,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if args.command == "import-fills":
         try:
             report = import_galaxy_fills(args.database, args.file, confirm=args.confirm)
