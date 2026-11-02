@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd  # type: ignore[import-untyped]
@@ -7,6 +8,7 @@ import pytest
 
 from a500_t_trader.market_data import CapabilityUnavailableError, MarketDataService
 from a500_t_trader.market_data.providers.amazingdata import AmazingDataProvider
+from a500_t_trader.market_data.providers.tgw_push import TgwPushProvider
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -50,7 +52,50 @@ class VendorAPI:
         return {"563360.SH": pd.DataFrame(self.kline_rows)}
 
 
-def _provider(api: VendorAPI, now: datetime) -> AmazingDataProvider:
+class SnapshotAPI:
+    MarketType = SimpleNamespace(kSSE=1, kSZSE=2)
+    MDDatatype = SimpleNamespace(kSnapshot=1, k1KLine=2, kTickExecution=3)
+
+    def __init__(self, *, deliver_snapshot: bool = True) -> None:
+        self.deliver_snapshot = deliver_snapshot
+        self.unsubscribed: list[object] = []
+
+    def SubscribeItem(self) -> SimpleNamespace:
+        return SimpleNamespace()
+
+    def Subscribe(self, item: object, spi: object) -> int:
+        if self.deliver_snapshot:
+            spi.OnMDSnapshot(
+                SimpleNamespace(
+                    security_code="563360",
+                    orig_time="20261102093200",
+                    last_price=1.2345,
+                    pre_close_price=1.2,
+                    open_price=1.21,
+                    high_price=1.24,
+                    low_price=1.2,
+                    total_volume_trade=3200,
+                    total_value_trade=3950.4,
+                    bid_price=[1.234],
+                    bid_volume=[18],
+                    offer_price=[1.235],
+                    offer_volume=[12],
+                )
+            )
+        return 0
+
+    def UnSubscribe(self, item: object, _spi: object) -> int:
+        self.unsubscribed.append(item)
+        return 0
+
+
+def _provider(
+    api: VendorAPI,
+    now: datetime,
+    *,
+    tgw_api: SnapshotAPI | None = None,
+    snapshot_timeout: float = 5,
+) -> AmazingDataProvider:
     return AmazingDataProvider(
         "trader",
         "secret",
@@ -58,6 +103,8 @@ def _provider(api: VendorAPI, now: datetime) -> AmazingDataProvider:
         9876,
         login_fn=lambda *_args, **_kwargs: True,
         market_data=api,
+        tgw_api=tgw_api,
+        snapshot_timeout=snapshot_timeout,
         clock=lambda: now,
     )
 
@@ -183,9 +230,10 @@ def test_empty_query_and_unavailable_capability_are_distinct() -> None:
         ).get_intraday_bars()
 
 
-def test_provider_logs_in_and_maps_vendor_snapshot_on_demand() -> None:
+def test_service_maps_live_callback_snapshot_and_unsubscribes() -> None:
     calls: list[tuple[object, ...]] = []
     api = VendorAPI()
+    subscription_api = SnapshotAPI()
 
     def login(
         username: str,
@@ -205,18 +253,20 @@ def test_provider_logs_in_and_maps_vendor_snapshot_on_demand() -> None:
         9876,
         login_fn=login,
         market_data=api,
+        tgw_api=subscription_api,
         clock=lambda: now,
     )
 
-    snapshot = provider.get_snapshot("SH.563360")
+    snapshot = MarketDataService(provider).get_snapshot("SH.563360")
 
     assert calls == [
         ("trader", "secret", "localhost", 9876, {"api_mode": "kInternetMode"})
     ]
     assert snapshot is not None
-    assert api.calls == [("snapshot", ["563360.SH"], 20261102, 20261102)]
+    assert api.calls == []
+    assert len(subscription_api.unsubscribed) == 1
     assert snapshot.symbol == "563360"
-    assert snapshot.timestamp == datetime(2026, 11, 2, 9, 31, tzinfo=SHANGHAI)
+    assert snapshot.timestamp == datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
     assert snapshot.received_at == now
     assert snapshot.last_price == Decimal("1.2345")
     assert snapshot.previous_close == Decimal("1.2")
@@ -225,6 +275,23 @@ def test_provider_logs_in_and_maps_vendor_snapshot_on_demand() -> None:
     assert snapshot.ask_price == Decimal("1.235")
     assert snapshot.bid_volume == 18
     assert snapshot.source == "AmazingData"
+
+
+def test_service_snapshot_timeout_is_explicit_and_unsubscribes() -> None:
+    api = VendorAPI()
+    subscription_api = SnapshotAPI(deliver_snapshot=False)
+    provider = _provider(
+        api,
+        datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI),
+        tgw_api=subscription_api,
+        snapshot_timeout=0.01,
+    )
+
+    with pytest.raises(CapabilityUnavailableError, match="snapshot callback timed out"):
+        MarketDataService(provider).get_snapshot()
+
+    assert api.calls == []
+    assert len(subscription_api.unsubscribed) == 1
 
 
 def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
