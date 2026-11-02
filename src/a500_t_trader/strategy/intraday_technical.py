@@ -71,7 +71,7 @@ class IntradayTechnicalAnalysis:
 
     symbol: str
     trend: str | None
-    indicators: dict[str, object]
+    indicators: Mapping[str, object]
     scores: dict[str, float | None]
     candidate: str
     risk_status: str
@@ -226,6 +226,8 @@ def _analyze_symbol(
                 and direction_confirmed[0]
                 and window[0]
                 and trend not in {"BEAR", "STRONG_BEAR"}
+                and isinstance(buy_threshold, (int, float))
+                and isinstance(delta_threshold, (int, float))
                 and buy_total >= buy_threshold
                 and delta >= delta_threshold
             ):
@@ -234,10 +236,13 @@ def _analyze_symbol(
                 grid_step is not None
                 and direction_confirmed[1]
                 and window[1]
+                and isinstance(sell_threshold, (int, float))
+                and isinstance(delta_threshold, (int, float))
                 and sell_total >= sell_threshold
                 and delta <= -delta_threshold
             ):
                 candidate = "SELL"
+
             if isinstance(paired_context, Mapping):
                 take_profit = paired_context.get("take_profit")
                 buyback = paired_context.get("buyback")
@@ -266,6 +271,7 @@ def _analyze_symbol(
                     and type(tp_quantity) is int
                     and tp_quantity > 0
                     and isinstance(tp_score, (int, float))
+                    and isinstance(delta_threshold, (int, float))
                     and sell_total >= tp_score
                     and delta <= -delta_threshold
                     and direction_confirmed[1]
@@ -278,6 +284,7 @@ def _analyze_symbol(
                     and type(bb_quantity) is int
                     and bb_quantity > 0
                     and isinstance(bb_score, (int, float))
+                    and isinstance(delta_threshold, (int, float))
                     and buy_total >= bb_score
                     and delta >= delta_threshold
                     and direction_confirmed[0]
@@ -435,7 +442,16 @@ def _ema(values: list[Decimal], period: int) -> Decimal | None:
     return average
 
 
-def _kdj(bars: list[MinuteBar]):
+def _kdj(
+    bars: list[MinuteBar],
+) -> tuple[
+    Decimal | None,
+    Decimal | None,
+    Decimal | None,
+    Decimal | None,
+    Decimal | None,
+    Decimal | None,
+]:
     if len(bars) < 9:
         return (None,) * 6
     k = d = Decimal(50)
@@ -531,7 +547,14 @@ def _score_components(
     close = indicators["close"]
     mid, sigma = indicators["bollinger_mid"], indicators["bollinger_sigma"]
     atr, vwap = indicators["atr_14"], indicators["vwap"]
-    if any(value is None for value in (close, mid, sigma, atr, vwap)) or atr <= ZERO:
+    if (
+        close is None
+        or mid is None
+        or sigma is None
+        or atr is None
+        or vwap is None
+        or atr <= ZERO
+    ):
         return {
             "ema_buy": 0.0,
             "ema_sell": 0.0,
@@ -563,7 +586,13 @@ def _score_components(
     )
     kdj_buy = 0
     kdj_sell = 0
-    if all(value is not None for value in (k, d, pk, pd, recent_min)):
+    if (
+        k is not None
+        and d is not None
+        and pk is not None
+        and pd is not None
+        and recent_min is not None
+    ):
         if pk <= pd and k > d and recent_min <= 35:
             kdj_buy = 15
         elif k > d and k > pk and k <= 45:
@@ -590,7 +619,12 @@ def _score_components(
     }
 
 
-def _grid(bars, indicators, trend, context):
+def _grid(
+    bars: list[MinuteBar],
+    indicators: Mapping[str, Decimal | None],
+    trend: str | None,
+    context: Mapping[str, object] | None,
+) -> tuple[Decimal, int, int, str | None, str | None] | None:
     anchor, atr, close = (
         indicators["vwap_0945"],
         indicators["atr_14"],
@@ -667,7 +701,10 @@ def _grid(bars, indicators, trend, context):
             up = (level_index, level)
             break
     current = bars[-1]
-    buy_score = buy_level = sell_score = sell_level = 0
+    buy_level: str | None = None
+    sell_level: str | None = None
+    buy_score = 0
+    sell_score = 0
     if down:
         idx, level = down
         buy_score = (
@@ -691,14 +728,24 @@ def _grid(bars, indicators, trend, context):
     return step, buy_score, sell_score, buy_level, sell_level
 
 
-def _confirmations(bars, indicators, scores):
+def _confirmations(
+    bars: list[MinuteBar],
+    indicators: Mapping[str, Decimal | None],
+    scores: Mapping[str, float],
+) -> tuple[bool, bool]:
     if len(bars) < 2:
         return False, False
     current, previous = bars[-1], bars[-2]
     k, d = indicators["kdj_k"], indicators["kdj_d"]
     pk, pd = indicators["kdj_previous_k"], indicators["kdj_previous_d"]
-    golden = pk is not None and pd is not None and pk <= pd and k > d
-    death = pk is not None and pd is not None and pk >= pd and k < d
+    golden = (
+        pk is not None and pd is not None and k is not None and d is not None
+        and pk <= pd and k > d
+    )
+    death = (
+        pk is not None and pd is not None and k is not None and d is not None
+        and pk >= pd and k < d
+    )
     lower = indicators["bollinger_lower"]
     upper = indicators["bollinger_upper"]
     boll_buy = lower is not None and previous.low <= lower and current.close > lower
@@ -723,14 +770,16 @@ def _confirmations(bars, indicators, scores):
     )
 
 
-def _window_allows(as_of: datetime):
+def _window_allows(as_of: datetime) -> tuple[bool, bool]:
     stamp = as_of.astimezone(SHANGHAI).time()
     normal = time(9, 50) <= stamp < time(11, 20) or time(13, 10) <= stamp < time(14, 30)
     sell = normal or time(14, 30) <= stamp < time(14, 45)
     return normal, sell
 
 
-def _scores(breakdown):
+def _scores(
+    breakdown: Mapping[str, float] | None,
+) -> dict[str, float | None]:
     if breakdown is None:
         return {"buy": None, "sell": None, "delta": None}
     buy = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)

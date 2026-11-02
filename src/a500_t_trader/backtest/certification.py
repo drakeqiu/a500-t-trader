@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from typing import cast
 
 _REQUIRED_CONFIG = (
     "net_return_minimum",
@@ -135,6 +136,7 @@ def _thresholds(
     for name in _REQUIRED_CONFIG:
         if name not in config or config[name] is None:
             blockers.append(f"{name} is not explicitly configured")
+    thresholds: dict[str, Decimal] = {}
     values: dict[str, object] = {}
     for name in _REQUIRED_CONFIG[:6]:
         if name not in config:
@@ -143,6 +145,7 @@ def _thresholds(
             value = Decimal(str(config[name]))
             if not value.is_finite():
                 raise InvalidOperation
+            thresholds[name] = value
             values[name] = value
         except InvalidOperation, ValueError, TypeError:
             blockers.append(f"{name} must be a finite number")
@@ -164,13 +167,18 @@ def _thresholds(
     if not isinstance(walk, Mapping):
         blockers.append("walk_forward must explicitly configure split counts")
     else:
-        for name in ("splits", "minimum_passing_splits"):
-            if type(walk.get(name)) is not int or walk[name] < 1:
-                blockers.append(f"walk_forward.{name} must be a positive integer")
+        split_count = walk.get("splits")
+        minimum_passing = walk.get("minimum_passing_splits")
+        if type(split_count) is not int or split_count < 1:
+            blockers.append("walk_forward.splits must be a positive integer")
+        if type(minimum_passing) is not int or minimum_passing < 1:
+            blockers.append(
+                "walk_forward.minimum_passing_splits must be a positive integer"
+            )
         if (
-            type(walk.get("splits")) is int
-            and type(walk.get("minimum_passing_splits")) is int
-            and walk["minimum_passing_splits"] > walk["splits"]
+            type(split_count) is int
+            and type(minimum_passing) is int
+            and minimum_passing > split_count
         ):
             blockers.append("walk_forward.minimum_passing_splits exceeds splits")
         else:
@@ -192,24 +200,26 @@ def _thresholds(
                     f"neighbor_parameter_perturbation.{name} must be positive"
                 )
         values["neighbor_parameter_perturbation"] = dict(perturbation)
-    if "profit_factor_minimum" in values and values["profit_factor_minimum"] < Decimal(
-        "1.25"
-    ):
+    profit_factor_minimum = thresholds.get("profit_factor_minimum")
+    if profit_factor_minimum is not None and profit_factor_minimum < Decimal("1.25"):
         blockers.append("profit_factor_minimum must be at least 1.25")
     for name in (
         "in_sample_profit_factor_minimum",
         "out_of_sample_profit_factor_minimum",
     ):
-        if name in values and values[name] < Decimal(1):
+        value = thresholds.get(name)
+        if value is not None and value < Decimal(1):
             blockers.append(f"{name} must be at least 1")
     for name in (
         "net_return_minimum",
         "paired_trade_average_net_profit_minimum",
         "maximum_drawdown",
     ):
-        if name in values and values[name] < 0:
+        value = thresholds.get(name)
+        if value is not None and value < 0:
             blockers.append(f"{name} cannot be negative")
-    if "maximum_drawdown" in values and values["maximum_drawdown"] > 1:
+    maximum_drawdown = thresholds.get("maximum_drawdown")
+    if maximum_drawdown is not None and maximum_drawdown > 1:
         blockers.append("maximum_drawdown must be a fraction no greater than 1")
     if any(key.startswith("walk_forward.") for key in blockers):
         values.pop("walk_forward", None)
@@ -226,8 +236,12 @@ def _evaluate(
         return value
 
     net_return = metric(evidence.net_return, "net_return")
+    net_return_minimum = cast(Decimal, thresholds["net_return_minimum"])
+    paired_average_minimum = cast(
+        Decimal, thresholds["paired_trade_average_net_profit_minimum"]
+    )
     if net_return is not None and (
-        net_return <= 0 or net_return < thresholds["net_return_minimum"]
+        net_return <= 0 or net_return < net_return_minimum
     ):
         blockers.append("net_return")
 
@@ -238,35 +252,32 @@ def _evaluate(
         blockers.append("paired_trade_net_profits are missing or incomplete")
     else:
         average = sum(profits, Decimal(0)) / len(profits)
-        if (
-            average <= 0
-            or average < thresholds["paired_trade_average_net_profit_minimum"]
-        ):
+        if average <= 0 or average < paired_average_minimum:
             blockers.append("paired_trade_average_net_profit")
 
     pf = metric(evidence.profit_factor, "profit_factor")
-    if pf is not None and pf < max(
-        Decimal("1.25"), thresholds["profit_factor_minimum"]
-    ):
+    profit_factor_minimum = cast(Decimal, thresholds["profit_factor_minimum"])
+    if pf is not None and pf < max(Decimal("1.25"), profit_factor_minimum):
         blockers.append("profit_factor")
     for name, value in (
         ("in_sample_profit_factor", evidence.in_sample_profit_factor),
         ("out_of_sample_profit_factor", evidence.out_of_sample_profit_factor),
     ):
         observed = metric(value, name)
-        if observed is not None and observed <= max(
-            Decimal(1), thresholds[name + "_minimum"]
-        ):
+        minimum = cast(Decimal, thresholds[name + "_minimum"])
+        if observed is not None and observed <= max(Decimal(1), minimum):
             blockers.append(name)
 
     drawdown = metric(evidence.maximum_drawdown, "maximum_drawdown")
+    maximum_drawdown = cast(Decimal, thresholds["maximum_drawdown"])
+    minimum_sample_count = cast(int, thresholds["minimum_sample_count"])
     if drawdown is not None and (
-        drawdown < 0 or drawdown > thresholds["maximum_drawdown"]
+        drawdown < 0 or drawdown > maximum_drawdown
     ):
         blockers.append("maximum_drawdown")
     if type(evidence.sample_count) is not int:
         blockers.append("sample_count is missing")
-    elif evidence.sample_count < thresholds["minimum_sample_count"]:
+    elif evidence.sample_count < minimum_sample_count:
         blockers.append("sample_count")
 
     stress_return = metric(evidence.stressed_net_return, "stressed_net_return")
@@ -278,15 +289,18 @@ def _evaluate(
     if stress_multiplier is not None and stress_multiplier != Decimal("1.5"):
         blockers.append("cost_slippage_stress.multiplier")
     if stress_return is not None and (
-        stress_return <= 0 or stress_return < thresholds["net_return_minimum"]
+        stress_return <= 0 or stress_return < net_return_minimum
     ):
         blockers.append("cost_slippage_stress.net_return")
     if stress_pf is not None and stress_pf < max(
-        Decimal("1.25"), thresholds["profit_factor_minimum"]
+        Decimal("1.25"), profit_factor_minimum
     ):
         blockers.append("cost_slippage_stress.profit_factor")
 
-    neighbor_count = len(thresholds["neighbor_parameter_perturbation"])
+    perturbations = cast(
+        Mapping[str, object], thresholds["neighbor_parameter_perturbation"]
+    )
+    neighbor_count = len(perturbations)
     if (
         len(evidence.neighbor_net_returns) != neighbor_count
         or len(evidence.neighbor_profit_factors) != neighbor_count
@@ -304,18 +318,19 @@ def _evaluate(
                 not isinstance(neighbor_return, Decimal)
                 or not neighbor_return.is_finite()
                 or neighbor_return <= 0
-                or neighbor_return < thresholds["net_return_minimum"]
+                or neighbor_return < net_return_minimum
             ):
                 blockers.append(f"neighbor_parameter_metrics[{index}].net_return")
             if (
                 not isinstance(neighbor_pf, Decimal)
                 or not neighbor_pf.is_finite()
                 or neighbor_pf
-                < max(Decimal("1.25"), thresholds["profit_factor_minimum"])
+                < max(Decimal("1.25"), profit_factor_minimum)
             ):
                 blockers.append(f"neighbor_parameter_metrics[{index}].profit_factor")
-    walk = thresholds["walk_forward"]
-    expected_splits = walk["splits"]
+    walk = cast(Mapping[str, object], thresholds["walk_forward"])
+    expected_splits = cast(int, walk["splits"])
+    minimum_passing_splits = cast(int, walk["minimum_passing_splits"])
     if (
         len(evidence.walk_forward_net_returns) != expected_splits
         or len(evidence.walk_forward_profit_factors) != expected_splits
@@ -339,7 +354,7 @@ def _evaluate(
                 blockers.append(f"walk_forward_metrics[{index}] are invalid")
             elif window_return > 0 and window_pf > 1:
                 passing += 1
-        if passing < walk["minimum_passing_splits"]:
+        if passing < minimum_passing_splits:
             blockers.append("walk_forward")
 
 

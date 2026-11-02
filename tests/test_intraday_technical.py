@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_technical import (
     TECHNICAL_PARAMETER_HASH,
@@ -94,15 +96,16 @@ def test_bollinger_score_saturates_at_source_z_boundary() -> None:
             amount=Decimal("39900"),
         ),
     )
-
     analysis = analyze_intraday_technical({"510300": bars})["510300"]
 
-    assert analysis.score_breakdown["boll_buy"] == 20.0
 
-    assert analysis.score_breakdown["boll_sell"] == 0.0
+    score_breakdown = analysis.score_breakdown
+    assert score_breakdown is not None
+    assert score_breakdown["boll_buy"] == 20.0
+    assert score_breakdown["boll_sell"] == 0.0
 
 
-def test_flat_completed_history_keeps_range_baseline_scores_and_wait():
+def test_flat_completed_history_keeps_range_baseline_scores_and_wait() -> None:
     bars = tuple(
         replace(
             bar,
@@ -258,7 +261,7 @@ def test_missing_0945_anchor_is_not_replaced_with_later_vwap() -> None:
 
 
 def test_source_exact_paired_targets_emit_take_profit_and_buyback(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import a500_t_trader.strategy.intraday_technical as technical
 
@@ -309,7 +312,7 @@ def test_source_exact_paired_targets_emit_take_profit_and_buyback(
 
 
 def test_paired_target_does_not_override_ordinary_buy_candidate(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import a500_t_trader.strategy.intraday_technical as technical
 
@@ -378,7 +381,7 @@ def test_same_session_missing_bar_fails_closed() -> None:
 
 
 def test_configured_signal_threshold_changes_candidate(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import a500_t_trader.strategy.intraday_technical as technical
 

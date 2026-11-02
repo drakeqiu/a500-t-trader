@@ -102,12 +102,18 @@ def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> 
 
 def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() -> None:
     result = certify_intraday_backtest(passing_evidence(), binding(), config())
-    assert result.report["metrics"]["net_return"] == "0.05"
-    assert result.report["metrics"]["paired_trade_average_net_profit"] == "2.5"
-    assert result.report["thresholds"]["minimum_sample_count"] == 20
+    metrics = result.report["metrics"]
+    thresholds = result.report["thresholds"]
+    assert isinstance(metrics, dict)
+    assert isinstance(thresholds, dict)
+    assert metrics["net_return"] == "0.05"
+    assert metrics["paired_trade_average_net_profit"] == "2.5"
+    assert thresholds["minimum_sample_count"] == 20
     assert result.report["binding_fingerprint"] == result.fingerprint
     assert result.report["certified"] is True
-    assert "not a guarantee of future profitability" in result.report["disclaimer"]
+    disclaimer = result.report["disclaimer"]
+    assert isinstance(disclaimer, str)
+    assert "not a guarantee of future profitability" in disclaimer
 
 
 def test_invalid_risk_budget_or_parameter_neighbor_configuration_fails_closed() -> None:

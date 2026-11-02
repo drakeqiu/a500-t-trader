@@ -31,7 +31,7 @@ class SymbolExecution:
     allowed: bool
     quantity: int
     side: str | None
-    score: int | None
+    score: float | None
     reasons: tuple[str, ...]
 
 
@@ -117,8 +117,12 @@ def calculate_intraday_execution(
             if score is not None and score < threshold:
                 reasons.append(f"{candidate} score is below its configured threshold")
             reasons.extend(analysis.reasons)
-            position_value = config.account["positions"].get(symbol, {})
-            position = position_value if isinstance(position_value, dict) else {}
+            position_value = config.account["positions"]
+            position = (
+                position_value.get(symbol, {})
+                if isinstance(position_value, Mapping)
+                else {}
+            )
             security_value = config.securities.get(symbol)
             security = security_value if isinstance(security_value, dict) else {}
             if not security:
@@ -146,7 +150,8 @@ def calculate_intraday_execution(
                 or impact_bps < ZERO
             ):
                 reasons.append("required fee inputs are missing or invalid")
-            risk = config.parameters.get("risk", {})
+            risk_value = config.parameters.get("risk", {})
+            risk = risk_value if isinstance(risk_value, Mapping) else {}
             activity = _activity_values(daily_activity)
             if activity is None:
                 reasons.append("explicit current daily activity counters are missing")
@@ -178,7 +183,13 @@ def calculate_intraday_execution(
                     reasons.append(
                         "daily fill limit is reserved by higher-priority actions"
                     )
-            if nav is None or price is None or not security or reasons:
+            if (
+                nav is None
+                or price is None
+                or not security
+                or reasons
+                or activity is None
+            ):
                 results[symbol] = SymbolExecution(
                     symbol,
                     False,
@@ -259,9 +270,7 @@ def calculate_intraday_execution(
                 continue
             daily_turnover_limit = min(
                 nav * MAX_DAILY_TURNOVER_NAV,
-                _decimal(risk.get("daily_turnover_limit"))
-                if isinstance(risk, dict)
-                else ZERO,
+                _decimal(risk.get("daily_turnover_limit")) or ZERO,
             )
             daily_turnover_remaining = max(
                 ZERO,
@@ -524,8 +533,13 @@ def _activity_values(
     sell = _decimal(activity.get("sell_notional"))
     additions = _decimal(activity.get("additions"))
     fills = _decimal(activity.get("fills"))
-    values = (turnover, sell, additions, fills)
-    if any(value is None or value < ZERO for value in values):
+    if (
+        turnover is None
+        or sell is None
+        or additions is None
+        or fills is None
+        or any(value < ZERO for value in (turnover, sell, additions, fills))
+    ):
         return None
     return {
         "turnover_notional": turnover,
@@ -546,9 +560,15 @@ def _daily_limit_reasons(
     max_additions = _decimal(risk.get("max_daily_additions"))
     max_fills = _decimal(risk.get("max_daily_fills"))
     reasons: list[str] = []
-    if any(
-        value is None or value < ZERO
-        for value in (max_turnover, max_sell, max_additions, max_fills)
+    if (
+        max_turnover is None
+        or max_sell is None
+        or max_additions is None
+        or max_fills is None
+        or any(
+            value < ZERO
+            for value in (max_turnover, max_sell, max_additions, max_fills)
+        )
     ):
         return ("explicit daily risk limits are missing or invalid",)
     if activity["turnover_notional"] >= max_turnover:
@@ -587,7 +607,23 @@ def _liquidity_reasons(
     if any(value is None for value in values.values()) or price is None:
         reasons.append("required current liquidity/volatility fields are missing")
         return
-    if any(value < ZERO for value in values.values()) or values["atr"] == ZERO:
+    average_daily_amount = values["average_daily_amount"]
+    latest_bar_amount = values["latest_bar_amount"]
+    spread = values["spread"]
+    atr = values["atr"]
+    if (
+        average_daily_amount is None
+        or latest_bar_amount is None
+        or spread is None
+        or atr is None
+    ):
+        return
+    if (
+        average_daily_amount < ZERO
+        or latest_bar_amount < ZERO
+        or spread < ZERO
+        or atr <= ZERO
+    ):
         reasons.append(
             "liquidity and volatility inputs must be nonnegative with positive ATR"
         )
@@ -595,13 +631,13 @@ def _liquidity_reasons(
     tick = _decimal(security.get("tick_size"))
     if tick is None:
         return
-    if values["average_daily_amount"] < Decimal(30000000):
+    if average_daily_amount < Decimal(30000000):
         reasons.append("20-day average daily amount is below 30000000")
-    if values["latest_bar_amount"] < Decimal(1000000):
+    if latest_bar_amount < Decimal(1000000):
         reasons.append("latest completed 5-minute amount is below 1000000")
-    if values["spread"] > max(Decimal("0.0015"), Decimal(2) * tick / price):
+    if spread > max(Decimal("0.0015"), Decimal(2) * tick / price):
         reasons.append("spread exceeds V1 liquidity limit")
-    atr_ratio = values["atr"] / price
+    atr_ratio = atr / price
     if not Decimal("0.0008") <= atr_ratio <= Decimal("0.015"):
         reasons.append("ATR/price is outside V1 liquidity limits")
 
