@@ -12,6 +12,7 @@ from .intraday_v1_config import IntradayV1Config
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
+MAX_DAILY_TURNOVER_NAV = Decimal("1.50")
 PORTFOLIO_LIMIT = Decimal("0.75")
 RESERVED_CASH = Decimal("0.35")
 MAX_INTENT_NAV = Decimal("0.08")

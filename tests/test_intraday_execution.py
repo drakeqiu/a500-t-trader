@@ -86,6 +86,7 @@ def test_sell_quantity_is_capped_at_eight_percent_of_nav(tmp_path: Path) -> None
             "market_value": "40000",
         }
     )
+    config_data["parameters"]["signals"]["sell_threshold"] = 68
     config_data["parameters"]["risk"].update(
         {
             "daily_turnover_limit": "100000",
