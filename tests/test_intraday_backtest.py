@@ -1,0 +1,158 @@
+import json
+from datetime import datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from a500_t_trader.backtest import (
+    BarSignal,
+    IntradayBacktestParams,
+    StrategyRulesUnavailableError,
+    run_intraday_backtest,
+)
+from a500_t_trader.market_data import MinuteBar
+from a500_t_trader.strategy.premarket import AccountSnapshot
+
+TZ = ZoneInfo("Asia/Shanghai")
+
+
+def bar(day: int, minute: int, price: str, volume: int = 1000) -> MinuteBar:
+    value = Decimal(price)
+    return MinuteBar(
+        "510300",
+        datetime(2026, 10, day, 9, minute, tzinfo=TZ),
+        1,
+        value,
+        value,
+        value,
+        value,
+        volume,
+    )
+
+
+def account() -> AccountSnapshot:
+    return AccountSnapshot(
+        datetime(2026, 10, 29, 15, tzinfo=TZ),
+        {"510300": 200},
+        {"510300": Decimal("10")},
+        {"510300": 100},
+        Decimal("10000"),
+    )
+
+
+def test_public_simulation_uses_later_bar_partial_fills_costs_t1_and_hold_baseline() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10", 250), bar(30, 2, "10", 250), bar(31, 0, "12"))
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=account(),
+        bars=bars,
+        signals=(BarSignal(bars[0].timestamp, "buy", 200),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal("0.5"),
+            fee_bps=Decimal("10"),
+            slippage_bps=Decimal("10"),
+            order_lifetime_bars=2,
+        ),
+        strategy_parameters={"profile": "source-rules-v1"},
+        implementation_version="test-v1",
+    )
+
+    assert [fill.fill_timestamp for fill in result.fills] == [bars[1].timestamp, bars[2].timestamp]
+    assert result.fills[0].fees == Decimal("1.00100")
+    assert result.fills[0].slippage == Decimal("1.00")
+    assert [fill.quantity for fill in result.fills] == [100, 100]
+    assert all(fill.signal_timestamp == bars[0].timestamp for fill in result.fills)
+    assert result.final_holdings == 400
+    assert result.baseline_final_value == Decimal("12400")
+    assert result.snapshot_bar_count == 4
+    assert result.strategy_parameters == {"profile": "source-rules-v1"}
+    assert result.assumptions["fill_timing"] == "next_available_bar_open"
+    assert json.loads(result.snapshot_json)[0]["close"] == "10"
+    initial_snapshot = result.assumptions["initial_account_snapshot"]
+    assert isinstance(initial_snapshot, dict)
+    assert initial_snapshot["cost_basis"] == {"510300": "10"}
+
+
+def test_public_simulation_fails_when_v1_rules_are_not_available() -> None:
+    with pytest.raises(StrategyRulesUnavailableError, match="signal provider"):
+        run_intraday_backtest(
+            symbol="510300",
+            account=account(),
+            bars=(bar(30, 0, "10"), bar(30, 1, "10")),
+            signals=None,
+            params=IntradayBacktestParams(),
+            strategy_parameters={},
+            implementation_version="test-v1",
+        )
+
+
+def test_public_simulation_cancels_unfilled_remainder_and_releases_reserve() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10", 250), bar(30, 2, "10", 250))
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=account(),
+        bars=bars,
+        signals=(BarSignal(bars[0].timestamp, "buy", 200),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal("0.5"),
+            order_lifetime_bars=1,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert [fill.quantity for fill in result.fills] == [100]
+    assert result.cancellations[0]["unfilled_quantity"] == 100
+    assert result.cancellations[0]["reserved_cash_released"] == Decimal("1000.0")
+
+
+def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10"), bar(31, 0, "10"), bar(31, 1, "10"))
+    empty_account = AccountSnapshot(
+        account().as_of, {}, {}, {}, Decimal("10000")
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=empty_account,
+        bars=bars,
+        signals=(
+            BarSignal(bars[0].timestamp, "buy", 100),
+            BarSignal(bars[1].timestamp, "sell", 100),
+            BarSignal(bars[2].timestamp, "sell", 100),
+        ),
+        params=IntradayBacktestParams(participation_rate=Decimal(1)),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert [(fill.side, fill.fill_timestamp) for fill in result.fills] == [
+        ("buy", bars[1].timestamp),
+        ("sell", bars[3].timestamp),
+    ]
+    assert result.final_holdings == 0
+
+
+def test_public_simulation_accepts_strategy_signal_provider() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10"))
+
+    class Provider:
+        def signals(
+            self, symbol: str, supplied_bars: tuple[MinuteBar, ...]
+        ) -> tuple[BarSignal, ...]:
+            assert symbol == "510300"
+            assert supplied_bars == bars
+            return (BarSignal(bars[0].timestamp, "buy", 100),)
+
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=account(),
+        bars=bars,
+        signals=Provider(),
+        params=IntradayBacktestParams(),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills[0].signal_timestamp == bars[0].timestamp
+    assert result.fills[0].fill_timestamp == bars[1].timestamp
