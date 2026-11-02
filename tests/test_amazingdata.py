@@ -8,7 +8,6 @@ import pytest
 
 from a500_t_trader.market_data import CapabilityUnavailableError, MarketDataService
 from a500_t_trader.market_data.providers.amazingdata import AmazingDataProvider
-from a500_t_trader.market_data.providers.tgw_push import TgwPushProvider
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -54,7 +53,9 @@ class VendorAPI:
 
 class SnapshotAPI:
     MarketType = SimpleNamespace(kSSE=1, kSZSE=2)
-    MDDatatype = SimpleNamespace(kSnapshot=1, k1KLine=2, kTickExecution=3)
+    SubscribeDataType = SimpleNamespace(
+        kSnapshot=10, k1MinKline=1, kTickExecution=23
+    )
 
     def __init__(self, *, deliver_snapshot: bool = True) -> None:
         self.deliver_snapshot = deliver_snapshot
