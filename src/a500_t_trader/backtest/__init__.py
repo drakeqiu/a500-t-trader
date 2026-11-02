@@ -22,6 +22,12 @@ from .intraday import (
     StrategySignalProvider,
     run_intraday_backtest,
 )
+from .certification import (
+    CertificationEvidence,
+    CertificationResult,
+    certification_is_current,
+    certify_intraday_backtest,
+)
 
 HUNDRED = Decimal(100)
 
