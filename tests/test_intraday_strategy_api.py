@@ -126,7 +126,7 @@ def _config(
         "intraday-etf-t-v1",
         "V1.0",
         "commit:test",
-        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.txt",
+        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
         RULE_SOURCE_SHA256,
         parameters,
         {
