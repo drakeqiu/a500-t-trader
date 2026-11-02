@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from ..account_ledger import AccountLedger, import_galaxy_fills
 from ..backtest import BacktestMarketData, BacktestRepository, run_backtest
+from ..backtest.intraday_signals import replay_fixed_quantity_signals
 from ..market_data import (
     CapabilityUnavailableError,
     DailyBar,
@@ -211,7 +212,94 @@ def main(
     strategy.add_argument("--bars", required=True, help="minute bars JSON input")
     strategy.add_argument("--as-of", required=True, type=datetime.fromisoformat)
     strategy.add_argument("--output", help="export the exact structured result as JSON")
+    signal_replay = commands.add_parser(
+        "intraday-signals",
+        help="replay V1 BUY/SELL candidates with a fixed signal quantity",
+    )
+    signal_replay.add_argument(
+        "--bars",
+        default="data/market-history/563360_5m_20240601_20261028.json",
+        help="saved five-minute history JSON",
+    )
+    signal_replay.add_argument(
+        "--quantity", type=int, default=40000, help="fixed signal quantity in shares"
+    )
+    signal_replay.add_argument("--output", help="optional JSON output file")
     args = parser.parse_args(argv)
+    if args.command == "intraday-signals":
+        try:
+            with open(args.bars, encoding="utf-8") as stream:
+                document = json.load(stream)
+            if not isinstance(document, dict) or not isinstance(
+                document.get("bars"), list
+            ):
+                raise ValueError("bars input must be a JSON object containing bars")
+            minute_bars = tuple(
+                MinuteBar(
+                    item["symbol"],
+                    datetime.fromisoformat(item["timestamp"]),
+                    item["interval_minutes"],
+                    Decimal(str(item["open"])),
+                    Decimal(str(item["high"])),
+                    Decimal(str(item["low"])),
+                    Decimal(str(item["close"])),
+                    item["volume"],
+                    None
+                    if item.get("amount") is None
+                    else Decimal(str(item["amount"])),
+                    item.get("is_completed", True),
+                )
+                for item in document["bars"]
+            )
+            if not minute_bars:
+                raise ValueError("bars input contains no bars")
+            symbol = minute_bars[0].symbol
+            if any(bar.symbol != symbol for bar in minute_bars):
+                raise ValueError("signal replay accepts one symbol per input")
+            signals = replay_fixed_quantity_signals(
+                symbol, minute_bars, quantity=args.quantity
+            )
+            result = {
+                "strategy": "intraday-etf-t-v1-technical-candidate-replay",
+                "symbol": symbol,
+                "signal_quantity": args.quantity,
+                "first_bar": minute_bars[0].timestamp,
+                "last_bar": minute_bars[-1].timestamp,
+                "input_bar_count": len(minute_bars),
+                "signal_count": len(signals),
+                "signals": [asdict(signal) for signal in signals],
+                "starting_account_snapshot": {
+                    "cash": "210000",
+                    "holding_quantity": 400700,
+                    "cost_price": "1.193",
+                    "protected_floor_quantity": 280500,
+                    "sellable_quantity_at_start": 120200,
+                    "fixed_quantity_sell_slots_at_start": 3,
+                },
+                "limitations": [
+                    "no fills, P&L, position updates, T+1 or sell-capacity checks",
+                    "starting account snapshot is informational, not a signal gate",
+                    "grid tick uses the SSE ETF minimum increment of 0.001 yuan",
+                    "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
+                    "missing history is not synthesized",
+                    "grid-level cooldown is absent; repeated candidates may occur",
+                    "daily bar completeness has not been independently audited",
+                ],
+            }
+            rendered = json.dumps(
+                result, ensure_ascii=False, indent=2, default=_json_default
+            )
+            print(rendered)
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as stream:
+                    stream.write(rendered + "\n")
+            return 0
+        except Exception as error:
+            print(
+                f"Unable to replay fixed-quantity V1 signals: {error}",
+                file=sys.stderr,
+            )
+            return 2
     if args.command == "intraday-strategy":
         try:
             loaded_config = load_intraday_v1_config(args.config)

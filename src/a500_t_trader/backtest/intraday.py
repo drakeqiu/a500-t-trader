@@ -67,7 +67,8 @@ class TechnicalAnalysisSignalProvider:
 
     A quantity resolver is mandatory because the technical analyzer does not
     authorize position sizing or account eligibility. Blocked/WAIT results
-    never reach it, and each candidate uses only bars available at that time.
+    never reach it. An optional history bound reduces replay cost when callers
+    explicitly accept a finite warm-up window.
     """
 
     def __init__(
@@ -77,11 +78,15 @@ class TechnicalAnalysisSignalProvider:
         config: IntradayV1Config | None = None,
         grid_context: Mapping[str, Mapping[str, object]] | None = None,
         grid_context_for: TechnicalGridContextProvider | None = None,
+        max_history_bars: int | None = None,
     ) -> None:
+        if max_history_bars is not None and max_history_bars <= 0:
+            raise ValueError("max_history_bars must be positive")
         self._quantity_for = quantity_for
         self._config = config
         self._grid_context = grid_context
         self._grid_context_for = grid_context_for
+        self._max_history_bars = max_history_bars
 
     def signals(
         self, symbol: str, bars: tuple[MinuteBar, ...]
@@ -92,6 +97,11 @@ class TechnicalAnalysisSignalProvider:
             if not bar.is_completed:
                 continue
             history.append(bar)
+            if (
+                self._max_history_bars is not None
+                and len(history) > self._max_history_bars
+            ):
+                del history[: len(history) - self._max_history_bars]
             history_tuple = tuple(history)
             context = (
                 self._grid_context_for.context_for(symbol, history_tuple)

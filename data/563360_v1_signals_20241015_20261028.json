@@ -1,0 +1,583 @@
+{
+  "strategy": "intraday-etf-t-v1-technical-candidate-replay",
+  "symbol": "563360",
+  "signal_quantity": 40000,
+  "first_bar": "2024-10-15T09:30:00+08:00",
+  "last_bar": "2026-10-28T14:55:00+08:00",
+  "input_bar_count": 23760,
+  "signal_count": 111,
+  "signals": [
+    {
+      "timestamp": "2024-10-31T10:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2024-11-12T13:55:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2024-11-27T11:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2024-12-17T10:20:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2024-12-19T13:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-01-14T10:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-02-06T11:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-02-18T14:00:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-03-03T10:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-03-03T10:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-03-11T14:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-04-18T14:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-05-14T13:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-06-09T10:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-06-17T10:35:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-06-25T14:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-07-04T13:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-07-22T13:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-07-30T14:05:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-07T10:30:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-07T10:40:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-14T13:25:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-14T13:35:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-19T14:00:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-21T14:25:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-22T10:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-25T11:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-25T14:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-27T14:00:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-28T10:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-28T10:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-08-29T10:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-09-01T14:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-09-05T10:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-09-05T10:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-09-29T10:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-09-29T10:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-13T14:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-13T14:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-13T14:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-13T14:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-15T13:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-10-23T14:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-03T13:20:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-03T13:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-12T14:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-13T10:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-24T14:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-11-24T14:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-05T14:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-10T11:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-10T14:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-12T11:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-12T13:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-24T13:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-25T13:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2025-12-30T13:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-05T10:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-07T13:50:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-13T13:40:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-14T13:15:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-14T13:35:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-19T10:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-27T10:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-27T11:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-01-30T13:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-02-03T13:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-02-03T14:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-06T10:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-09T13:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-10T14:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-16T13:30:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-16T13:45:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-03-16T14:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-08T13:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-14T13:40:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-15T14:15:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-15T14:25:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-21T13:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-04-24T14:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-07T14:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-15T11:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-19T14:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-21T13:40:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-22T13:55:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-25T11:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-05-28T13:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-06-02T11:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-06-10T10:40:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-06-12T11:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-06-15T13:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-06-29T14:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-07-01T14:00:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-07-03T11:05:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-07-21T11:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-07-22T14:15:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-07-29T13:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-07T10:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-12T11:10:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-18T11:10:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-25T13:25:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-25T14:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-08-31T13:35:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-09-11T13:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-09-11T14:00:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-09-11T14:20:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-09-15T10:40:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-09-22T13:35:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-10-09T13:50:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-10-26T13:15:00+08:00",
+      "direction": "sell",
+      "quantity": 40000
+    },
+    {
+      "timestamp": "2026-10-27T11:05:00+08:00",
+      "direction": "buy",
+      "quantity": 40000
+    }
+  ],
+  "starting_account_snapshot": {
+    "cash": "210000",
+    "holding_quantity": 400700,
+    "cost_price": "1.193",
+    "protected_floor_quantity": 280500,
+    "sellable_quantity_at_start": 120200,
+    "fixed_quantity_sell_slots_at_start": 3
+  },
+  "limitations": [
+    "no fills, P&L, position updates, T+1 or sell-capacity checks",
+    "starting account snapshot is informational, not a signal gate",
+    "grid tick uses the SSE ETF minimum increment of 0.001 yuan",
+    "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
+    "missing history is not synthesized",
+    "grid-level cooldown is absent; repeated candidates may occur",
+    "daily bar completeness has not been independently audited"
+  ]
+}
