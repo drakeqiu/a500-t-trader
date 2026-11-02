@@ -64,6 +64,10 @@ def calculate_intraday_execution(
         key=lambda item: (-(item[1].scores.get("buy") or -1), item[0]),
     )
     buy_allocated = ZERO
+    turnover_allocated = ZERO
+    sell_allocated = ZERO
+    additions_allocated = ZERO
+    fills_allocated = ZERO
     for symbol, analysis in ordered:
         reasons: list[str] = []
         try:
@@ -103,8 +107,15 @@ def calculate_intraday_execution(
             fee_rate = _decimal(config.fees.get("commission_rate"))
             minimum_fee = _decimal(config.fees.get("minimum_commission"))
             impact_bps = _decimal(config.fees.get("impact_bps"))
-            if fee_rate is None or minimum_fee is None or impact_bps is None:
-                reasons.append("required fee inputs are missing")
+            if (
+                fee_rate is None
+                or fee_rate < ZERO
+                or minimum_fee is None
+                or minimum_fee < ZERO
+                or impact_bps is None
+                or impact_bps < ZERO
+            ):
+                reasons.append("required fee inputs are missing or invalid")
             risk = config.parameters.get("risk", {})
             activity = _activity_values(daily_activity)
             if activity is None:
@@ -113,6 +124,24 @@ def calculate_intraday_execution(
                 reasons.append("required V1 risk limits are not explicitly configured")
             if activity is not None and _daily_limit_reasons(config, activity, side):
                 reasons.extend(_daily_limit_reasons(config, activity, side))
+            if activity is not None and side == "sell":
+                sell_budget = _decimal(risk.get("daily_sell_limit"))
+                if sell_budget is not None and (
+                    activity["sell_notional"] + sell_allocated >= sell_budget
+                ):
+                    reasons.append("daily sell limit is reserved by higher-priority actions")
+            if activity is not None and side == "buy":
+                additions_limit = _decimal(risk.get("max_daily_additions"))
+                if additions_limit is not None and (
+                    activity["additions"] + additions_allocated >= additions_limit
+                ):
+                    reasons.append("daily addition limit is reserved by higher-priority actions")
+            if activity is not None:
+                fills_limit = _decimal(risk.get("max_daily_fills"))
+                if fills_limit is not None and (
+                    activity["fills"] + fills_allocated >= fills_limit
+                ):
+                    reasons.append("daily fill limit is reserved by higher-priority actions")
             if nav is None or price is None or not security or reasons:
                 results[symbol] = SymbolExecution(
                     symbol, False, 0, side if side in {"buy", "sell"} else None,
@@ -130,6 +159,31 @@ def calculate_intraday_execution(
                 reasons.append("valid T+0/T+1 settlement rule is missing")
             if (price / tick) != (price / tick).to_integral_value():
                 reasons.append("current price is not aligned to the security tick size")
+            lower_limit = _decimal(security.get("lower_price_limit"))
+            upper_limit = _decimal(security.get("upper_price_limit"))
+            if (
+                lower_limit is None
+                or upper_limit is None
+                or lower_limit <= ZERO
+                or upper_limit < lower_limit
+            ):
+                reasons.append("valid explicit security price bands are missing")
+            elif price < lower_limit or price > upper_limit:
+                reasons.append(
+                    "current price is outside the explicit security price bands"
+                )
+            if (
+                lower_limit is not None
+                and upper_limit is not None
+                and tick > ZERO
+                and (
+                    lower_limit / tick
+                    != (lower_limit / tick).to_integral_value()
+                    or upper_limit / tick
+                    != (upper_limit / tick).to_integral_value()
+                )
+            ):
+                reasons.append("explicit security price bands are not tick-aligned")
             holding = _nonnegative_int(position.get("quantity"))
             floor = _nonnegative_int(position.get("protected_floor"))
             sellable = _nonnegative_int(position.get("sellable_quantity"))
@@ -141,11 +195,29 @@ def calculate_intraday_execution(
             if reasons:
                 results[symbol] = SymbolExecution(symbol, False, 0, side, score, tuple(dict.fromkeys(reasons)))
                 continue
-            amount_per_share = price * (ONE + (impact_bps or ZERO) / Decimal(10000) + (fee_rate or ZERO))
+            amount_per_share = price * (
+                ONE
+                + (impact_bps or ZERO) / Decimal(10000)
+                + (fee_rate or ZERO)
+            )
             if floor > holding or sellable > holding:
                 reasons.append("protected floor or available inventory exceeds holdings")
-                results[symbol] = SymbolExecution(symbol, False, 0, side, score, tuple(reasons))
+                results[symbol] = SymbolExecution(
+                    symbol, False, 0, side, score, tuple(reasons)
+                )
                 continue
+            daily_turnover_limit = min(
+                nav * MAX_DAILY_TURNOVER_NAV,
+                _decimal(risk.get("daily_turnover_limit"))
+                if isinstance(risk, dict)
+                else ZERO,
+            )
+            daily_turnover_remaining = max(
+                ZERO,
+                daily_turnover_limit
+                - activity["turnover_notional"]
+                - turnover_allocated,
+            )
             if side == "buy":
                 headroom = max(ZERO, nav * PORTFOLIO_LIMIT - _held_value(config))
                 symbol_headroom = max(
@@ -156,13 +228,32 @@ def calculate_intraday_execution(
                     nav * MAX_INTENT_NAV,
                     headroom,
                     symbol_headroom,
-                    max(ZERO, _cash(config) - nav * RESERVED_CASH - (minimum_fee or ZERO)),
+                    daily_turnover_remaining,
+                    max(
+                        ZERO,
+                        _cash(config)
+                        - nav * RESERVED_CASH
+                        - buy_allocated
+                        - (minimum_fee or ZERO),
+                    ),
                 )
-                quantity = int((capacity / amount_per_share).to_integral_value(rounding=ROUND_FLOOR))
+                quantity = int(
+                    (capacity / amount_per_share).to_integral_value(rounding=ROUND_FLOOR)
+                )
             else:
                 inventory = min(sellable, max(0, holding - floor))
-                capacity = min(nav * MAX_SELL_TURNOVER_NAV, market_value)
-                quantity = min(inventory, int((capacity / price).to_integral_value(rounding=ROUND_FLOOR)))
+                capacity = min(
+                    nav * MAX_SELL_TURNOVER_NAV,
+                    market_value,
+                    max(
+                        ZERO,
+                        _daily_sell_remaining(config, activity) - sell_allocated,
+                    ),
+                )
+                quantity = min(
+                    inventory,
+                    int((capacity / price).to_integral_value(rounding=ROUND_FLOOR)),
+                )
             quantity = quantity // lot * lot
             bar_volume = _decimal(fields.get("latest_bar_volume"))
             if bar_volume is None or bar_volume < ZERO:
@@ -176,28 +267,77 @@ def calculate_intraday_execution(
                 )
                 quantity = min(quantity, participation_limit // lot * lot)
             if side == "buy":
-                remaining = max(ZERO, nav * PORTFOLIO_LIMIT - _held_value(config) - buy_allocated)
-                quantity = min(quantity, int((remaining / amount_per_share).to_integral_value(rounding=ROUND_FLOOR)) // lot * lot)
-                buy_allocated += Decimal(quantity) * amount_per_share
+                remaining = max(
+                    ZERO, nav * PORTFOLIO_LIMIT - _held_value(config) - buy_allocated
+                )
+                quantity = min(
+                    quantity,
+                    int((remaining / amount_per_share).to_integral_value(rounding=ROUND_FLOOR))
+                    // lot
+                    * lot,
+                )
             else:
                 daily_remaining = _daily_sell_remaining(config, activity)
-                quantity = min(quantity, int((daily_remaining / price).to_integral_value(rounding=ROUND_FLOOR)) // lot * lot)
+                quantity = min(
+                    quantity,
+                    int((daily_remaining / price).to_integral_value(rounding=ROUND_FLOOR))
+                    // lot
+                    * lot,
+                )
+            atr = _decimal(fields.get("atr"))
+            grid_step = _decimal(fields.get("grid_step"))
+            if atr is None or atr <= ZERO or grid_step is None or grid_step <= ZERO:
+                reasons.append("positive ATR and V1 grid step are required for stop-risk sizing")
+                results[symbol] = SymbolExecution(
+                    symbol, False, 0, side, score, tuple(reasons)
+                )
+                continue
+            stop_distance = max(
+                Decimal("1.5") * atr,
+                Decimal("1.2") * grid_step,
+                Decimal("0.004") * price,
+            )
+            risk_budget = nav * MAX_RISK_NAV
+            risk_quantity_by_stop = max(
+                ZERO,
+                (risk_budget - (minimum_fee or ZERO)) / stop_distance,
+            ).to_integral_value(rounding=ROUND_FLOOR)
+            risk_quantity_by_cost = (
+                risk_budget
+                / (stop_distance + price * (fee_rate or ZERO))
+            ).to_integral_value(rounding=ROUND_FLOOR)
+            quantity = min(
+                quantity,
+                int(min(risk_quantity_by_stop, risk_quantity_by_cost)) // lot * lot,
+            )
             if quantity < lot:
-                reasons.append("budget, portfolio, or available inventory is below one trading unit")
-                results[symbol] = SymbolExecution(symbol, False, 0, side, score, tuple(reasons))
+                reasons.append(
+                    "budget, portfolio, or available inventory is below one trading unit"
+                )
+                results[symbol] = SymbolExecution(
+                    symbol, False, 0, side, score, tuple(reasons)
+                )
                 continue
             notional = Decimal(quantity) * price
             fee = max(minimum_fee or ZERO, notional * (fee_rate or ZERO))
-            planned_risk = _decimal(fields.get("planned_risk"))
-            if planned_risk is None:
-                reasons.append("risk estimate using the V1 stop rule is missing")
-                results[symbol] = SymbolExecution(symbol, False, 0, side, score, tuple(reasons))
-                continue
+            planned_risk = Decimal(quantity) * stop_distance
             if planned_risk + fee > nav * MAX_RISK_NAV:
                 reasons.append("planned risk and fees exceed 0.15% of NAV")
-                results[symbol] = SymbolExecution(symbol, False, 0, side, score, tuple(reasons))
+                results[symbol] = SymbolExecution(
+                    symbol, False, 0, side, score, tuple(reasons)
+                )
                 continue
-            results[symbol] = SymbolExecution(symbol, True, quantity, side, score, ())
+            if side == "buy":
+                buy_allocated += (
+                    Decimal(quantity) * amount_per_share
+                    + max(ZERO, (minimum_fee or ZERO) - notional * (fee_rate or ZERO))
+                )
+            turnover_allocated += notional
+            if side == "sell":
+                sell_allocated += notional
+            if side == "buy":
+                additions_allocated += ONE
+            fills_allocated += ONE
         except Exception as error:
             results[symbol] = SymbolExecution(
                 symbol, False, 0, None, None,
@@ -324,7 +464,7 @@ def _daily_limit_reasons(
         reasons.append("daily turnover limit has been reached")
     if side == "sell" and activity["sell_notional"] >= max_sell:
         reasons.append("daily sell limit has been reached")
-    if activity["additions"] >= max_additions:
+    if side == "buy" and activity["additions"] >= max_additions:
         reasons.append("daily addition limit has been reached")
     if activity["fills"] >= max_fills:
         reasons.append("daily fill limit has been reached")
@@ -343,10 +483,19 @@ def _liquidity_reasons(
     fields: Mapping[str, object], price: Decimal | None,
     security: Mapping[str, object], reasons: list[str],
 ) -> None:
-    required = ("average_daily_amount", "latest_bar_amount", "latest_bar_volume", "spread", "atr")
+    required = (
+        "average_daily_amount",
+        "latest_bar_amount",
+        "latest_bar_volume",
+        "spread",
+        "atr",
+    )
     values = {key: _decimal(fields.get(key)) for key in required}
     if any(value is None for value in values.values()) or price is None:
         reasons.append("required current liquidity/volatility fields are missing")
+        return
+    if any(value < ZERO for value in values.values()) or values["atr"] == ZERO:
+        reasons.append("liquidity and volatility inputs must be nonnegative with positive ATR")
         return
     tick = _decimal(security.get("tick_size"))
     if tick is None:

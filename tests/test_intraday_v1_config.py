@@ -63,6 +63,8 @@ def _complete_config() -> dict[str, object]:
                 "t_plus": "T+1",
                 "lot_size": 100,
                 "tick_size": "0.001",
+                "lower_price_limit": "3.6",
+                "upper_price_limit": "4.4",
                 "source": "exchange rule sheet",
                 "as_of": "2026-11-02T09:00:00+08:00",
             }
@@ -114,6 +116,12 @@ def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
 
 
+def test_security_price_bands_are_explicit_configuration(tmp_path: Path) -> None:
+    document = _complete_config()
+    del document["securities"]["510300"]["upper_price_limit"]  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="securities.510300.upper_price_limit"):
+        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
 def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
     source = (
         Path(__file__).parents[1]
