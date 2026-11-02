@@ -170,43 +170,40 @@ def import_galaxy_fills(
 ) -> dict[str, object]:
     """Validate a Galaxy export and optionally atomically persist its fills."""
     records, errors = _read_galaxy_fills(csv_file)
-    existing: dict[str, dict[str, object]] = {}
-    if not errors and Path(database).exists():
-        with closing(_readonly_database(database)) as db:
-            if _table_exists(db, "imported_fills"):
-                existing = {
-                    str(row["trade_number"]): dict(row)
-                    for row in db.execute(
-                        "SELECT * FROM imported_fills WHERE source=?",
-                        (GALAXY_SOURCE,),
-                    )
-                }
-
-    candidates: list[dict[str, object]] = []
-    seen: dict[str, dict[str, object]] = {}
-    duplicates = 0
-    for record in records:
-        trade_number = str(record["trade_number"])
-        previous = seen.get(trade_number) or existing.get(trade_number)
-        if previous is not None:
-            if _same_trade(previous, record):
-                duplicates += 1
-            else:
-                errors.append({
-                    "row": record["_row"],
-                    "field": "成交编号",
-                    "reason": "conflicts with another record using this trade number",
-                })
-            continue
-        seen[trade_number] = record
-        candidates.append(record)
-    if errors:
-        candidates = []
-        duplicates = 0
-
     inserted_ids: list[int] = []
-    if confirm and not errors:
+    candidates: list[dict[str, object]] = []
+    duplicates = 0
+
+    def classify(
+        existing: dict[str, dict[str, object]],
+    ) -> tuple[list[dict[str, object]], int]:
+        seen: dict[str, dict[str, object]] = {}
+        new_records: list[dict[str, object]] = []
+        repeated = 0
+        for record in records:
+            trade_number = str(record["trade_number"])
+            previous = seen.get(trade_number) or existing.get(trade_number)
+            if previous is not None:
+                if _same_trade(previous, record):
+                    repeated += 1
+                else:
+                    errors.append({
+                        "row": record["_row"],
+                        "field": "成交编号",
+                        "reason": (
+                            "conflicts with another record using this trade number"
+                        ),
+                    })
+                continue
+            seen[trade_number] = record
+            new_records.append(record)
+        if errors:
+            return [], 0
+        return new_records, repeated
+
+    if not errors and confirm:
         with sqlite3.connect(str(database)) as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS imported_fills (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,6 +224,14 @@ def import_galaxy_fills(
                     UNIQUE(source,trade_number)
                 )"""
             )
+            existing = {
+                str(row["trade_number"]): dict(row)
+                for row in db.execute(
+                    "SELECT * FROM imported_fills WHERE source=?",
+                    (GALAXY_SOURCE,),
+                )
+            }
+            candidates, duplicates = classify(existing)
             for record in candidates:
                 cursor = db.execute(
                     """INSERT INTO imported_fills(
@@ -244,6 +249,20 @@ def import_galaxy_fills(
                 if cursor.lastrowid is None:
                     raise TypeError("SQLite insert did not return a row id")
                 inserted_ids.append(cursor.lastrowid)
+    elif not errors:
+        existing: dict[str, dict[str, object]] = {}
+        if Path(database).exists():
+            with closing(_readonly_database(database)) as db:
+                if _table_exists(db, "imported_fills"):
+                    existing = {
+                        str(row["trade_number"]): dict(row)
+                        for row in db.execute(
+                            "SELECT * FROM imported_fills WHERE source=?",
+                            (GALAXY_SOURCE,),
+                        )
+                    }
+        candidates, duplicates = classify(existing)
+
     return {
         "valid": len(records),
         "new": len(candidates),
