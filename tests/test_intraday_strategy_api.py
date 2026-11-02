@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
+from a500_t_trader.strategy.intraday_state import IntradayStrategyStateStore
 from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -201,4 +202,11 @@ def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> None
     assert isinstance(execution, dict)
     assert execution["suggested_price"] is None
     assert execution["order_type"] is None
-    assert execution["expires_at"] is None
+
+def test_evaluation_requires_explicit_persistent_state_configuration(tmp_path) -> None:
+    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    result = _evaluate(state_store=store)["510300"]
+
+    _assert_blocked(result, "persistent strategy state unavailable or unconfigured")
+    assert store.state("510300", AS_OF.date()) is None
+    assert store.trade_pairs() == []

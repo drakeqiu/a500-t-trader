@@ -303,7 +303,7 @@ class IntradayStrategyStateStore:
             raise ValueError("recommendation id, symbol and non-negative grid coordinates are required")
         with sqlite3.connect(self.path) as db:
             db.execute(
-                """INSERT INTO strategy_recommendations (
+                """INSERT OR IGNORE INTO strategy_recommendations (
                     recommendation_id,symbol,side,created_at,grid_version,grid_layer,grid_round
                 ) VALUES(?,?,?,?,?,?,?)""",
                 (

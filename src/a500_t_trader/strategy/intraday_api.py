@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Mapping
 from zoneinfo import ZoneInfo
 
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
+from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
 from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
 from .intraday_v1_config import IntradayV1Config
 from .premarket import MAX_INPUT_AGE
@@ -25,6 +27,8 @@ def evaluate_intraday_strategy(
     liquidity: Mapping[str, Mapping[str, object]] | None = None,
     daily_activity: Mapping[str, object] | None = None,
     certification: Mapping[str, object] | None = None,
+    state_store: IntradayStrategyStateStore | None = None,
+    pending_order_state: str | None = None,
 ) -> dict[str, dict[str, object]]:
     """Return a deterministic result per symbol; unknown gates always veto.
 
@@ -32,16 +36,19 @@ def evaluate_intraday_strategy(
     available on this integration tip. The real execution sizing gate is still
     run when the explicit V1 configuration is supplied, with certification
     fixed false until verifiable evidence can be bound to that configuration.
+
+    Persistent state is mandatory for directional candidates. Recommendations
+    are recorded only after every gate passes and never count as actual fills.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
     now = as_of.astimezone(SHANGHAI)
-    analyses = analyze_intraday_technical(bars_by_symbol)
     securities = {} if config is None else config.securities
     account = {} if config is None else config.account
     positions = account.get("positions")
     account_symbols = positions if isinstance(positions, dict) else {}
     symbols = sorted(set(bars_by_symbol) | set(securities) | set(account_symbols))
+    analyses = analyze_intraday_technical(bars_by_symbol)
     adjusted = {
         symbol: _with_reference_price(analysis, _latest_completed_bar(bars_by_symbol.get(symbol, ())))
         for symbol, analysis in analyses.items()
@@ -87,6 +94,39 @@ def evaluate_intraday_strategy(
                 elif _stale(stamp, now):
                     reasons.append(f"trading rules for {symbol} are stale or future-dated")
 
+        side = analysis.candidate.lower() if analysis is not None else ""
+        state_parameters = _state_parameters(config)
+        state_reasons: tuple[str, ...] = ()
+        if state_store is None or state_parameters is None:
+            state_reasons = ("persistent strategy state unavailable or unconfigured",)
+        elif side in ("buy", "sell"):
+            try:
+                (
+                    grid_version,
+                    grid_layer,
+                    grid_round,
+                    max_daily_trades,
+                    max_daily_adds,
+                    max_daily_turnover,
+                    min_same_direction_bars,
+                ) = state_parameters
+                state_reasons = state_store.check_constraints(
+                    symbol=symbol,
+                    session_date=now.date(),
+                    side=side,
+                    now=now,
+                    grid_version=grid_version,
+                    grid_layer=grid_layer,
+                    grid_round=grid_round,
+                    pending_order_state=pending_order_state,
+                    max_daily_trades=max_daily_trades,
+                    max_daily_adds=max_daily_adds,
+                    max_daily_turnover=max_daily_turnover,
+                    min_same_direction_bars=min_same_direction_bars,
+                )
+            except (ValueError, TypeError, ArithmeticError, sqlite3.Error):
+                state_reasons = ("persistent strategy state unavailable or unconfigured",)
+        reasons.extend(state_reasons)
         bars = bars_by_symbol.get(symbol, ())
         latest = _latest_completed_bar(bars)
         if latest is None:
@@ -113,6 +153,29 @@ def evaluate_intraday_strategy(
             allowed = False
             quantity = 0 if execution is not None else None
         reasons = list(dict.fromkeys(reasons))
+        if (
+            analysis is not None
+            and side in ("buy", "sell")
+            and state_store is not None
+            and state_parameters is not None
+            and allowed
+        ):
+            grid_version, grid_layer, grid_round = state_parameters[:3]
+            recommendation_id = (
+                f"{config.strategy_id}:{symbol}:{now.isoformat()}:{side}:"
+                f"{grid_version}:{grid_layer}:{grid_round}"
+            )
+            state_store.record_recommendation(
+                StrategyRecommendation(
+                    recommendation_id,
+                    symbol,
+                    side,
+                    now,
+                    grid_version,
+                    grid_layer,
+                    grid_round,
+                )
+            )
         results[symbol] = {
             "signal": _signal(analysis),
             "position": _position(account, symbol),
@@ -135,6 +198,37 @@ def evaluate_intraday_strategy(
             "reasons": reasons,
         }
     return results
+
+def _state_parameters(
+    config: IntradayV1Config | None,
+) -> tuple[int, int, int, int, int, Decimal, int] | None:
+    if config is None:
+        return None
+    grid = config.parameters.get("grid")
+    risk = config.parameters.get("risk")
+    if not isinstance(grid, dict) or not isinstance(risk, dict):
+        return None
+    values = (
+        grid.get("grid_version"),
+        grid.get("grid_layer"),
+        grid.get("grid_round"),
+        risk.get("max_daily_trades"),
+        risk.get("max_daily_adds"),
+        risk.get("max_daily_turnover"),
+        risk.get("min_same_direction_bars"),
+    )
+    if any(type(value) is not int for value in values[:5] + values[6:]):
+        return None
+    try:
+        turnover = Decimal(str(values[5]))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not turnover.is_finite() or turnover <= 0:
+        return None
+    grid_version, grid_layer, grid_round, trades, adds, _, bars = values
+    if grid_version < 1 or grid_layer < 0 or grid_round < 0 or trades < 1 or adds < 1 or bars < 0:
+        return None
+    return grid_version, grid_layer, grid_round, trades, adds, turnover, bars
 
 
 def _latest_completed_bar(bars: tuple[MinuteBar, ...]) -> MinuteBar | None:
