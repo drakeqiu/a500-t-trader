@@ -27,6 +27,8 @@ Keep account-ledger and workflow-specific persistence with their owning domain; 
 
 Update repository imports and tests to the new module locations. Do not retain compatibility aliases for old module paths. Keep `python -m a500_t_trader` as the documented command-line entry point.
 
+Within `cli`, `main.py` preserves the single `main(argv, *, market_data, as_of)` application seam and dispatches parsed commands. `parser.py` composes registrations from responsibility-based modules: `account.py` for ledger operations, `history.py` for daily history and backtests, `planning.py` for pre-market/post-market workflows and monitoring, and `intraday.py` for intraday strategy commands. `common.py` holds shared CLI types and JSON serialization. These modules are internal organization; users continue to invoke commands through `python -m a500_t_trader`.
+
 This proposal changes internal organization only. It does not create independently installable distributions, alter strategy behavior, or change the CLI contract.
 
 ## Consequences

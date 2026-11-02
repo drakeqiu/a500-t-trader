@@ -89,7 +89,7 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL/TAKE_PROFIT/BUYBACK 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
 V1.0 的候选分数门槛与方向差门槛均取自调用方的完整策略参数（源规则基准：BUY 72、SELL 68、TAKE_PROFIT 60、BUYBACK 68，弱 BEAR 下 BUYBACK 78；方向差为 ±12），不会在执行环节退回硬编码默认值。同一交易时段内漏失已完成 5 分钟线会阻断候选，午休时段除外。通过其他限制的单笔委托数量仍受净资产 8% 上限、证券库存/仓位、可卖量、流动性及费用约束；配对意图还须受已持久化配对未完成数量约束。
 
-命令 `uv run python -m a500_t_trader.cli.main intraday-signals` 使用默认保存的 563360 五分钟行情，按固定 40,000 份回放 V1 的 BUY/SELL 技术候选；可用 `--quantity` 覆盖份数、`--bars` 指定其他单标的行情 JSON，并用 `--output` 保存结果。使用 181 根滚动窗口以满足 180 根预热并控制回放开销。该命令不模拟成交、持仓变化、T+1、底仓/可卖量或网格层级状态；信号数量不是可执行建议。网格上下文使用[上交所基金交易规则](https://www.sse.com.cn/assortment/fund/etf/question/c/c_20240118_5734754.shtml)中的 ETF 0.001 元最小价位、每边万 0.5 佣金和每笔 0.1 元最低佣金，不含滑点。输出会记录这些限制。
+命令 `uv run python -m a500_t_trader intraday-signals` 使用默认保存的 563360 五分钟行情，按固定 40,000 份回放 V1 的 BUY/SELL 技术候选；可用 `--quantity` 覆盖份数、`--bars` 指定其他单标的行情 JSON，并用 `--output` 保存结果。使用 181 根滚动窗口以满足 180 根预热并控制回放开销。该命令不模拟成交、持仓变化、T+1、底仓/可卖量或网格层级状态；信号数量不是可执行建议。网格上下文使用[上交所基金交易规则](https://www.sse.com.cn/assortment/fund/etf/question/c/c_20240118_5734754.shtml)中的 ETF 0.001 元最小价位、每边万 0.5 佣金和每笔 0.1 元最低佣金，不含滑点。输出会记录这些限制。
 
 ```python
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
