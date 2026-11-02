@@ -39,7 +39,9 @@ def evaluate_intraday_strategy(
     analyses = analyze_intraday_technical(bars_by_symbol)
     securities = {} if config is None else config.securities
     account = {} if config is None else config.account
-    symbols = sorted(set(bars_by_symbol) | set(securities))
+    positions = account.get("positions")
+    account_symbols = positions if isinstance(positions, dict) else {}
+    symbols = sorted(set(bars_by_symbol) | set(securities) | set(account_symbols))
     adjusted = {
         symbol: _with_reference_price(analysis, _latest_completed_bar(bars_by_symbol.get(symbol, ())))
         for symbol, analysis in analyses.items()
