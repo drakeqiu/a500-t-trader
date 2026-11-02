@@ -183,36 +183,13 @@ def test_empty_query_and_unavailable_capability_are_distinct() -> None:
         ).get_intraday_bars()
 
 
-def test_provider_logs_in_and_maps_vendor_snapshot_on_demand() -> None:
-    calls: list[tuple[object, ...]] = []
+def test_service_maps_query_snapshot() -> None:
     api = VendorAPI()
-
-    def login(
-        username: str,
-        password: str,
-        host: str,
-        port: int,
-        **kwargs: object,
-    ) -> bool:
-        calls.append((username, password, host, port, kwargs))
-        return True
-
     now = datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
-    provider = AmazingDataProvider(
-        "trader",
-        "secret",
-        "localhost",
-        9876,
-        login_fn=login,
-        market_data=api,
-        clock=lambda: now,
-    )
+    provider = _provider(api, now)
 
-    snapshot = provider.get_snapshot("SH.563360")
+    snapshot = MarketDataService(provider).get_snapshot("SH.563360")
 
-    assert calls == [
-        ("trader", "secret", "localhost", 9876, {"api_mode": "kInternetMode"})
-    ]
     assert snapshot is not None
     assert api.calls == [("snapshot", ["563360.SH"], 20261102, 20261102)]
     assert snapshot.symbol == "563360"
@@ -225,6 +202,19 @@ def test_provider_logs_in_and_maps_vendor_snapshot_on_demand() -> None:
     assert snapshot.ask_price == Decimal("1.235")
     assert snapshot.bid_volume == 18
     assert snapshot.source == "AmazingData"
+
+
+def test_snapshot_query_without_data_is_unavailable() -> None:
+    class EmptySnapshot(VendorAPI):
+        def query_snapshot(
+            self, codes: list[str], start: int, end: int
+        ) -> dict[str, object]:
+            self.calls.append(("snapshot", codes, start, end))
+            return {}
+
+    provider = _provider(EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI))
+    with pytest.raises(CapabilityUnavailableError, match="returned no data"):
+        MarketDataService(provider).get_snapshot()
 
 
 def test_rejected_login_is_not_reported_as_an_empty_query() -> None:

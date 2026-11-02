@@ -141,17 +141,17 @@ def _snapshot(raw: Any, now: datetime) -> Snapshot:
         symbol=code,
         timestamp=_timestamp(raw.orig_time),
         received_at=now,
-        last_price=_decimal(raw.last_price),
-        previous_close=_decimal(raw.pre_close_price),
-        open=_decimal(raw.open_price),
-        high=_decimal(raw.high_price),
-        low=_decimal(raw.low_price),
-        cumulative_volume=int(raw.total_volume_trade),
-        cumulative_amount=_decimal(raw.total_value_trade),
-        bid_price=_decimal(raw.bid_price[0]),
-        bid_volume=int(raw.bid_volume[0]),
-        ask_price=_decimal(raw.offer_price[0]),
-        ask_volume=int(raw.offer_volume[0]),
+        last_price=_decimal(raw.last_price) / Decimal(1_000_000),
+        previous_close=_decimal(raw.pre_close_price) / Decimal(1_000_000),
+        open=_decimal(raw.open_price) / Decimal(1_000_000),
+        high=_decimal(raw.high_price) / Decimal(1_000_000),
+        low=_decimal(raw.low_price) / Decimal(1_000_000),
+        cumulative_volume=int(_decimal(raw.total_volume_trade) / Decimal(100)),
+        cumulative_amount=_decimal(raw.total_value_trade) / Decimal(100_000),
+        bid_price=_decimal(raw.bid_price[0]) / Decimal(1_000_000),
+        bid_volume=int(_decimal(raw.bid_volume[0]) / Decimal(100)),
+        ask_price=_decimal(raw.offer_price[0]) / Decimal(1_000_000),
+        ask_volume=int(_decimal(raw.offer_volume[0]) / Decimal(100)),
         source="tgw",
     )
 
@@ -243,11 +243,12 @@ class TgwPushProvider:
             else self._api.MarketType.kSZSE
         )
         item.security_code = code
-        item.category_type = {
-            "snapshot": self._api.MDDatatype.kSnapshot,
-            "bar": self._api.MDDatatype.k1KLine,
-            "tick": self._api.MDDatatype.kTickExecution,
+        item.flag = {
+            "snapshot": self._api.SubscribeDataType.kSnapshot,
+            "bar": self._api.SubscribeDataType.k1MinKline,
+            "tick": self._api.SubscribeDataType.kTickExecution,
         }[event_type]
+        item.category_type = self._api.VarietyCategory.kNone
         return item
 
     def _remove(self, subscription: Subscription) -> None:

@@ -1,0 +1,99 @@
+{
+  "snapshot": {
+    "symbol": "563360",
+    "timestamp": "2026-11-02T10:55:09.380000+08:00",
+    "received_at": "2026-11-02T10:55:07.511080+08:00",
+    "last_price": "1.09",
+    "previous_close": "1.086",
+    "open": "1.091",
+    "high": "1.098",
+    "low": "1.085",
+    "cumulative_volume": 2728661700,
+    "cumulative_amount": "2977476536",
+    "bid_price": "1.089",
+    "bid_volume": 48926400,
+    "ask_price": "1.09",
+    "ask_volume": 52028100,
+    "source": "AmazingData"
+  },
+  "bars": [
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:49:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.091",
+      "high": "1.092",
+      "low": "1.091",
+      "close": "1.092",
+      "volume": 21319900,
+      "amount": "23281242.2",
+      "is_completed": true,
+      "source": "AmazingData"
+    },
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:50:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.092",
+      "high": "1.092",
+      "low": "1.091",
+      "close": "1.092",
+      "volume": 4960300,
+      "amount": "5416357.3",
+      "is_completed": true,
+      "source": "AmazingData"
+    },
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:51:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.092",
+      "high": "1.092",
+      "low": "1.091",
+      "close": "1.092",
+      "volume": 20016900,
+      "amount": "21858415.0",
+      "is_completed": true,
+      "source": "AmazingData"
+    },
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:52:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.092",
+      "high": "1.092",
+      "low": "1.09",
+      "close": "1.091",
+      "volume": 17035400,
+      "amount": "18585627.3",
+      "is_completed": true,
+      "source": "AmazingData"
+    },
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:53:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.091",
+      "high": "1.091",
+      "low": "1.09",
+      "close": "1.091",
+      "volume": 62317400,
+      "amount": "67988280.4",
+      "is_completed": true,
+      "source": "AmazingData"
+    },
+    {
+      "symbol": "563360",
+      "timestamp": "2026-11-02T10:54:00+08:00",
+      "interval_minutes": 1,
+      "open": "1.091",
+      "high": "1.091",
+      "low": "1.09",
+      "close": "1.09",
+      "volume": 27524800,
+      "amount": "30002254.5",
+      "is_completed": true,
+      "source": "AmazingData"
+    }
+  ]
+}

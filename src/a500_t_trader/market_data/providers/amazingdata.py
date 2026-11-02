@@ -21,7 +21,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class AmazingDataProvider:
-    """Logged-in AmazingData provider; its query results are not push events."""
+    """Logged-in AmazingData provider for request/response market data."""
 
     def __init__(
         self,
@@ -58,37 +58,49 @@ class AmazingDataProvider:
                 ) from error
         self._market_data = market_data
 
-    def get_snapshot(self, symbol: str) -> Snapshot | None:
+    def get_snapshot(self, symbol: str) -> Snapshot:
         code = normalize_symbol(symbol)
         now = _local_time(self._clock())
-        day = int(now.strftime("%Y%m%d"))
+        session_date = int(now.strftime("%Y%m%d"))
         try:
-            raw = self._market_data.query_snapshot([_vendor_symbol(code)], day, day)
+            raw = self._market_data.query_snapshot(
+                [_vendor_symbol(code)], session_date, session_date
+            )
         except Exception as error:
             raise CapabilityUnavailableError(
                 f"AmazingData snapshot query unavailable or unauthorized: {error}"
             ) from error
-        row = _snapshot_row(raw, code)
-        if row is None:
-            return None
-        return Snapshot(
-            symbol=code,
-            timestamp=_vendor_time(row["trade_time"]),
-            received_at=now,
-            name=_optional_string(row.get("name")),
-            last_price=_optional_decimal(row.get("last")),
-            previous_close=_optional_decimal(row.get("pre_close")),
-            open=_optional_decimal(row.get("open")),
-            high=_optional_decimal(row.get("high")),
-            low=_optional_decimal(row.get("low")),
-            cumulative_volume=_optional_int(row.get("volume")),
-            cumulative_amount=_optional_decimal(row.get("amount")),
-            bid_price=_optional_decimal(row.get("bid_price1")),
-            bid_volume=_optional_int(row.get("bid_volume1")),
-            ask_price=_optional_decimal(row.get("ask_price1")),
-            ask_volume=_optional_int(row.get("ask_volume1")),
-            source="AmazingData",
-        )
+        rows = _snapshot_rows(raw, code, session_date)
+        if not rows:
+            raise CapabilityUnavailableError(
+                f"AmazingData snapshot query returned no data for {code}"
+            )
+        row = rows[-1]
+        try:
+            timestamp = _vendor_time(row["trade_time"])
+            snapshot = Snapshot(
+                symbol=code,
+                timestamp=timestamp,
+                received_at=now,
+                name=_optional_string(row.get("name")),
+                last_price=_optional_decimal(row.get("last")),
+                previous_close=_optional_decimal(row.get("pre_close")),
+                open=_optional_decimal(row.get("open")),
+                high=_optional_decimal(row.get("high")),
+                low=_optional_decimal(row.get("low")),
+                cumulative_volume=_optional_int(row.get("volume")),
+                cumulative_amount=_optional_decimal(row.get("amount")),
+                bid_price=_optional_decimal(row.get("bid_price1")),
+                bid_volume=_optional_int(row.get("bid_volume1")),
+                ask_price=_optional_decimal(row.get("ask_price1")),
+                ask_volume=_optional_int(row.get("ask_volume1")),
+                source="AmazingData",
+            )
+        except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+            raise CapabilityUnavailableError(
+                f"AmazingData snapshot query returned invalid data for {code}: {error}"
+            ) from error
+        return snapshot
 
     def get_intraday_bars(
         self, symbol: str, interval_minutes: int
@@ -282,29 +294,6 @@ def _period_value(interval_minutes: int) -> int:
     return int(Period.min1.value if interval_minutes == 1 else Period.min5.value)
 
 
-def _snapshot_row(raw: Any, symbol: str) -> Mapping[str, Any] | None:
-    if not raw:
-        return None
-    date_results = raw
-    if isinstance(raw, Mapping):
-        date_results = next(iter(raw.values()), None)
-    if not date_results:
-        return None
-    if isinstance(date_results, Mapping):
-        frame = next(
-            (
-                value
-                for key, value in date_results.items()
-                if normalize_symbol(str(key).split(".")[0]) == symbol
-            ),
-            None,
-        )
-    else:
-        frame = date_results
-    rows = _records(frame)
-    return rows[0] if rows else None
-
-
 def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
     if not raw:
         return []
@@ -316,6 +305,23 @@ def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
         (
             value
             for key, value in raw.items()
+            if normalize_symbol(str(key).split(".")[0]) == symbol
+        ),
+        None,
+    )
+    return _records(frame)
+
+
+def _snapshot_rows(raw: Any, symbol: str, session_date: int) -> list[Mapping[str, Any]]:
+    if not isinstance(raw, Mapping):
+        return []
+    dated = raw.get(str(session_date), raw.get(session_date))
+    if not isinstance(dated, Mapping):
+        return []
+    frame = next(
+        (
+            value
+            for key, value in dated.items()
             if normalize_symbol(str(key).split(".")[0]) == symbol
         ),
         None,
