@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -66,8 +66,17 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
             Path(__file__).parent / "fixtures" / "amazingdata_563360_20261102.json"
         ).read_text(encoding="utf-8")
     )
+    history = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "data"
+            / "market-history"
+            / "563360_1m_20261102.json"
+        ).read_text(encoding="utf-8")
+    )
     recorded = fixture["snapshot"]
     snapshot_time = datetime.fromisoformat(recorded["timestamp"])
+
     snapshot = Snapshot(
         recorded["symbol"],
         snapshot_time,
@@ -99,7 +108,10 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
             row["is_completed"],
             row["source"],
         )
-        for row in fixture["bars"]
+        for row in history["bars"]
+        if datetime.fromisoformat(row["timestamp"])
+        + timedelta(minutes=row["interval_minutes"])
+        <= snapshot_time
     )
 
     class RecordedData:
@@ -110,13 +122,6 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         def session_status(self, session_date: date) -> tuple[SessionState, bool]:
             assert session_date == snapshot_time.date()
             return SessionState.TRADING, False
-
-        def get_intraday_bars(
-            self, symbol: str, interval_minutes: int = 1
-        ) -> tuple[MinuteBar, ...]:
-            assert symbol == snapshot.symbol
-            assert interval_minutes == 1
-            return bars
 
         def get_history_bars(
             self,
