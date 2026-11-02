@@ -71,7 +71,7 @@ class IntradayBacktestResult:
     fills: tuple[IntradayFill, ...]
     cancellations: tuple[dict[str, object], ...]
     snapshot_id: str
-    snapshot_bars: tuple[dict[str, object], ...]
+    snapshot_json: str
     snapshot_bar_count: int
     strategy_parameters: dict[str, object]
     implementation_version: str
@@ -253,7 +253,7 @@ def run_intraday_backtest(
         fills=tuple(fills),
         cancellations=tuple(cancellations),
         snapshot_id=hashlib.sha256(snapshot_json.encode()).hexdigest(),
-        snapshot_bars=snapshot_bars,
+        snapshot_json=snapshot_json,
         snapshot_bar_count=len(selected),
         strategy_parameters=dict(strategy_parameters),
         implementation_version=implementation_version,

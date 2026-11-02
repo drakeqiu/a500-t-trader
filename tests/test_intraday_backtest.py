@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -67,7 +68,7 @@ def test_public_simulation_uses_later_bar_partial_fills_costs_t1_and_hold_baseli
     assert result.snapshot_bar_count == 4
     assert result.strategy_parameters == {"profile": "source-rules-v1"}
     assert result.assumptions["fill_timing"] == "next_available_bar_open"
-    assert result.snapshot_bars[0]["close"] == "10"
+    assert json.loads(result.snapshot_json)[0]["close"] == "10"
     initial_snapshot = result.assumptions["initial_account_snapshot"]
     assert isinstance(initial_snapshot, dict)
     assert initial_snapshot["cost_basis"] == {"510300": "10"}
