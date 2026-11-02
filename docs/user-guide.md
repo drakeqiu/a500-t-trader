@@ -85,6 +85,8 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 V1.0 源规则尚未提供精确评分分项条件，因此 API 保留 `scores.buy/sell = null`、`candidate = WAIT` 和 `risk_status = BLOCKED`，并说明评分规则不可用；分数不是收益概率。不要将技术结果视为允许执行的建议。
 
+账户与逐证券数量约束由 `a500_t_trader.strategy.intraday_execution.calculate_intraday_execution` 单独计算。它接收技术分析候选、当前账户/规则配置、证券级流动性数据、当日成交活动及显式认证状态；仅在账户、费用、行情和证券规则有效且未过期时返回可行动数量。规则配置必须逐证券提供 T+0/T+1、交易单位、tick、价格上下限及来源时间；行情输入须包括 ATR 与计算停止距离所需的网格间距。没有有效买入候选不会因评分或数量计算被提升为买入；流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率或日内上限均可进一步减量或阻断。单证券输入错误只影响该证券。
+
 ```python
 from a500_t_trader.strategy.intraday_technical import analyze_intraday_technical
 

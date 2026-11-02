@@ -60,7 +60,15 @@ _REQUIRED_POSITION_FIELDS = (
     "sellable_quantity",
     "market_value",
 )
-_REQUIRED_SECURITY_FIELDS = ("t_plus", "lot_size", "tick_size", "source", "as_of")
+_REQUIRED_SECURITY_FIELDS = (
+    "t_plus",
+    "lot_size",
+    "tick_size",
+    "lower_price_limit",
+    "upper_price_limit",
+    "source",
+    "as_of",
+)
 
 
 @dataclass(frozen=True, slots=True)
