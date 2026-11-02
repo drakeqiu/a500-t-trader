@@ -78,20 +78,36 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 `MarketDataService.get_trades()` 在接口上存在，但当前 AmazingData provider不支持按需成交查询，会抛出 `CapabilityUnavailableError`。逐笔成交仅通过具备相应能力的 tgw 推送订阅获取。
 
-### 已完成 5 分钟技术分析 API
+### 已完成 5 分钟技术分析与策略评估 API
 
+`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成 BUY/SELL 候选。
 
-`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 接受按证券隔离的已完成 `MinuteBar` 序列，并返回各证券指标、趋势、分数、候选和阻断理由。它只计入已完成 5 分钟 bar；不足 180 根或缺少当日 09:45 VWAP 锚点会单独阻断对应证券，不以其他证券数据或替代锚点补齐。
+`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、配置和 `as_of`，数量建议需提供逐证券流动性数据、费用匹配的当前回测认证及其完整 binding、持久状态库、已结订单状态和动态网格上下文。认证使用 `certification_is_current` 对照 V1 源 SHA-256、规则版本、完整参数、实现版本、回测数据快照 SHA-256、费用模型和认证阈值；任何字段缺失、失败或变化均阻断数量。网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
 
-V1.0 源规则尚未提供精确评分分项条件，因此 API 保留 `scores.buy/sell = null`、`candidate = WAIT` 和 `risk_status = BLOCKED`，并说明评分规则不可用；分数不是收益概率。不要将技术结果视为允许执行的建议。
-
-账户与逐证券数量约束由 `a500_t_trader.strategy.intraday_execution.calculate_intraday_execution` 单独计算。它接收技术分析候选、当前账户/规则配置、证券级流动性数据、当日成交活动及显式认证状态；仅在账户、费用、行情和证券规则有效且未过期时返回可行动数量。规则配置必须逐证券提供 T+0/T+1、交易单位、tick、价格上下限及来源时间；行情输入须包括 ATR 与计算停止距离所需的网格间距。没有有效买入候选不会因评分或数量计算被提升为买入；流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率或日内上限均可进一步减量或阻断。单证券输入错误只影响该证券。
+策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
 
 ```python
-from a500_t_trader.strategy.intraday_technical import analyze_intraday_technical
+from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
 
-analysis_by_symbol = analyze_intraday_technical({"563360": completed_five_minute_bars})
+result = evaluate_intraday_strategy(
+    {"563360": completed_five_minute_bars},
+    as_of=aware_timestamp,
+    config=v1_config,
+    grid_context={
+        "563360": {
+            "tick_size": security_rules["tick_size"],
+            "round_trip_cost_rate": quantity_specific_cost_rate,
+        }
+    },
+    state_store=state_store,
+    pending_order_state=current_order_state,
+    certification=certification_result,
+    certification_binding=current_backtest_binding,
+    liquidity=liquidity_by_symbol,
+)
 ```
+
+`analyze_intraday_technical` 也可独立调用，用于只读研究；其 `risk_status == READY` 仅表示技术规则允许候选，不表示账户或认证允许执行。账户约束、流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率和日内上限均由执行层另行检查。不得将技术候选视为订单或真实成交。
 
 ## 4. 盘前计划 CLI
 

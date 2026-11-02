@@ -9,10 +9,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Mapping
 from zoneinfo import ZoneInfo
 
+from ..backtest.certification import CertificationResult, certification_is_current
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
 from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
-from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
+from .intraday_technical import (
+    RULE_SOURCE_SHA256,
+    IntradayTechnicalAnalysis,
+    analyze_intraday_technical,
+)
 from .intraday_v1_config import IntradayV1Config
 from .premarket import MAX_INPUT_AGE
 
@@ -26,19 +31,19 @@ def evaluate_intraday_strategy(
     config: IntradayV1Config | None,
     liquidity: Mapping[str, Mapping[str, object]] | None = None,
     daily_activity: Mapping[str, object] | None = None,
-    certification: Mapping[str, object] | None = None,
+    certification: CertificationResult | None = None,
+    certification_binding: Mapping[str, object] | None = None,
     state_store: IntradayStrategyStateStore | None = None,
     pending_order_state: str | None = None,
+    grid_context: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, dict[str, object]]:
-    """Return a deterministic result per symbol; unknown gates always veto.
+    """Evaluate source-exact candidates, then apply durable and sizing vetoes.
 
-    Exact source scoring rules and an integrated certification verifier are not
-    available on this integration tip. The real execution sizing gate is still
-    run when the explicit V1 configuration is supplied, with certification
-    fixed false until verifiable evidence can be bound to that configuration.
-
-    Persistent state is mandatory for directional candidates. Recommendations
-    are recorded only after every gate passes and never count as actual fills.
+    The technical grid context is explicit because its cost rate is
+    quantity-specific. Missing context blocks a candidate in the analyzer.
+    Certification is current only when its fingerprint verifies against the
+    exact V1 rules, parameters, implementation, data snapshot, costs, and
+    certification thresholds supplied to this call.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
@@ -48,23 +53,21 @@ def evaluate_intraday_strategy(
     positions = account.get("positions")
     account_symbols = positions if isinstance(positions, dict) else {}
     symbols = sorted(set(bars_by_symbol) | set(securities) | set(account_symbols))
-    analyses = analyze_intraday_technical(bars_by_symbol)
-    adjusted = {
-        symbol: _with_reference_price(analysis, _latest_completed_bar(bars_by_symbol.get(symbol, ())))
-        for symbol, analysis in analyses.items()
-    }
-    sized = (
-        {}
-        if config is None
-        else calculate_intraday_execution(
-            analyses=adjusted,
-            config=config,
-            as_of=as_of,
-            liquidity=liquidity or {},
-            certification_passed=False,
-            daily_activity=daily_activity,
-        ).symbols
-    )
+    analyses: dict[str, IntradayTechnicalAnalysis] = {}
+    analyzer_error: str | None = None
+    if config is not None:
+        try:
+            analyses = analyze_intraday_technical(
+                bars_by_symbol,
+                config=config,
+                grid_context=grid_context,
+                as_of=as_of,
+            )
+        except (ValueError, TypeError, ArithmeticError) as error:
+            analyzer_error = f"source-exact technical analysis unavailable: {error}"
+    else:
+        analyzer_error = "source-exact technical analysis unavailable without V1 configuration"
+
     results: dict[str, dict[str, object]] = {}
     for symbol in symbols:
         analysis = analyses.get(symbol)
@@ -93,7 +96,19 @@ def evaluate_intraday_strategy(
                     reasons.append(f"trading rules for {symbol} have invalid timestamp")
                 elif _stale(stamp, now):
                     reasons.append(f"trading rules for {symbol} are stale or future-dated")
+        if analyzer_error is not None:
+            reasons.append(analyzer_error)
+        elif analysis is None:
+            reasons.append(f"technical candidate unavailable for {symbol}")
+        else:
+            reasons.extend(analysis.reasons)
 
+        certification_reasons = _certification_reasons(
+            certification,
+            certification_binding,
+            config,
+        )
+        reasons.extend(certification_reasons)
         side = analysis.candidate.lower() if analysis is not None else ""
         state_parameters = _state_parameters(config)
         state_reasons: tuple[str, ...] = ()
@@ -133,25 +148,43 @@ def evaluate_intraday_strategy(
             reasons.append(f"market data unavailable for {symbol}")
         elif _stale(latest.timestamp.astimezone(SHANGHAI), now):
             reasons.append(f"market data for {symbol} is stale or future-dated")
-        if analysis is None:
-            reasons.append(f"technical candidate unavailable for {symbol}")
-        else:
-            reasons.extend(analysis.reasons)
-        reasons.extend(_certification_reasons(certification, now))
-        execution = sized.get(symbol)
+
+        # Never size a technical WAIT or a candidate blocked by an upstream gate.
+        eligible = (
+            analysis is not None
+            and side in ("buy", "sell")
+            and not reasons
+            and config is not None
+            and latest is not None
+        )
+        execution = None
+        if eligible:
+            adjusted = _with_reference_price(analysis, latest)
+            try:
+                execution = calculate_intraday_execution(
+                    analyses={symbol: adjusted},
+                    config=config,
+                    as_of=as_of,
+                    liquidity=liquidity or {},
+                    certification_passed=True,
+                    daily_activity=daily_activity,
+                ).symbols.get(symbol)
+            except (ValueError, TypeError, ArithmeticError):
+                reasons.append("V1 quantity calculation unavailable")
         if execution is None:
-            reasons.append("V1 quantity calculation unavailable without explicit configuration")
-            quantity = None
+            if side in ("buy", "sell") and eligible:
+                reasons.append("V1 quantity calculation unavailable")
+            quantity = 0
             allowed = False
             execution_reasons: tuple[str, ...] = ()
         else:
             reasons.extend(execution.reasons)
-            quantity = execution.quantity if execution.allowed else 0
+            quantity = execution.quantity if execution.allowed and not reasons else 0
             allowed = execution.allowed and not reasons
             execution_reasons = execution.reasons
         if analysis is not None and analysis.candidate == "WAIT":
             allowed = False
-            quantity = 0 if execution is not None else None
+            quantity = 0
         reasons = list(dict.fromkeys(reasons))
         if (
             analysis is not None
@@ -165,17 +198,23 @@ def evaluate_intraday_strategy(
                 f"{config.strategy_id}:{symbol}:{now.isoformat()}:{side}:"
                 f"{grid_version}:{grid_layer}:{grid_round}"
             )
-            state_store.record_recommendation(
-                StrategyRecommendation(
-                    recommendation_id,
-                    symbol,
-                    side,
-                    now,
-                    grid_version,
-                    grid_layer,
-                    grid_round,
+            try:
+                state_store.record_recommendation(
+                    StrategyRecommendation(
+                        recommendation_id,
+                        symbol,
+                        side,
+                        now,
+                        grid_version,
+                        grid_layer,
+                        grid_round,
+                    )
                 )
-            )
+            except (ValueError, TypeError, sqlite3.Error):
+                reasons.append("persistent strategy recommendation could not be recorded")
+                allowed = False
+                quantity = 0
+            reasons = list(dict.fromkeys(reasons))
         results[symbol] = {
             "signal": _signal(analysis),
             "position": _position(account, symbol),
@@ -265,16 +304,45 @@ def _timestamp(value: object) -> datetime | None:
 
 
 def _certification_reasons(
-    certification: Mapping[str, object] | None, now: datetime
+    certification: CertificationResult | None,
+    binding: Mapping[str, object] | None,
+    config: IntradayV1Config | None,
 ) -> list[str]:
     if certification is None:
-        return ["certification evidence unavailable; no verifiable certification gate is installed"]
-    if certification.get("status") != "passed":
+        return ["certification evidence unavailable"]
+    if not isinstance(certification, CertificationResult) or not certification.certified:
         return ["certification is failed or not passed"]
-    timestamp = _timestamp(certification.get("as_of"))
-    if timestamp is not None and _stale(timestamp.astimezone(SHANGHAI), now):
-        return ["certification is stale or future-dated"]
-    return ["certification evidence is unverified or not bound to current inputs"]
+    if config is None or binding is None:
+        return ["certification binding unavailable"]
+    expected = {
+        "rule_source_sha256": config.rule_source_sha256,
+        "rule_version": config.rule_version,
+        "parameters": config.parameters,
+        "implementation_version": config.implementation_version,
+        "cost_model": config.fees,
+    }
+    if (
+        not isinstance(config.rule_source_sha256, str)
+        or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
+    ):
+        return ["certification rule source does not match current technical rules"]
+    missing = (
+        "rule_source_sha256",
+        "rule_version",
+        "parameters",
+        "implementation_version",
+        "data_snapshot_sha256",
+        "cost_model",
+    )
+    absent = [field for field in missing if field not in binding or binding[field] in (None, "", {})]
+    if absent:
+        return [f"certification binding missing required fields: {', '.join(absent)}"]
+    mismatched = [field for field, value in expected.items() if binding.get(field) != value]
+    if mismatched:
+        return [f"certification binding mismatches current configuration: {', '.join(mismatched)}"]
+    if not certification_is_current(certification, binding, config.certification):
+        return ["certification is stale or mismatched with current inputs"]
+    return []
 
 
 def _position(account: Mapping[str, object], symbol: str) -> dict[str, object]:
