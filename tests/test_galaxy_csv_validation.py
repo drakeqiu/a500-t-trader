@@ -53,15 +53,23 @@ def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
 ) -> None:
     database = tmp_path / "account.sqlite3"
     source = tmp_path / "unsupported.csv"
-    source.write_bytes((HEADER.replace("成交时间", "时间", 1) + "private row\n").encode("gb18030"))
-    assert main(["import-fills", "--file", str(source), "--database", str(database)]) == 2
+    source.write_bytes(
+        (HEADER.replace("成交时间", "时间", 1) + "private row\n").encode("gb18030")
+    )
+    assert (
+        main(["import-fills", "--file", str(source), "--database", str(database)])
+        == 2
+    )
     output = capsys.readouterr()
     assert "unsupported Galaxy CSV header" in output.out
     assert "private row" not in output.out + output.err
     assert not database.exists()
 
     source.write_bytes(HEADER.encode("gb18030") + b"\xff\n")
-    assert main(["import-fills", "--file", str(source), "--database", str(database)]) == 2
+    assert (
+        main(["import-fills", "--file", str(source), "--database", str(database)])
+        == 2
+    )
     output = capsys.readouterr()
     assert "cannot read strict GB18030 CSV" in output.out
     assert "\\xff" not in output.out + output.err

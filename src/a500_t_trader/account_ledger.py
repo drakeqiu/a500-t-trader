@@ -51,26 +51,9 @@ class AccountLedger:
                     notes TEXT NOT NULL,
                     classification TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS imported_fills (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-                    quantity INTEGER NOT NULL CHECK (quantity > 0),
-                    price TEXT NOT NULL,
-                    trade_amount TEXT NOT NULL,
-                    fees TEXT NOT NULL,
-                    stamp_duty TEXT NOT NULL,
-                    other_charges TEXT NOT NULL,
-                    occurrence_amount TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    trade_number TEXT NOT NULL,
-                    contract_number TEXT NOT NULL,
-                    classification TEXT NOT NULL,
-                    UNIQUE(source, trade_number)
-                );
                 """
             )
+            _create_imported_fills(db)
 
     def record_snapshot(self, snapshot: AccountSnapshot) -> int:
         record = asdict(snapshot)
@@ -205,26 +188,7 @@ def import_galaxy_fills(
         with sqlite3.connect(str(database)) as db:
             db.row_factory = sqlite3.Row
             db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS imported_fills (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK (side IN ('buy','sell')),
-                    quantity INTEGER NOT NULL CHECK (quantity > 0),
-                    price TEXT NOT NULL,
-                    trade_amount TEXT NOT NULL,
-                    fees TEXT NOT NULL,
-                    stamp_duty TEXT NOT NULL,
-                    other_charges TEXT NOT NULL,
-                    occurrence_amount TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    trade_number TEXT NOT NULL,
-                    contract_number TEXT NOT NULL,
-                    classification TEXT NOT NULL,
-                    UNIQUE(source,trade_number)
-                )"""
-            )
+            _create_imported_fills(db)
             existing = {
                 str(row["trade_number"]): dict(row)
                 for row in db.execute(
@@ -408,6 +372,29 @@ def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
             Decimal(str(left[key])) == Decimal(str(right[key]))
             for key in decimal_fields
         )
+    )
+
+
+def _create_imported_fills(db: sqlite3.Connection) -> None:
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS imported_fills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+            quantity INTEGER NOT NULL CHECK (quantity > 0),
+            price TEXT NOT NULL,
+            trade_amount TEXT NOT NULL,
+            fees TEXT NOT NULL,
+            stamp_duty TEXT NOT NULL,
+            other_charges TEXT NOT NULL,
+            occurrence_amount TEXT NOT NULL,
+            source TEXT NOT NULL,
+            trade_number TEXT NOT NULL,
+            contract_number TEXT NOT NULL,
+            classification TEXT NOT NULL,
+            UNIQUE(source, trade_number)
+        )"""
     )
 
 
