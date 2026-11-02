@@ -144,6 +144,10 @@ def main(
     )
     backtest.add_argument("--cost-bps", type=Decimal, default=Decimal(0))
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal(0))
+    backtest.add_argument(
+        "--minimum-commission", type=Decimal, default=Decimal(0),
+        help="minimum commission charged independently for each fill; zero disables it",
+    )
     backtest.add_argument("--implementation-version", default="1")
     backtest.add_argument(
         "--confirm-history-persistence-permitted",
@@ -533,6 +537,7 @@ def main(
                 interval_minutes=args.interval_minutes,
                 cost_bps=args.cost_bps,
                 slippage_bps=args.slippage_bps,
+                minimum_commission=args.minimum_commission,
                 implementation_version=args.implementation_version,
             )
             backtest_result = repository.save(selected_bars, backtest_result)

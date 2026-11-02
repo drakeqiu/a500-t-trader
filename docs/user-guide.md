@@ -165,13 +165,13 @@ python -m a500_t_trader import-fills \
 
 ## 5. 分钟历史回测 CLI
 
-回测仅适用于规则文件中选定的一只 ETF。它使用历史接口返回的已完成分钟线，按配置的 `buy_below` / `sell_above` 阈值在前一根 bar 收盘后产生信号，并以紧接的下一根 bar 开盘价模拟成交。持仓遵守 T+1（当日买入不可当日卖出）和 `minimum_holding` 下限；`max_buy_cash`、初始现金/持仓、交易费和滑点均纳入约束。默认费用和滑点为零，结果同时给出策略及相同初始账户的持有基线。缺失或未授权分钟历史会明确报错，不会生成替代行情或成交。
+回测仅适用于规则文件中选定的一只 ETF。它使用历史接口返回的已完成分钟线，按配置的 `buy_below` / `sell_above` 阈值在前一根 bar 收盘后产生信号，并以紧接的下一根 bar 开盘价模拟成交。持仓遵守 T+1（当日买入不可当日卖出）和 `minimum_holding` 下限；`max_buy_cash`、初始现金/持仓、交易费和滑点均纳入约束。`--cost-bps` 为比例佣金，`--minimum-commission` 是每次成交的最低佣金，费用按 `max(成交额 × bps / 10,000, 最低佣金)` 计算；部分成交逐笔计算最低佣金。默认比例费率、最低佣金和滑点均为零。结果同时给出策略及相同初始账户的持有基线。缺失或未授权分钟历史会明确报错，不会生成替代行情或成交。
 
 ```bash
 python -m a500_t_trader backtest \
   --config strategy.json --account account.json --symbol 510300 \
   --start-date 2026-10-01 --end-date 2026-10-31 --interval-minutes 1 \
-  --cost-bps 3 --slippage-bps 5 --implementation-version my-rules-v2 \
+  --cost-bps 0.5 --minimum-commission 0.1 --slippage-bps 5 \
   --database backtest.sqlite \
   --confirm-history-persistence-permitted
 ```
@@ -194,6 +194,8 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 回测认证由 `a500_t_trader.backtest.certify_intraday_backtest` 按显式认证配置评估。必须提供扣费后正收益、正的配对交易平均净利、总 PF 至少 1.25、样本内/外 PF 均大于 1、最大回撤、样本量、成本/滑点乘数 1.5 下的收益和 PF、每个已配置邻域扰动的收益/PF，以及每个 walk-forward 切分的收益/PF。最低收益/净利、最大回撤预算、最低样本数、扰动参数范围、walk-forward 切分数和最低通过切分数都必须由用户配置；缺失配置或指标会返回未认证和阻断原因，不存在默认风险档位。
 
 认证指纹涵盖规则源 SHA-256/规则版本/全部参数、实现版本、行情快照 SHA-256、完整成本模型和完整认证配置。每次授权前消费方必须调用 `certification_is_current` 并将当前输入提供给它；输入任何变化都会使旧认证失效。认证仅表示这些历史输入达到所配置条件，不保证未来盈利，也不构成下单授权或投资建议。
+
+针对 563360、现金 210,000 元和持仓 400,700 份的 V1.0 回测准备记录及缺失输入清单，见[回测准备记录](backtest-563360-v1.md)。该记录不表示已执行回测。
 
 ## 6. 订阅 tgw 推送
 

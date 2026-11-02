@@ -85,6 +85,8 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
         "10",
         "--slippage-bps",
         "5",
+        "--minimum-commission",
+        "0.1",
         "--implementation-version",
         "test-v1",
         "--confirm-history-persistence-permitted",
@@ -100,6 +102,7 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
     assert '"simulated_fills"' in output
     assert data.request == ("510300", date(2026, 10, 30), date(2026, 10, 31), 1)
     result = json.loads(output)
+    assert result["minimum_commission"] == "0.1"
     sells = [fill for fill in result["simulated_fills"] if fill["side"] == "sell"]
     assert [fill["quantity"] for fill in sells] == [1000, 1000]
     assert result["initial_account_snapshot"]["sellable"]["510300"] == 1000
