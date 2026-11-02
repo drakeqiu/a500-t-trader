@@ -78,6 +78,19 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 `MarketDataService.get_trades()` 在接口上存在，但当前 AmazingData provider不支持按需成交查询，会抛出 `CapabilityUnavailableError`。逐笔成交仅通过具备相应能力的 tgw 推送订阅获取。
 
+### 已完成 5 分钟技术分析 API
+
+
+`a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 接受按证券隔离的已完成 `MinuteBar` 序列，并返回各证券指标、趋势、分数、候选和阻断理由。它只计入已完成 5 分钟 bar；不足 180 根或缺少当日 09:45 VWAP 锚点会单独阻断对应证券，不以其他证券数据或替代锚点补齐。
+
+V1.0 源规则尚未提供精确评分分项条件，因此 API 保留 `scores.buy/sell = null`、`candidate = WAIT` 和 `risk_status = BLOCKED`，并说明评分规则不可用；分数不是收益概率。不要将技术结果视为允许执行的建议。
+
+```python
+from a500_t_trader.strategy.intraday_technical import analyze_intraday_technical
+
+analysis_by_symbol = analyze_intraday_technical({"563360": completed_five_minute_bars})
+```
+
 ## 4. 盘前计划 CLI
 
 按[盘前计划指南](premarket-plan.md)创建 ETF 规则文件和用户录入的账户快照，再运行：
@@ -139,6 +152,12 @@ python -m a500_t_trader history-cleanup --database backtest.sqlite
 
 `backtest-show --latest` 可显示最新运行；`history-cleanup` 只清除可复用的共用历史，不删除回测引用的快照或记录。模拟成交明确标记为非实际成交。本工具不连接券商、不下单，也不提供投资建议。
 
+策略信号 API 也可直接调用 `a500_t_trader.backtest.run_intraday_backtest` 进行 bar 模拟：传入已完成 bars、`BarSignal` 序列或实现 `StrategySignalProvider` 的信号提供器、账户快照和执行参数。模拟仅在后续 bar 开盘尝试成交，并记录部分成交、撤单、预留现金、费用/滑点、T+1 库存、输入 bars 快照及其 SHA-256 标识、策略参数和假设；持有基线使用相同的初始现金/持仓。此 API 不推导策略评分或信号规则；未提供信号提供器/信号时明确报错。旧 CLI 的规则文件阈值不能代替尚未提供的 V1 源规则。
+
+回测认证由 `a500_t_trader.backtest.certify_intraday_backtest` 按显式认证配置评估。必须提供扣费后正收益、正的配对交易平均净利、总 PF 至少 1.25、样本内/外 PF 均大于 1、最大回撤、样本量、成本/滑点乘数 1.5 下的收益和 PF、每个已配置邻域扰动的收益/PF，以及每个 walk-forward 切分的收益/PF。最低收益/净利、最大回撤预算、最低样本数、扰动参数范围、walk-forward 切分数和最低通过切分数都必须由用户配置；缺失配置或指标会返回未认证和阻断原因，不存在默认风险档位。
+
+认证指纹涵盖规则源 SHA-256/规则版本/全部参数、实现版本、行情快照 SHA-256、完整成本模型和完整认证配置。每次授权前消费方必须调用 `certification_is_current` 并将当前输入提供给它；输入任何变化都会使旧认证失效。认证仅表示这些历史输入达到所配置条件，不保证未来盈利，也不构成下单授权或投资建议。
+
 ## 6. 订阅 tgw 推送
 
 `TgwPushProvider` 需要调用方提供**已初始化的 tgw API 对象**。本项目只适配它的订阅回调，不负责创建、登录或配置该对象；连接方法请使用你所接入 tgw 环境提供的说明。
@@ -188,3 +207,15 @@ else:
 - `Trade.side` 仅在来源明确提供时有意义；不要从缺失值推断买卖方向。
 
 所有查询和订阅数据均受当前数据源、连接方式及账号权限限制。能力不可用应按异常或状态处理，不应伪装成空数据或自行推断。
+## Intraday strategy CLI
+
+`intraday-strategy --config <v1.json> --bars <bars.json> --as-of <timestamp> [--output <result.json>]`
+loads the explicit V1 configuration and a JSON array of minute-bar objects
+(`symbol`, `timestamp`, `interval_minutes`, `open`, `high`, `low`, `close`,
+`volume`; optional `amount` and `is_completed`) and calls the public strategy
+API. Standard output and `--output` contain the same structured JSON result.
+The CLI does not reimplement strategy scoring or sizing. Unknown scoring and
+certification gates remain fail-closed; blocked executions do not expose a
+positive actionable quantity. This advisory system does not connect to a
+broker and cannot see pending broker orders, so unseen orders may cause
+duplicate orders.
