@@ -56,9 +56,10 @@ def test_partial_fills_costs_t1_and_hold_baseline() -> None:
         signals=(BarSignal(bars[0].timestamp, "buy", 200),),
         params=IntradayBacktestParams(
             participation_rate=Decimal("0.5"),
-            fee_bps=Decimal("10"),
+            fee_bps=Decimal("0.5"),
             slippage_bps=Decimal("10"),
             order_lifetime_bars=2,
+            minimum_commission=Decimal("0.1"),
         ),
         strategy_parameters={"profile": "source-rules-v1"},
         implementation_version="test-v1",
@@ -68,8 +69,10 @@ def test_partial_fills_costs_t1_and_hold_baseline() -> None:
         bars[1].timestamp,
         bars[2].timestamp,
     ]
-    assert result.fills[0].fees == Decimal("1.00100")
-    assert result.fills[0].slippage == Decimal("1.00")
+    assert [fill.fees for fill in result.fills] == [
+        Decimal("0.1"),
+        Decimal("0.1"),
+    ]
     assert [fill.quantity for fill in result.fills] == [100, 100]
     assert all(fill.signal_timestamp == bars[0].timestamp for fill in result.fills)
     assert result.final_holdings == 400
@@ -77,6 +80,7 @@ def test_partial_fills_costs_t1_and_hold_baseline() -> None:
     assert result.snapshot_bar_count == 4
     assert result.strategy_parameters == {"profile": "source-rules-v1"}
     assert result.assumptions["fill_timing"] == "next_available_bar_open"
+    assert result.assumptions["minimum_commission"] == Decimal("0.1")
     assert json.loads(result.snapshot_json)[0]["close"] == "10"
     initial_snapshot = result.assumptions["initial_account_snapshot"]
     assert isinstance(initial_snapshot, dict)

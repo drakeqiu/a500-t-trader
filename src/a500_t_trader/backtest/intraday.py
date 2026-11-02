@@ -119,11 +119,12 @@ class IntradayBacktestParams:
     fee_bps: Decimal = Decimal(0)
     slippage_bps: Decimal = Decimal(0)
     order_lifetime_bars: int = 1
+    minimum_commission: Decimal = Decimal(0)
 
     def __post_init__(self) -> None:
         if not Decimal(0) < self.participation_rate <= Decimal(1):
             raise ValueError("participation_rate must be in (0, 1]")
-        if self.fee_bps < 0 or self.slippage_bps < 0:
+        if self.fee_bps < 0 or self.slippage_bps < 0 or self.minimum_commission < 0:
             raise ValueError("fees and slippage cannot be negative")
         if self.order_lifetime_bars < 1:
             raise ValueError("order_lifetime_bars must be positive")
@@ -249,24 +250,49 @@ def run_intraday_backtest(
                     unit_cost = execution_price * (
                         Decimal(1) + params.fee_bps / BASIS_POINTS
                     )
-                    reserved_for_order = order.reserved_cash
-                    max_affordable = (
+                    available = min(cash, order.reserved_cash)
+                    quantity = min(
+                        quantity,
                         int(
-                            (
-                                min(cash, reserved_for_order, unit_cost * quantity)
-                                / (unit_cost * BOARD_LOT)
-                            ).to_integral_value(rounding=ROUND_DOWN)
+                            (available / (unit_cost * BOARD_LOT)).to_integral_value(
+                                rounding=ROUND_DOWN
+                            )
                         )
-                        * BOARD_LOT
+                        * BOARD_LOT,
                     )
-                    quantity = min(quantity, max_affordable)
+                    if quantity and (
+                        execution_price * quantity * params.fee_bps / BASIS_POINTS
+                        < params.minimum_commission
+                    ):
+                        fee_budget = available - params.minimum_commission
+                        quantity = (
+                            0
+                            if fee_budget < 0
+                            else min(
+                                quantity,
+                                int(
+                                    (
+                                        fee_budget / (execution_price * BOARD_LOT)
+                                    ).to_integral_value(rounding=ROUND_DOWN)
+                                )
+                                * BOARD_LOT,
+                            )
+                        )
                 if quantity:
                     if order.signal.direction == "buy":
                         fill_price = bar.open * (
                             Decimal(1) + params.slippage_bps / BASIS_POINTS
                         )
-                        notional = fill_price * quantity
-                        fees = notional * params.fee_bps / BASIS_POINTS
+                    else:
+                        fill_price = bar.open * (
+                            Decimal(1) - params.slippage_bps / BASIS_POINTS
+                        )
+                    notional = fill_price * quantity
+                    fees = max(
+                        notional * params.fee_bps / BASIS_POINTS,
+                        params.minimum_commission,
+                    )
+                    if order.signal.direction == "buy":
                         slippage = (fill_price - bar.open) * quantity
                         cash -= notional + fees
                         holdings += quantity
@@ -275,15 +301,9 @@ def run_intraday_backtest(
                             Decimal(0), order.reserved_cash - notional - fees
                         )
                     else:
-                        fill_price = bar.open * (
-                            Decimal(1) - params.slippage_bps / BASIS_POINTS
-                        )
-                        notional = fill_price * quantity
-                        fees = notional * params.fee_bps / BASIS_POINTS
                         slippage = (bar.open - fill_price) * quantity
                         cash += notional - fees
                         holdings -= quantity
-                        # Sellable inventory was reserved when the order was accepted.
                     fills.append(
                         IntradayFill(
                             order.signal.direction,
@@ -325,16 +345,20 @@ def run_intraday_backtest(
                         Decimal(0),
                     ),
                 )
-                estimated_unit_cost = (
-                    bar.close
-                    * (Decimal(1) + params.slippage_bps / BASIS_POINTS)
-                    * (Decimal(1) + params.fee_bps / BASIS_POINTS)
+                estimated_price = bar.close * (
+                    Decimal(1) + params.slippage_bps / BASIS_POINTS
                 )
-                reserved = min(free_cash, estimated_unit_cost * signal.quantity)
+                fee_reserve = params.minimum_commission * params.order_lifetime_bars
+                order_budget = max(Decimal(0), free_cash - fee_reserve)
+                unit_cost = estimated_price * (
+                    Decimal(1) + params.fee_bps / BASIS_POINTS
+                )
+                reserved = min(free_cash, unit_cost * signal.quantity + fee_reserve)
                 allowed = (
                     int(
                         (
-                            reserved / (estimated_unit_cost * BOARD_LOT)
+                            min(order_budget, unit_cost * signal.quantity)
+                            / (unit_cost * BOARD_LOT)
                         ).to_integral_value(rounding=ROUND_DOWN)
                     )
                     * BOARD_LOT
@@ -377,6 +401,7 @@ def run_intraday_backtest(
         "fill_timing": "next_available_bar_open",
         "signal_bar_close_fills": False,
         "participation_rate": params.participation_rate,
+        "minimum_commission": params.minimum_commission,
         "fee_bps": params.fee_bps,
         "slippage_bps": params.slippage_bps,
         "order_lifetime_bars": params.order_lifetime_bars,

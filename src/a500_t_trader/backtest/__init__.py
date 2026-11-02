@@ -89,6 +89,7 @@ class BacktestResult:
     implementation_version: str
     fill_assumption: str
     cost_bps: Decimal
+    minimum_commission: Decimal
     slippage_bps: Decimal
     snapshot_id: str
     snapshot_bar_count: int
@@ -118,6 +119,7 @@ def run_backtest(
     interval_minutes: int,
     cost_bps: Decimal = Decimal(0),
     slippage_bps: Decimal = Decimal(0),
+    minimum_commission: Decimal = Decimal(0),
     implementation_version: str = "1",
 ) -> BacktestResult:
     """Run explicit configured price triggers using next-bar-open fills."""
@@ -125,8 +127,8 @@ def run_backtest(
         raise ValueError("start_date must be on or before end_date")
     if interval_minutes not in (1, 5):
         raise ValueError("interval_minutes must be 1 or 5")
-    if cost_bps < 0 or slippage_bps < 0:
-        raise ValueError("cost and slippage basis points cannot be negative")
+    if cost_bps < 0 or slippage_bps < 0 or minimum_commission < 0:
+        raise ValueError("costs, slippage, and minimum commission cannot be negative")
     if not implementation_version.strip():
         raise ValueError("implementation_version must not be empty")
     symbols = {rule.symbol for rule in config.rules}
@@ -192,33 +194,45 @@ def run_backtest(
         if signal == "buy":
             market_price = current.open * (Decimal(1) + slippage_bps / Decimal(10000))
             cash_limit = min(cash, rule.max_buy_cash or cash)
+            unit_cost = market_price * (1 + cost_bps / Decimal(10000))
             quantity = int(
-                (
-                    cash_limit
-                    / (market_price * (1 + cost_bps / Decimal(10000)))
-                    / HUNDRED
-                ).to_integral_value(rounding=ROUND_DOWN)
+                (cash_limit / unit_cost / HUNDRED).to_integral_value(
+                    rounding=ROUND_DOWN
+                )
                 * 100
             )
             if quantity:
                 notional = market_price * quantity
-                costs = notional * cost_bps / Decimal(10000)
-                slippage = (market_price - current.open) * quantity
-                cash -= notional + costs
-                holdings += quantity
-                acquired.append((current.timestamp.date(), quantity))
-                fills.append(
-                    SimulatedFill(
-                        symbol,
-                        "buy",
-                        quantity,
-                        previous.timestamp,
-                        current.timestamp,
-                        market_price,
-                        costs,
-                        slippage,
+                costs = max(notional * cost_bps / Decimal(10000), minimum_commission)
+                if notional + costs > cash_limit:
+                    quantity = int(
+                        (
+                            max(Decimal(0), cash_limit - minimum_commission)
+                            / market_price
+                            / HUNDRED
+                        ).to_integral_value(rounding=ROUND_DOWN)
+                        * 100
                     )
-                )
+                    notional = market_price * quantity
+                    costs = max(
+                        notional * cost_bps / Decimal(10000), minimum_commission
+                    )
+                if quantity and notional + costs <= cash_limit:
+                    cash -= notional + costs
+                    holdings += quantity
+                    acquired.append((current.timestamp.date(), quantity))
+                    fills.append(
+                        SimulatedFill(
+                            symbol,
+                            "buy",
+                            quantity,
+                            previous.timestamp,
+                            current.timestamp,
+                            market_price,
+                            costs,
+                            (market_price - current.open) * quantity,
+                        )
+                    )
         elif signal == "sell":
             quantity = min(
                 max(0, holdings - rule.minimum_holding), immediately_sellable
@@ -229,7 +243,7 @@ def run_backtest(
                     Decimal(1) - slippage_bps / Decimal(10000)
                 )
                 notional = market_price * quantity
-                costs = notional * cost_bps / Decimal(10000)
+                costs = max(notional * cost_bps / Decimal(10000), minimum_commission)
                 slippage = (current.open - market_price) * quantity
                 cash += notional - costs
                 holdings -= quantity
@@ -268,6 +282,7 @@ def run_backtest(
         implementation_version,
         "next_bar_open",
         cost_bps,
+        minimum_commission,
         slippage_bps,
         snapshot_id,
         len(selected),
