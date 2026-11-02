@@ -29,6 +29,22 @@ class FakeTgw:
         kTickExecution = 23
 
     class SubscribeItem:
+        def __init__(self) -> None:
+            self.flag = None
+            self.category_type = None
+            self.market = None
+            self.security_code = None
+
+        @property
+        def flag(self) -> int:
+            return self._flag
+
+        @flag.setter
+        def flag(self, value: int) -> None:
+            if not 0 <= value <= 255:
+                raise OverflowError("flag must fit uint8")
+            self._flag = value
+
         @property
         def category_type(self) -> int:
             return self._category_type
@@ -38,6 +54,9 @@ class FakeTgw:
             if not 0 <= value <= 255:
                 raise OverflowError("category_type must fit uint8")
             self._category_type = value
+
+    class VarietyCategory:
+        kNone = 0
 
     def __init__(self) -> None:
         self.calls: list[tuple[object, ...]] = []
@@ -54,16 +73,24 @@ class FakeTgw:
         self.calls.append(("close",))
 
 
-def test_provider_uses_uint8_subscribe_datatypes() -> None:
+def test_provider_sets_sdk_subscribe_item_fields() -> None:
     api = FakeTgw()
     provider = TgwPushProvider(api)
 
     for event_type, expected in (("snapshot", 10), ("bar", 1), ("tick", 23)):
         subscription = provider.subscribe("563360", event_type)
-        assert api.calls[-1][1].category_type == expected
+        item = api.calls[-1][1]
+        assert item.flag == expected
+        assert item.category_type == api.VarietyCategory.kNone
+        assert item.security_code == "563360"
+        assert item.market == api.MarketType.kSSE
         subscription.close()
 
     provider.close()
+
+
+
+
 
 
 def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
