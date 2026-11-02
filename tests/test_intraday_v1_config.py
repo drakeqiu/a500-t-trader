@@ -139,3 +139,45 @@ def test_cli_validates_and_reports_auditable_configuration(
     assert output["rule_version"] == "1.0.0"
     assert output["rule_source_sha256"] == "a" * 64
     assert len(output["configuration_fingerprint"]) == 64
+
+
+def test_cli_evaluates_exports_api_result_and_reports_execution_gate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from a500_t_trader.cli.main import main
+    from a500_t_trader.market_data import MinuteBar
+    from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
+    from datetime import datetime
+    from decimal import Decimal
+    from zoneinfo import ZoneInfo
+
+    config_path = _write_config(tmp_path / "rules.json", _complete_config())
+    bars_path = tmp_path / "bars.json"
+    bars_path.write_text(json.dumps([{
+        "symbol": "510300", "timestamp": "2026-11-02T09:59:00+08:00",
+        "interval_minutes": 5, "open": "4.02", "high": "4.03",
+        "low": "4.01", "close": "4.02", "volume": 10000,
+    }]), encoding="utf-8")
+    export_path = tmp_path / "result.json"
+    assert main([
+        "intraday-strategy", "--config", str(config_path), "--bars", str(bars_path),
+        "--as-of", "2026-11-02T10:00:00+08:00", "--output", str(export_path),
+    ]) == 0
+    captured = capsys.readouterr()
+    displayed = json.loads(captured.out)
+    assert json.loads(export_path.read_text(encoding="utf-8")) == displayed
+    api_result = evaluate_intraday_strategy(
+        {"510300": (MinuteBar(
+            "510300", datetime.fromisoformat("2026-11-02T09:59:00+08:00"),
+            5, Decimal("4.02"), Decimal("4.03"), Decimal("4.01"),
+            Decimal("4.02"), 10000,
+        ),)},
+        as_of=datetime.fromisoformat("2026-11-02T10:00:00+08:00"),
+        config=load_intraday_v1_config(config_path),
+    )
+    assert displayed == json.loads(json.dumps(api_result, default=str))
+    execution = displayed["510300"]["execution"]
+    assert execution["allowed"] is False
+    assert execution["quantity"] in (None, 0)
+    assert "does not connect to a broker" in captured.err
+    assert "duplicate orders" in captured.err
