@@ -102,7 +102,18 @@ python -m a500_t_trader postmarket \
   --date 2026-10-30 --plan plan-2026-10-30.json --database signals.sqlite3
 ```
 
-复盘读取该日期保存的盘前建议、SQLite 触发证据，并查询该 ETF 当日可用的规范化 1 分钟历史行情；最后一根可用分钟线仅标作最新可用线，不保证是官方收盘价。输出分别列出账户快照、建议、触发、手工录入成交和模拟成交。当前命令不创建成交记录；未提供或不可用的计划、触发证据、历史行情会列入 `missing_data`，不会补造。建议和触发是参考证据，不是订单或成交。
+复盘读取该日期保存的盘前建议、SQLite 触发证据，并查询该 ETF 当日可用的规范化 1 分钟历史行情；最后一根可用分钟线仅标作最新可用线，不保证是官方收盘价。输出分别列出账户快照、建议、触发、手工录入成交、Galaxy 导入成交和模拟成交。导入成交按成交时间单独展示，并标记为用户提供、未经系统验证；导入不会更新账户现金、持仓或快照。未提供或不可用的计划、触发证据、历史行情会列入 `missing_data`，不会补造。建议和触发是参考证据，不是订单或成交。
+
+Galaxy 成交 CSV 首先以预览模式检查，不会创建或修改数据库。文件必须是 GB18030 编码且匹配支持的完整 Galaxy 导出表头。确认后才将有效新成交写入独立的导入成交记录；错误会阻止整批写入，重复成交编号不会重复导入：
+
+```bash
+python -m a500_t_trader import-fills \
+  --file galaxy-fills.csv --database signals.sqlite3
+python -m a500_t_trader import-fills \
+  --file galaxy-fills.csv --database signals.sqlite3 --confirm
+```
+
+导入及复盘不会显示或保存文件中的股东账户、资金余额或原始行。`account-ledger` 可分别查询手工成交和导入成交。
 
 ## 5. 分钟历史回测 CLI
 

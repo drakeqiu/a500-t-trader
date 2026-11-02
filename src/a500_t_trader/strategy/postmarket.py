@@ -35,6 +35,7 @@ class PostMarketReview:
     market_data: dict[str, object]
     manual_fills: dict[str, object]
     simulated_fills: dict[str, object]
+    imported_fills: dict[str, object]
     missing_data: tuple[str, ...]
 
 
@@ -106,8 +107,9 @@ def generate_review(
             "records": plan_record.get("suggestions", []),
         }
 
-    triggers: list[dict[str, object]] = []
     manual_fills: dict[str, object] = {"status": "not recorded", "records": []}
+    imported_fills: dict[str, object] = {"status": "not recorded", "records": []}
+    triggers: list[dict[str, object]] = []
     try:
         with sqlite3.connect(
             f"file:{Path(evidence_path).resolve()}?mode=ro", uri=True
@@ -136,7 +138,6 @@ def generate_review(
                 "SELECT 1 FROM sqlite_master "
                 "WHERE type='table' AND name='trigger_evidence'"
             ).fetchone()
-            triggers = []
             if has_triggers:
                 rows = db.execute(
                     "SELECT * FROM trigger_evidence "
@@ -159,6 +160,25 @@ def generate_review(
                     "status": "recorded" if records else "not recorded",
                     "records": records,
                     "classification": "user-entered manual fills; not broker-verified",
+                }
+            has_imported_fills = db.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='imported_fills'"
+            ).fetchone()
+            if has_imported_fills:
+                imported_rows = db.execute(
+                    "SELECT * FROM imported_fills "
+                    "WHERE substr(timestamp,1,10)=? ORDER BY timestamp,id",
+                    (session_date.isoformat(),),
+                )
+                imported_records = [dict(row) for row in imported_rows]
+                imported_fills = {
+                    "status": "recorded" if imported_records else "not recorded",
+                    "records": imported_records,
+                    "classification": (
+                        "user-provided Galaxy Securities file; not system-verified"
+                    ),
+                    "source": "user-provided Galaxy Securities CSV file",
                 }
         suggestions = recommendations["records"]
         if isinstance(suggestions, list):
@@ -248,6 +268,7 @@ def generate_review(
         market,
         manual_fills,
         {"status": "not recorded", "records": []},
+        imported_fills,
         tuple(missing),
     )
 
