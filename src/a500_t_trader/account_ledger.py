@@ -343,9 +343,20 @@ def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
             )
         return value
 
+    trade_date, trade_time = row[0].strip(), row[1].strip()
     try:
+        if (
+            len(trade_date) != 8
+            or not trade_date.isascii()
+            or not trade_date.isdecimal()
+            or len(trade_time) != 8
+            or not trade_time.isascii()
+            or trade_time[2] != ":"
+            or trade_time[5] != ":"
+        ):
+            raise ValueError
         timestamp = datetime.strptime(
-            f"{row[0].strip()} {row[1].strip()}", "%Y%m%d %H:%M:%S"
+            f"{trade_date} {trade_time}", "%Y%m%d %H:%M:%S"
         ).replace(tzinfo=ZoneInfo("Asia/Shanghai"))
     except ValueError:
         fail("成交日期/成交时间", "must be a valid YYYYMMDD date and HH:MM:SS time")
