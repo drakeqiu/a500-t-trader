@@ -86,7 +86,7 @@ def test_bollinger_score_saturates_at_source_z_boundary() -> None:
 
     assert analysis.score_breakdown["boll_sell"] == 0.0
 
-def test_flat_completed_history_produces_zero_dual_score_and_wait():
+def test_flat_completed_history_keeps_range_baseline_scores_and_wait():
     bars = tuple(
         replace(
             bar,
@@ -101,7 +101,7 @@ def test_flat_completed_history_produces_zero_dual_score_and_wait():
     analysis = analyze_intraday_technical({"510300": bars})["510300"]
 
     assert analysis.trend == "RANGE"
-    assert analysis.scores == {"buy": 0.0, "sell": 0.0, "delta": 0.0}
+    assert analysis.scores == {"buy": 10.0, "sell": 10.0, "delta": 0.0}
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "BLOCKED"
     assert any("dynamic grid inputs unavailable" in reason for reason in analysis.reasons)
@@ -282,7 +282,7 @@ def test_source_exact_paired_targets_emit_take_profit_and_buyback(
         assert analysis.candidate == expected
 
 
-def test_paired_target_cannot_override_price_or_direction_score(
+def test_paired_target_does_not_override_ordinary_buy_candidate(
     monkeypatch,
 ) -> None:
     import a500_t_trader.strategy.intraday_technical as technical
@@ -323,7 +323,8 @@ def test_paired_target_cannot_override_price_or_direction_score(
         },
     )["510300"]
 
-    assert analysis.candidate == "WAIT"
+    assert analysis.candidate == "BUY"
+    assert analysis.candidate != "TAKE_PROFIT"
 
 
 def test_same_session_missing_bar_fails_closed() -> None:
