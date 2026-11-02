@@ -411,7 +411,7 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
                 "--database",
                 str(database),
             ],
-            market_data=None,
+            market_data=Data(),
             as_of=CLOSE,
         )
         == 0
