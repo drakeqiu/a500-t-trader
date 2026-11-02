@@ -176,8 +176,10 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         planned["suggestions"][0]["quantity"]
     )
     assert review["market_data"]["563360"]["close"] == "1.09"
-    assert review["market_data"]["563360"]["bar_count"] == len(bars)
-    assert review["market_data"]["563360"]["source"] == "AmazingData"
+    assert review["market_data"]["563360"]["bar_timestamp"].startswith(
+        "2026-11-02T10:54:00"
+    )
+    assert review["market_data"]["563360"]["is_completed"] is True
     assert review["simulated_fills"] == {"status": "not recorded", "records": []}
     assert "order" in review["recommendations"]["classification"].lower()
     assert "NOT AN ORDER" in review["recommendations"]["classification"]
