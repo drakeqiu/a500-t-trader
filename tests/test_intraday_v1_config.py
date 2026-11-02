@@ -99,12 +99,8 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     assert isinstance(config, IntradayV1Config)
     assert config.strategy_id == "intraday-etf-t-v1"
     assert config.rule_version == "V1.0"
-    assert (
-        config.rule_source
-        == (
-            "docs/strategy/intraday-etf-t-v1/"
-            "intraday_etf_t_quantitative_strategy_v1.0.md"
-        )
+    assert config.rule_source == (
+        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         config.rule_source_sha256
@@ -190,12 +186,8 @@ def test_cli_validates_and_reports_auditable_configuration(
 
     assert output["strategy_id"] == "intraday-etf-t-v1"
     assert output["rule_version"] == "V1.0"
-    assert (
-        output["rule_source"]
-        == (
-            "docs/strategy/intraday-etf-t-v1/"
-            "intraday_etf_t_quantitative_strategy_v1.0.md"
-        )
+    assert output["rule_source"] == (
+        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         output["rule_source_sha256"]
