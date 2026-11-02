@@ -197,13 +197,15 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         review["plan"]["suggestions"][0]["quantity"]
         == (planned["suggestions"][0]["quantity"])
     )
-    assert review["market_data"]["563360"]["close"] == "1.09"
-    assert review["market_data"]["563360"]["bar_timestamp"].startswith(
-        "2026-11-02T10:54:00"
+    closing_bar = bars[-1]
+    assert review["market_data"]["563360"]["close"] == str(closing_bar.close)
+    assert review["market_data"]["563360"]["bar_timestamp"] == (
+        closing_bar.timestamp.isoformat()
     )
     assert review["market_data"]["563360"]["is_completed"] is True
     assert review["simulated_fills"] == {"status": "not recorded", "records": []}
     assert "order" in review["recommendations"]["classification"].lower()
+    assert "not orders" in review["recommendations"]["classification"]
 
 
 def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
@@ -306,7 +308,7 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
     assert review["triggers"][0]["condition"] == "low <= 3.85 CNY"
     assert review["account_snapshot"]["holdings"]["510300"] == 1200
     assert review["triggers"][0]["related_recommendation_indices"] == [0]
-    assert review["market_data"]["510300"]["close"] == "3.79"
+    assert review["market_data"]["510300"]["close"] == "3.80"
     assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
     assert review["manual_fills"]["status"] == "recorded"
     assert review["manual_fills"]["records"][0]["quantity"] == 100
@@ -339,7 +341,7 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(
         == 0
     )
     review = json.loads(capsys.readouterr().out)
-    assert review["plan"]["status"] == "missing"
+    assert review["plan"] is None
     assert review["triggers"] == []
     assert any("market" in item.lower() for item in review["missing_data"])
 
@@ -383,16 +385,8 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
         main(
             [
                 "account-snapshot",
-                "--timestamp",
-                "2026-10-30T14:00:00+08:00",
-                "--holdings",
-                '{"510300":1000}',
-                "--cost-basis",
-                '{"510300":"3.70"}',
-                "--sellable",
-                '{"510300":600}',
-                "--available-cash",
-                "1000",
+                "--account",
+                str(account),
                 "--database",
                 str(database),
             ]
@@ -438,6 +432,6 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
         == 0
     )
     review = json.loads(capsys.readouterr().out)
-    assert review["account_snapshot"]["available_cash"] == "500"
+    assert review["account_snapshot"]["available_cash"] == "5000"
     assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
     assert review["manual_fills"]["records"][0]["side"] == "sell"

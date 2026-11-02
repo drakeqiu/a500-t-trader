@@ -19,7 +19,6 @@ def live_market_data_service() -> MarketDataService:
     return MarketDataService(create_provider_from_env())
 
 
-
 def test_live_snapshot_for_563360(
     live_market_data_service: MarketDataService,
 ) -> None:
@@ -43,4 +42,3 @@ def test_live_minute_bars_for_563360(
     assert all(bar.symbol == "563360" for bar in bars)
     assert all(bar.interval_minutes == 1 for bar in bars)
     assert all(bar.source == "AmazingData" for bar in bars)
-

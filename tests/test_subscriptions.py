@@ -89,10 +89,6 @@ def test_provider_sets_sdk_subscribe_item_fields() -> None:
     provider.close()
 
 
-
-
-
-
 def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
     from types import SimpleNamespace
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from threading import Event
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,13 +16,12 @@ from .. import (
     Trade,
     normalize_symbol,
 )
-from .tgw_push import TgwPushProvider
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class AmazingDataProvider:
-    """Logged-in AmazingData provider; its query results are not push events."""
+    """Logged-in AmazingData provider for request/response market data."""
 
     def __init__(
         self,
@@ -34,8 +32,6 @@ class AmazingDataProvider:
         *,
         login_fn: Callable[..., bool] | None = None,
         market_data: Any | None = None,
-        tgw_api: Any | None = None,
-        snapshot_timeout: float = 5.0,
         clock: Callable[[], datetime] = datetime.now,
     ) -> None:
         if login_fn is None:
@@ -61,68 +57,50 @@ class AmazingDataProvider:
                     f"AmazingData market-data initialization failed: {error}"
                 ) from error
         self._market_data = market_data
-        self._tgw_api = tgw_api
-        self._push_provider: TgwPushProvider | None = None
-        self._snapshot_timeout = snapshot_timeout
 
     def get_snapshot(self, symbol: str) -> Snapshot:
         code = normalize_symbol(symbol)
         now = _local_time(self._clock())
+        session_date = int(now.strftime("%Y%m%d"))
         try:
-            provider = self._live_push_provider()
-            received: list[Snapshot] = []
-            ready = Event()
-
-            def on_snapshot(snapshot: Snapshot) -> None:
-                received.append(snapshot)
-                ready.set()
-
-            subscription = provider.subscribe(
-                code, "snapshot", callback=on_snapshot
+            raw = self._market_data.query_snapshot(
+                [_vendor_symbol(code)], session_date, session_date
             )
-            try:
-                if not ready.wait(self._snapshot_timeout):
-                    raise CapabilityUnavailableError(
-                        f"AmazingData snapshot callback timed out for {code}"
-                    )
-                snapshot = received[0]
-                return Snapshot(
-                    symbol=code,
-                    timestamp=snapshot.timestamp,
-                    received_at=now,
-                    name=snapshot.name,
-                    last_price=snapshot.last_price,
-                    previous_close=snapshot.previous_close,
-                    open=snapshot.open,
-                    high=snapshot.high,
-                    low=snapshot.low,
-                    cumulative_volume=snapshot.cumulative_volume,
-                    cumulative_amount=snapshot.cumulative_amount,
-                    bid_price=snapshot.bid_price,
-                    bid_volume=snapshot.bid_volume,
-                    ask_price=snapshot.ask_price,
-                    ask_volume=snapshot.ask_volume,
-                    source="AmazingData",
-                )
-            finally:
-                subscription.close()
-        except CapabilityUnavailableError:
-            raise
         except Exception as error:
             raise CapabilityUnavailableError(
-                f"AmazingData live snapshot unavailable or invalid: {error}"
+                f"AmazingData snapshot query unavailable or unauthorized: {error}"
             ) from error
-
-    def _live_push_provider(self) -> TgwPushProvider:
-        if self._push_provider is None:
-            try:
-                api = self._tgw_api if self._tgw_api is not None else _make_tgw_api()
-                self._push_provider = TgwPushProvider(api, clock=self._clock)
-            except Exception as error:
-                raise CapabilityUnavailableError(
-                    f"AmazingData live snapshot initialization failed: {error}"
-                ) from error
-        return self._push_provider
+        rows = _snapshot_rows(raw, code, session_date)
+        if not rows:
+            raise CapabilityUnavailableError(
+                f"AmazingData snapshot query returned no data for {code}"
+            )
+        row = rows[-1]
+        try:
+            timestamp = _vendor_time(row["trade_time"])
+            snapshot = Snapshot(
+                symbol=code,
+                timestamp=timestamp,
+                received_at=now,
+                name=_optional_string(row.get("name")),
+                last_price=_optional_decimal(row.get("last")),
+                previous_close=_optional_decimal(row.get("pre_close")),
+                open=_optional_decimal(row.get("open")),
+                high=_optional_decimal(row.get("high")),
+                low=_optional_decimal(row.get("low")),
+                cumulative_volume=_optional_int(row.get("volume")),
+                cumulative_amount=_optional_decimal(row.get("amount")),
+                bid_price=_optional_decimal(row.get("bid_price1")),
+                bid_volume=_optional_int(row.get("bid_volume1")),
+                ask_price=_optional_decimal(row.get("ask_price1")),
+                ask_volume=_optional_int(row.get("ask_volume1")),
+                source="AmazingData",
+            )
+        except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+            raise CapabilityUnavailableError(
+                f"AmazingData snapshot query returned invalid data for {code}: {error}"
+            ) from error
+        return snapshot
 
     def get_intraday_bars(
         self, symbol: str, interval_minutes: int
@@ -298,12 +276,6 @@ def _make_market_data() -> Any:
     return MarketData(calendar)
 
 
-def _make_tgw_api() -> Any:
-    from AmazingData.subscribe_api.on_data import tgw  # type: ignore[import-untyped]
-
-    return tgw
-
-
 def _vendor_symbol(symbol: str) -> str:
     if symbol.startswith(("5", "6")):
         exchange = "SH"
@@ -333,6 +305,23 @@ def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
         (
             value
             for key, value in raw.items()
+            if normalize_symbol(str(key).split(".")[0]) == symbol
+        ),
+        None,
+    )
+    return _records(frame)
+
+
+def _snapshot_rows(raw: Any, symbol: str, session_date: int) -> list[Mapping[str, Any]]:
+    if not isinstance(raw, Mapping):
+        return []
+    dated = raw.get(str(session_date), raw.get(session_date))
+    if not isinstance(dated, Mapping):
+        return []
+    frame = next(
+        (
+            value
+            for key, value in dated.items()
             if normalize_symbol(str(key).split(".")[0]) == symbol
         ),
         None,
