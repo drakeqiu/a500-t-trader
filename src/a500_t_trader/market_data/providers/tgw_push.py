@@ -243,11 +243,12 @@ class TgwPushProvider:
             else self._api.MarketType.kSZSE
         )
         item.security_code = code
-        item.category_type = {
+        item.flag = {
             "snapshot": self._api.SubscribeDataType.kSnapshot,
             "bar": self._api.SubscribeDataType.k1MinKline,
             "tick": self._api.SubscribeDataType.kTickExecution,
         }[event_type]
+        item.category_type = self._api.VarietyCategory.kNone
         return item
 
     def _remove(self, subscription: Subscription) -> None:
