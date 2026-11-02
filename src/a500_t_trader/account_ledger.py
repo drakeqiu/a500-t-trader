@@ -203,6 +203,7 @@ def import_galaxy_fills(
 
     if not errors and confirm:
         with sqlite3.connect(str(database)) as db:
+            db.row_factory = sqlite3.Row
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS imported_fills (
