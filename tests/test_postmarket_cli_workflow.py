@@ -27,14 +27,13 @@ class Data:
         return (
             MinuteBar(
                 symbol,
-                datetime(2026, 10, 30, 10, 0, tzinfo=SHANGHAI),
+                datetime(2026, 10, 30, 9, 59, tzinfo=SHANGHAI),
                 1,
                 Decimal("3.80"),
-                Decimal("3.85"),
-                Decimal("3.75"),
-                Decimal("3.78"),
+                Decimal("3.81"),
+                Decimal("3.79"),
+                Decimal("3.80"),
                 1000,
-                is_completed=True,
             ),
         )
 
@@ -43,21 +42,147 @@ class Data:
         symbol: str,
         start_date: date,
         end_date: date,
-        interval_minutes: int = 1,
+        interval_minutes: int,
     ) -> tuple[MinuteBar, ...]:
         return (
             MinuteBar(
                 symbol,
-                datetime(2026, 10, 30, 14, 59, tzinfo=SHANGHAI),
-                interval_minutes,
-                Decimal("3.77"),
+                datetime(2026, 10, 30, 9, 59, tzinfo=SHANGHAI),
+                1,
                 Decimal("3.80"),
-                Decimal("3.76"),
+                Decimal("3.81"),
                 Decimal("3.79"),
-                2000,
-                is_completed=True,
+                Decimal("3.80"),
+                1000,
             ),
         )
+
+
+def test_recorded_fixture_premarket_then_postmarket_is_advisory(
+    tmp_path: Path, capsys: Any
+) -> None:
+    fixture = json.loads(
+        (
+            Path(__file__).parent
+            / "fixtures"
+            / "amazingdata_563360_20261102.json"
+        ).read_text(encoding="utf-8")
+    )
+    recorded = fixture["snapshot"]
+    snapshot_time = datetime.fromisoformat(recorded["timestamp"])
+    snapshot = Snapshot(
+        recorded["symbol"],
+        snapshot_time,
+        datetime.fromisoformat(recorded["received_at"]),
+        last_price=Decimal(recorded["last_price"]),
+        previous_close=Decimal(recorded["previous_close"]),
+        open=Decimal(recorded["open"]),
+        high=Decimal(recorded["high"]),
+        low=Decimal(recorded["low"]),
+        cumulative_volume=recorded["cumulative_volume"],
+        cumulative_amount=Decimal(recorded["cumulative_amount"]),
+        bid_price=Decimal(recorded["bid_price"]),
+        bid_volume=recorded["bid_volume"],
+        ask_price=Decimal(recorded["ask_price"]),
+        ask_volume=recorded["ask_volume"],
+        source=recorded["source"],
+    )
+    bars = tuple(
+        MinuteBar(
+            row["symbol"],
+            datetime.fromisoformat(row["timestamp"]),
+            row["interval_minutes"],
+            Decimal(row["open"]),
+            Decimal(row["high"]),
+            Decimal(row["low"]),
+            Decimal(row["close"]),
+            row["volume"],
+            Decimal(row["amount"]),
+            row["is_completed"],
+            row["source"],
+        )
+        for row in fixture["bars"]
+    )
+
+    class RecordedData:
+        def get_snapshot(self, symbol: str) -> Snapshot:
+            assert symbol == snapshot.symbol
+            return snapshot
+
+        def session_status(self, session_date: date) -> tuple[SessionState, bool]:
+            assert session_date == snapshot_time.date()
+            return SessionState.TRADING, False
+
+        def get_intraday_bars(
+            self, symbol: str, interval_minutes: int = 1
+        ) -> tuple[MinuteBar, ...]:
+            assert symbol == snapshot.symbol
+            assert interval_minutes == 1
+            return bars
+
+    data = RecordedData()
+    config = tmp_path / "rules.json"
+    account = tmp_path / "account.json"
+    plan_file = tmp_path / "plan.json"
+    database = tmp_path / "review.sqlite3"
+    config.write_text(
+        '{"etfs":[{"symbol":"563360","buy_below":"1.10",'
+        '"max_buy_cash":"10000","minimum_holding":100}]}',
+        encoding="utf-8",
+    )
+    account.write_text(
+        '{"as_of":"2026-11-02T10:55:00+08:00","holdings":{"563360":10000},'
+        '"cost_basis":{"563360":"1.05"},"sellable":{"563360":8000},'
+        '"available_cash":"20000"}',
+        encoding="utf-8",
+    )
+
+    assert main(
+        [
+            "premarket",
+            "--config",
+            str(config),
+            "--account",
+            str(account),
+            "--output",
+            str(plan_file),
+        ],
+        market_data=data,
+        as_of=snapshot_time,
+    ) == 0
+    planned = json.loads(capsys.readouterr().out)
+    assert plan_file.is_file()
+    assert planned["suggestions"][0]["direction"] == "buy"
+    assert planned["suggestions"][0]["quantity"] > 0
+    assert planned["suggestions"][0]["symbol"] == "563360"
+
+    assert main(
+        [
+            "postmarket",
+            "--date",
+            snapshot_time.date().isoformat(),
+            "--plan",
+            str(plan_file),
+            "--database",
+            str(database),
+        ],
+        market_data=data,
+        as_of=snapshot_time.replace(hour=15, minute=0),
+    ) == 0
+    review = json.loads(capsys.readouterr().out)
+    assert review["session_date"] == snapshot_time.date().isoformat()
+    assert review["plan"]["suggestions"][0]["direction"] == "buy"
+    assert review["plan"]["suggestions"][0]["quantity"] == (
+        planned["suggestions"][0]["quantity"]
+    )
+    assert review["market_data"]["563360"]["close"] == "1.09"
+    assert review["market_data"]["563360"]["bar_timestamp"].startswith(
+        "2026-11-02T10:54:00"
+    )
+    assert review["market_data"]["563360"]["is_completed"] is True
+    assert review["simulated_fills"] == {"status": "not recorded", "records": []}
+    assert "order" in review["recommendations"]["classification"].lower()
+    assert "NOT AN ORDER" in review["recommendations"]["classification"]
 
 
 def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
@@ -175,9 +300,7 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(
     tmp_path: Path, capsys: Any
 ) -> None:
     plan_file = tmp_path / "plan.json"
-    plan_file.write_text(
-        json.dumps({"session_date": "2026-10-30", "plan": {"suggestions": []}})
-    )
+    database = tmp_path / "signals.sqlite3"
     assert (
         main(
             [
@@ -187,17 +310,16 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(
                 "--plan",
                 str(plan_file),
                 "--database",
-                str(tmp_path / "missing.sqlite3"),
+                str(database),
             ],
-            market_data=None,
+            market_data=Data(),
             as_of=CLOSE,
         )
         == 0
     )
     review = json.loads(capsys.readouterr().out)
-    assert review["missing_data"]
-    assert any("trigger" in item.lower() for item in review["missing_data"])
-    assert any("account snapshot" in item.lower() for item in review["missing_data"])
+    assert review["plan"]["status"] == "missing"
+    assert review["triggers"] == []
     assert any("market" in item.lower() for item in review["missing_data"])
 
 
@@ -205,29 +327,51 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
     tmp_path: Path, capsys: Any
 ) -> None:
     database = tmp_path / "evidence.sqlite3"
-    account = tmp_path / "account.json"
     plan_file = tmp_path / "plan.json"
-    account.write_text(
-        '{"as_of":"2026-10-30T08:30:00+08:00","holdings":{"510300":100},'
-        '"cost_basis":{"510300":"3.70"},"sellable":{"510300":0},'
-        '"available_cash":"500"}',
+    config = tmp_path / "rules.json"
+    account = tmp_path / "account.json"
+    config.write_text(
+        '{"etfs":[{"symbol":"510300","buy_below":"3.85",'
+        '"max_buy_cash":"4000","minimum_holding":100}]}',
         encoding="utf-8",
     )
-    plan_file.write_text(
-        json.dumps(
-            {
-                "session_date": "2026-10-30",
-                "plan": {"suggestions": []},
-            }
-        ),
+    account.write_text(
+        '{"as_of":"2026-10-30T10:00:00+08:00","holdings":{"510300":1200},'
+        '"cost_basis":{"510300":"3.70"},"sellable":{"510300":800},'
+        '"available_cash":"5000"}',
         encoding="utf-8",
     )
     assert (
         main(
             [
-                "account-snapshot",
+                "premarket",
+                "--config",
+                str(config),
                 "--account",
                 str(account),
+                "--output",
+                str(plan_file),
+            ],
+            market_data=Data(),
+            as_of=MORNING,
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "account-snapshot",
+                "--timestamp",
+                "2026-10-30T14:00:00+08:00",
+                "--holdings",
+                '{"510300":1000}',
+                "--cost-basis",
+                '{"510300":"3.70"}',
+                "--sellable",
+                '{"510300":600}',
+                "--available-cash",
+                "1000",
                 "--database",
                 str(database),
             ]
@@ -240,7 +384,7 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
             [
                 "manual-fill",
                 "--timestamp",
-                "2026-10-30T10:02:00+08:00",
+                "2026-10-30T14:30:00+08:00",
                 "--symbol",
                 "510300",
                 "--side",
@@ -248,7 +392,7 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
                 "--quantity",
                 "100",
                 "--price",
-                "3.80",
+                "3.90",
                 "--database",
                 str(database),
             ]
