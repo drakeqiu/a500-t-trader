@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
+from typing import cast
 
 from ..backtest.certification import CertificationResult, certification_is_current
 from ..market_data import MinuteBar
@@ -93,8 +94,8 @@ def evaluate_intraday_strategy(
             elif _stale(account_stamp, now):
                 reasons.append("account snapshot is stale or future-dated")
             position = (
-                account.get("positions", {}).get(symbol)
-                if isinstance(account.get("positions"), dict)
+                positions.get(symbol)
+                if isinstance(positions, dict)
                 else None
             )
             if not isinstance(position, dict):
@@ -176,7 +177,7 @@ def evaluate_intraday_strategy(
                 and persisted_pair.get("symbol") == symbol
                 and persisted_pair.get("status") == "open"
             )
-            if valid_pair:
+            if valid_pair and isinstance(persisted_pair, Mapping):
                 buy_quantity = persisted_pair.get("buy_quantity")
                 sell_quantity = persisted_pair.get("sell_quantity")
                 buy_outstanding = (
@@ -260,7 +261,7 @@ def evaluate_intraday_strategy(
             and latest is not None
         )
         execution = None
-        if eligible:
+        if eligible and analysis is not None and latest is not None and config is not None:
             adjusted = _with_reference_price(analysis, latest)
             try:
                 execution = calculate_intraday_execution(
@@ -321,7 +322,8 @@ def evaluate_intraday_strategy(
             quantity = 0
         reasons = list(dict.fromkeys(reasons))
         if (
-            analysis is not None
+            config is not None
+            and analysis is not None
             and side in ("buy", "sell")
             and state_store is not None
             and state_parameters is not None
@@ -396,23 +398,16 @@ def _state_parameters(
         risk.get("max_daily_turnover"),
         risk.get("min_same_direction_bars"),
     )
-    if any(type(value) is not int for value in values[:5] + values[6:]):
+    if not all(type(value) is int for value in values[:5] + values[6:]):
         return None
+    grid_version, grid_layer, grid_round, trades, adds, _, bars = cast(
+        tuple[int, int, int, int, int, object, int], values
+    )
     try:
         turnover = Decimal(str(values[5]))
     except InvalidOperation, TypeError, ValueError:
         return None
     if not turnover.is_finite() or turnover <= 0:
-        return None
-    grid_version, grid_layer, grid_round, trades, adds, _, bars = values
-    if (
-        grid_version < 1
-        or grid_layer < 0
-        or grid_round < 0
-        or trades < 1
-        or adds < 1
-        or bars < 0
-    ):
         return None
     return grid_version, grid_layer, grid_round, trades, adds, turnover, bars
 

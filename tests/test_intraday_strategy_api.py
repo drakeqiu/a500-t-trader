@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -101,10 +102,12 @@ def _config(
             }
         }
     )
+    technical_grid = TECHNICAL_PARAMETERS["grid"]
+    assert isinstance(technical_grid, dict)
     parameters = {
         **TECHNICAL_PARAMETERS,
         "grid": {
-            **TECHNICAL_PARAMETERS["grid"],
+            **technical_grid,
             "grid_version": 1,
             "grid_layer": 0,
             "grid_round": 0,
@@ -240,7 +243,7 @@ def _candidate_analysis(candidate: str) -> IntradayTechnicalAnalysis:
 
 
 def _paired_api_result(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     store: IntradayStrategyStateStore,
     candidate: str,
     pair_id: str | None,
@@ -349,19 +352,22 @@ def test_current_certification_binding_is_accepted() -> None:
         "510300"
     ]
 
-    assert (
-        "certification is stale or mismatched with current inputs"
-        not in result["reasons"]
-    )
-    assert "certification binding unavailable" not in result["reasons"]
+    reasons = result["reasons"]
+    assert isinstance(reasons, list)
+    assert "certification is stale or mismatched with current inputs" not in reasons
+    assert "certification binding unavailable" not in reasons
 
 
-def _assert_blocked(result: dict[str, object], *reasons: str) -> None:
+def _assert_blocked(
+    result: dict[str, object], *reasons_to_check: str
+) -> None:
     execution = result["execution"]
     assert isinstance(execution, dict)
     assert execution["allowed"] is False
     assert execution["quantity"] in (None, 0)
-    assert all(reason in result["reasons"] for reason in reasons)
+    reasons = result["reasons"]
+    assert isinstance(reasons, list)
+    assert all(reason in reasons for reason in reasons_to_check)
 
 
 def test_api_returns_separate_technical_candidate_and_risk_veto() -> None:
@@ -413,7 +419,7 @@ def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason
 
 def test_certification_mapping_is_not_accepted_as_verified_evidence() -> None:
     _assert_blocked(
-        _evaluate(certification={"status": "passed"})["510300"],  # type: ignore[arg-type]
+        _evaluate(certification={"status": "passed"})["510300"],
         "certification is failed or not passed",
     )
 
@@ -462,7 +468,7 @@ def test_paired_targets_do_not_bypass_source_candidate_rules() -> None:
     (("TAKE_PROFIT", "buy"), ("BUYBACK", "sell")),
 )
 def test_valid_open_pair_id_is_returned_for_candidate(
-    tmp_path, monkeypatch, candidate: str, first_side: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, candidate: str, first_side: str
 ) -> None:
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     pair_id = f"open-{candidate.lower()}"
@@ -488,8 +494,8 @@ def test_valid_open_pair_id_is_returned_for_candidate(
     ),
 )
 def test_invalid_pair_provenance_or_status_blocks_pair_id(
-    tmp_path,
-    monkeypatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     candidate: str,
     first_side: str,
     symbol: str,
@@ -519,7 +525,7 @@ def test_invalid_pair_provenance_or_status_blocks_pair_id(
 
 @pytest.mark.parametrize("pair_id", ("unknown-pair", None))
 def test_missing_or_unknown_pair_id_fails_closed(
-    tmp_path, monkeypatch, pair_id: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pair_id: str | None
 ) -> None:
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
 
@@ -534,7 +540,7 @@ def test_missing_or_unknown_pair_id_fails_closed(
     )
 
 
-def test_evaluation_requires_existing_persistent_state(tmp_path) -> None:
+def test_evaluation_requires_existing_persistent_state(tmp_path: Path) -> None:
     store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
     result = _evaluate(state_store=store)["510300"]
 

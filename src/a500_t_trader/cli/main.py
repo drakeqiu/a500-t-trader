@@ -206,7 +206,7 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "intraday-strategy":
         try:
-            config = load_intraday_v1_config(args.config)
+            intraday_config = load_intraday_v1_config(args.config)
             with open(args.bars, encoding="utf-8") as stream:
                 document = json.load(stream)
             if not isinstance(document, list):
@@ -233,7 +233,7 @@ def main(
             result = evaluate_intraday_strategy(
                 {symbol: tuple(bars) for symbol, bars in grouped.items()},
                 as_of=args.as_of,
-                config=config,
+                config=intraday_config,
             )
             rendered = json.dumps(
                 result, ensure_ascii=False, indent=2, default=_json_default
@@ -253,19 +253,19 @@ def main(
             return 2
     if args.command == "intraday-config":
         try:
-            config = load_intraday_v1_config(args.config)
+            intraday_config = load_intraday_v1_config(args.config)
         except Exception as error:
             print(f"Unable to load V1 intraday configuration: {error}", file=sys.stderr)
             return 2
         print(
             json.dumps(
                 {
-                    "strategy_id": config.strategy_id,
-                    "rule_version": config.rule_version,
-                    "implementation_version": config.implementation_version,
-                    "rule_source": config.rule_source,
-                    "rule_source_sha256": config.rule_source_sha256,
-                    "configuration_fingerprint": config.fingerprint,
+                    "strategy_id": intraday_config.strategy_id,
+                    "rule_version": intraday_config.rule_version,
+                    "implementation_version": intraday_config.implementation_version,
+                    "rule_source": intraday_config.rule_source,
+                    "rule_source_sha256": intraday_config.rule_source_sha256,
+                    "configuration_fingerprint": intraday_config.fingerprint,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -425,12 +425,12 @@ def main(
         return 0
     if args.command == "monitor":
         try:
-            config = load_config(args.config)
+            monitor_config = load_config(args.config)
             account = load_account(args.account)
             if market_data is None:
                 market_data = MarketDataService(create_provider_from_env())
             run_monitor(
-                config,
+                monitor_config,
                 account,
                 cast(MonitorMarketData, market_data),
                 args.database,
@@ -452,16 +452,16 @@ def main(
         return 0
 
     try:
-        config = load_config(args.config)
+        plan_config = load_config(args.config)
         account = load_account(args.account)
         if args.command == "backtest":
             if args.symbol is not None:
                 symbol = normalize_symbol(args.symbol)
-                matching = tuple(rule for rule in config.rules if rule.symbol == symbol)
+                matching = tuple(rule for rule in plan_config.rules if rule.symbol == symbol)
                 if not matching:
                     raise ValueError(f"{symbol} is not present in configured ETF rules")
-                config = replace(config, rules=matching)
-            if len(config.rules) != 1:
+                plan_config = replace(plan_config, rules=matching)
+            if len(plan_config.rules) != 1:
                 raise ValueError(
                     "select --symbol when the configuration contains multiple ETFs"
                 )
@@ -475,7 +475,7 @@ def main(
                 )
                 return 2
             repository = BacktestRepository(args.database)
-            symbol = config.rules[0].symbol
+            symbol = plan_config.rules[0].symbol
             selected_bars = repository.get_shared_history(
                 symbol, args.start_date, args.end_date, args.interval_minutes
             )
@@ -518,7 +518,7 @@ def main(
                     )
                     return 2
             backtest_result = run_backtest(
-                config,
+                plan_config,
                 account,
                 selected_bars,
                 start_date=args.start_date,
@@ -542,7 +542,7 @@ def main(
             market_data = MarketDataService(create_provider_from_env())
         now = as_of or datetime.now(ZoneInfo("Asia/Shanghai"))
         plan = generate_plan(
-            config, account, cast(PlanMarketData, market_data), as_of=now
+            plan_config, account, cast(PlanMarketData, market_data), as_of=now
         )
     except CapabilityUnavailableError as error:
         print(

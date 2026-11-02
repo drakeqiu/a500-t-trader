@@ -4,7 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from test_intraday_v1_config import _complete_config, _write_config
+from .test_intraday_v1_config import _complete_config, _write_config
 
 from a500_t_trader.strategy.intraday_execution import calculate_intraday_execution
 from a500_t_trader.strategy.intraday_technical import IntradayTechnicalAnalysis
@@ -50,8 +50,12 @@ def test_missing_position_valuation_blocks_all_action_quantities(
         _write_config(tmp_path / "rules.json", _complete_config())
     )
     account = dict(config.account)
-    positions = dict(account["positions"])
-    position = dict(positions["510300"])
+    positions_value = account["positions"]
+    assert isinstance(positions_value, dict)
+    positions = dict(positions_value)
+    position_value = positions["510300"]
+    assert isinstance(position_value, dict)
+    position = dict(position_value)
     position["market_value"] = None
     positions["510300"] = position
     account["positions"] = positions

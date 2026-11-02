@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -182,7 +183,9 @@ def test_technical_provider_fails_closed_without_sufficient_history() -> None:
     )
 
     class QuantityResolver:
-        def quantity_for(self, symbol, analysis, history):
+        def quantity_for(
+            self, symbol: str, analysis: object, history: tuple[MinuteBar, ...]
+        ) -> int:
             pytest.fail("blocked technical candidates must not reach quantity sizing")
 
     provider = TechnicalAnalysisSignalProvider(quantity_for=QuantityResolver())

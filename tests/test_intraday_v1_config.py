@@ -120,8 +120,14 @@ def test_missing_configuration_is_reported_by_exact_field_path(tmp_path: Path) -
 
 def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -> None:
     document = _complete_config()
-    del document["fees"]["minimum_commission"]  # type: ignore[index]
-    del document["securities"]["510300"]["t_plus"]  # type: ignore[index]
+    fees = document["fees"]
+    securities = document["securities"]
+    assert isinstance(fees, dict)
+    assert isinstance(securities, dict)
+    security = securities["510300"]
+    assert isinstance(security, dict)
+    del fees["minimum_commission"]
+    del security["t_plus"]
 
     with pytest.raises(ValueError, match="fees.minimum_commission"):
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
