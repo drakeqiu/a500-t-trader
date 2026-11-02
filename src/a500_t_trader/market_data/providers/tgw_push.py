@@ -244,9 +244,9 @@ class TgwPushProvider:
         )
         item.security_code = code
         item.category_type = {
-            "snapshot": self._api.MDDatatype.kSnapshot,
-            "bar": self._api.MDDatatype.k1KLine,
-            "tick": self._api.MDDatatype.kTickExecution,
+            "snapshot": self._api.SubscribeDataType.kSnapshot,
+            "bar": self._api.SubscribeDataType.k1MinKline,
+            "tick": self._api.SubscribeDataType.kTickExecution,
         }[event_type]
         return item
 

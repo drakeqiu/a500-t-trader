@@ -19,12 +19,25 @@ class FakeTgw:
         kSZSE = 2
 
     class MDDatatype:
+        kSnapshot = 10014
+        k1KLine = 10000
+        kTickExecution = 10013
+
+    class SubscribeDataType:
         kSnapshot = 10
-        k1KLine = 11
-        kTickExecution = 12
+        k1MinKline = 1
+        kTickExecution = 23
 
     class SubscribeItem:
-        pass
+        @property
+        def category_type(self) -> int:
+            return self._category_type
+
+        @category_type.setter
+        def category_type(self, value: int) -> None:
+            if not 0 <= value <= 255:
+                raise OverflowError("category_type must fit uint8")
+            self._category_type = value
 
     def __init__(self) -> None:
         self.calls: list[tuple[object, ...]] = []
@@ -39,6 +52,18 @@ class FakeTgw:
 
     def Close(self) -> None:
         self.calls.append(("close",))
+
+
+def test_provider_uses_uint8_subscribe_datatypes() -> None:
+    api = FakeTgw()
+    provider = TgwPushProvider(api)
+
+    for event_type, expected in (("snapshot", 10), ("bar", 1), ("tick", 23)):
+        subscription = provider.subscribe("563360", event_type)
+        assert api.calls[-1][1].category_type == expected
+        subscription.close()
+
+    provider.close()
 
 
 def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
