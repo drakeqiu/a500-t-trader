@@ -55,6 +55,7 @@ class CertificationResult:
     certified: bool
     fingerprint: str | None
     blockers: tuple[str, ...]
+    report: dict[str, object]
     disclaimer: str = "Historical certification is not a guarantee of future profitability."
 
 
@@ -81,11 +82,27 @@ def certify_intraday_backtest(
                 or any(char not in "0123456789abcdefABCDEF" for char in digest)
             ):
                 blockers.append(f"binding.{name} must be a SHA-256 digest")
+        if not isinstance(binding.get("parameters"), Mapping):
+            blockers.append("binding.parameters must be an object")
+        if not isinstance(binding.get("cost_model"), Mapping):
+            blockers.append("binding.cost_model must be an object")
     if thresholds is not None:
         _evaluate(evidence, thresholds, blockers)
-    if blockers:
-        return CertificationResult(False, None, tuple(dict.fromkeys(blockers)))
-    return CertificationResult(True, _fingerprint(binding, config), ())
+    blockers = list(dict.fromkeys(blockers))
+    fingerprint = None
+    if not blockers:
+        try:
+            fingerprint = _fingerprint(binding, config)
+        except (TypeError, ValueError):
+            blockers.append("binding and certification configuration must be JSON serializable")
+    certified = not blockers
+    if not certified:
+        fingerprint = None
+    report = _report(
+        evidence, thresholds, binding, config, fingerprint, certified, blockers
+    )
+    return CertificationResult(certified, fingerprint, tuple(blockers), report)
+
 
 def certification_is_current(
     result: CertificationResult,
@@ -97,9 +114,13 @@ def certification_is_current(
         return False
     blockers: list[str] = []
     _thresholds(config, blockers)
-    if blockers or not binding:
+    if blockers or not isinstance(binding, Mapping):
         return False
-    return result.fingerprint == _fingerprint(binding, config)
+    try:
+        return result.fingerprint == _fingerprint(binding, config)
+    except (TypeError, ValueError):
+        return False
+
 
 
 def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, object] | None:
@@ -167,6 +188,15 @@ def _thresholds(config: Mapping[str, object], blockers: list[str]) -> dict[str, 
     for name in ("in_sample_profit_factor_minimum", "out_of_sample_profit_factor_minimum"):
         if name in values and values[name] < Decimal(1):
             blockers.append(f"{name} must be at least 1")
+    for name in (
+        "net_return_minimum",
+        "paired_trade_average_net_profit_minimum",
+        "maximum_drawdown",
+    ):
+        if name in values and values[name] < 0:
+            blockers.append(f"{name} cannot be negative")
+    if "maximum_drawdown" in values and values["maximum_drawdown"] > 1:
+        blockers.append("maximum_drawdown must be a fraction no greater than 1")
     if any(key.startswith("walk_forward.") for key in blockers):
         values.pop("walk_forward", None)
     return None if blockers else values
@@ -271,5 +301,78 @@ def _evaluate(evidence: CertificationEvidence, thresholds: dict[str, object], bl
 
 def _fingerprint(binding: Mapping[str, object], config: Mapping[str, object]) -> str:
     payload = {"binding": binding, "certification_config": config}
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    canonical = json.dumps(
+        _canonical_value(payload),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _canonical_value(value: object) -> object:
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("non-finite decimal input")
+        return str(value)
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("fingerprint mapping keys must be strings")
+        return {key: _canonical_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_canonical_value(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise TypeError(f"unsupported fingerprint input: {type(value).__name__}")
+
+def _report(
+    evidence: CertificationEvidence,
+    thresholds: dict[str, object] | None,
+    binding: Mapping[str, object],
+    config: Mapping[str, object],
+    fingerprint: str | None,
+    certified: bool,
+    blockers: list[str],
+) -> dict[str, object]:
+    def value(item: object) -> object:
+        if isinstance(item, Decimal):
+            return str(item)
+        if isinstance(item, Mapping):
+            return {str(key): value(element) for key, element in item.items()}
+        if isinstance(item, (tuple, list)):
+            return [value(element) for element in item]
+        return item
+
+    profits = evidence.paired_trade_net_profits
+    metrics = {
+        "net_return": evidence.net_return,
+        "paired_trade_net_profits": profits,
+        "paired_trade_average_net_profit": (
+            sum(profits, Decimal(0)) / len(profits) if profits else None
+        ),
+        "profit_factor": evidence.profit_factor,
+        "in_sample_profit_factor": evidence.in_sample_profit_factor,
+        "out_of_sample_profit_factor": evidence.out_of_sample_profit_factor,
+        "maximum_drawdown": evidence.maximum_drawdown,
+        "sample_count": evidence.sample_count,
+        "stressed_net_return": evidence.stressed_net_return,
+        "stressed_profit_factor": evidence.stressed_profit_factor,
+        "stressed_cost_slippage_multiplier": evidence.stressed_cost_slippage_multiplier,
+        "neighbor_net_returns": evidence.neighbor_net_returns,
+        "neighbor_profit_factors": evidence.neighbor_profit_factors,
+        "walk_forward_net_returns": evidence.walk_forward_net_returns,
+        "walk_forward_profit_factors": evidence.walk_forward_profit_factors,
+    }
+    return {
+        "certified": certified,
+        "binding_fingerprint": fingerprint,
+        "binding": value(binding) if isinstance(binding, Mapping) else {},
+        "certification_config": value(config) if isinstance(config, Mapping) else {},
+        "thresholds": {} if thresholds is None else {
+            key: value(item) for key, item in thresholds.items()
+        },
+        "metrics": {key: value(item) for key, item in metrics.items()},
+        "blockers": blockers.copy(),
+        "disclaimer": "Historical certification is not a guarantee of future profitability.",
+    }

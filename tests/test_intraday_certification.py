@@ -83,6 +83,37 @@ def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> 
     ) is False
 
 
+
+def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() -> None:
+    result = certify_intraday_backtest(passing_evidence(), binding(), config())
+    assert result.report["metrics"]["net_return"] == "0.05"
+    assert result.report["metrics"]["paired_trade_average_net_profit"] == "2.5"
+    assert result.report["thresholds"]["minimum_sample_count"] == 20
+    assert result.report["binding_fingerprint"] == result.fingerprint
+    assert result.report["certified"] is True
+    assert "not a guarantee of future profitability" in result.report["disclaimer"]
+
+
+def test_invalid_risk_budget_or_parameter_neighbor_configuration_fails_closed() -> None:
+    for invalid in (
+        config() | {"maximum_drawdown": "-0.1"},
+        config() | {"neighbor_parameter_perturbation": {"grid.width": "-0.001"}},
+        config() | {"net_return_minimum": "-1"},
+    ):
+        result = certify_intraday_backtest(passing_evidence(), binding(), invalid)
+        assert result.certified is False
+        assert result.fingerprint is None
+
+
+def test_binding_must_be_complete_and_canonicalizable() -> None:
+    for invalid in (
+        binding() | {"cost_model": {}},
+        binding() | {"parameters": []},
+    ):
+        result = certify_intraday_backtest(passing_evidence(), invalid, config())
+        assert result.certified is False
+        assert result.fingerprint is None
+
 def test_incomplete_certification_configuration_never_certifies() -> None:
     incomplete = config() | {"walk_forward": {"splits": 3}}
     result = certify_intraday_backtest(passing_evidence(), binding(), incomplete)
