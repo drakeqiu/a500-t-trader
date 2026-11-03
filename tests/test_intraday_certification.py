@@ -17,8 +17,12 @@ def binding() -> dict[str, object]:
         "implementation_version": "commit:abc123",
         "data_snapshot_sha256": "b" * 64,
         "cost_model": {"commission": "0.0003", "slippage_bps": "2"},
-        "execution_assumptions": {"fill_model": "next-bar-open", "account": "full-ledger"},
+        "execution_assumptions": {
+            "fill_model": "next-bar-open",
+            "account": "full-ledger",
+        },
     }
+
 def config() -> dict[str, object]:
     return {
         "net_return_minimum": "0.01",

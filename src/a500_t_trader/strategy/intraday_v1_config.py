@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
-
 CONFIG_SCHEMA_VERSION = "2.0"
 STRATEGY_ID = "intraday-etf-t-v1-rsi"
 RULE_SOURCE = (

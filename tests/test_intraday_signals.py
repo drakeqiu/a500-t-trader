@@ -1,15 +1,14 @@
 import json
-from pathlib import Path
-
-from _pytest.capture import CaptureFixture
-from a500_t_trader.cli.main import main
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from _pytest.capture import CaptureFixture
 
 from a500_t_trader.backtest.intraday_signals import replay_fixed_quantity_signals
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import MinuteBar
 
 
