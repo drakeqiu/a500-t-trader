@@ -31,23 +31,30 @@ IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
 
 
 def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
-    """Return the trailing 20 fully observed session amounts, or None if unavailable."""
-    daily: dict[object, Decimal] = {}
-    complete: set[object] = set()
-    invalid: set[object] = set()
+    """Return the trailing 20 complete 48-bar session amounts, if all are valid."""
+    daily: dict[object, list[MinuteBar]] = {}
     for bar in bars:
         day = bar.timestamp.astimezone(SHANGHAI).date()
-        if bar.amount is None:
-            invalid.add(day)
+        daily.setdefault(day, []).append(bar)
+    sessions: list[tuple[object, Decimal]] = []
+    for day, session in daily.items():
+        local_times = {
+            bar.timestamp.astimezone(SHANGHAI).time() for bar in session
+        }
+        if (
+            len(session) != 48
+            or len(local_times) != 48
+            or max(local_times) != time(14, 55)
+            or any(bar.amount is None for bar in session)
+        ):
             continue
-        daily[day] = daily.get(day, Decimal(0)) + bar.amount
-        if bar.timestamp.astimezone(SHANGHAI).time() >= time(14, 55):
-            complete.add(day)
-    sessions = sorted(complete - invalid)
+        sessions.append(
+            (day, sum((bar.amount for bar in session), Decimal(0)))
+        )
+    sessions.sort(key=lambda item: item[0])
     if len(sessions) < 20:
         return None
-    trailing = sessions[-20:]
-    return sum((daily[day] for day in trailing), Decimal(0)) / 20
+    return sum((amount for _, amount in sessions[-20:]), Decimal(0)) / 20
 
 
 class _SequentialV1Signals:
@@ -68,16 +75,35 @@ class _SequentialV1Signals:
         self._daily_start_nav: Decimal | None = None
         self._day = pre_start[-1].timestamp.astimezone(SHANGHAI).date() if pre_start else None
         self._day_amount = Decimal(0)
-        daily_amounts: dict[object, Decimal] = {}
+        daily_bars: dict[object, list[MinuteBar]] = {}
         for prior in pre_start:
-            if prior.amount is not None:
-                day = prior.timestamp.astimezone(SHANGHAI).date()
-                daily_amounts[day] = daily_amounts.get(day, Decimal(0)) + prior.amount
+            day = prior.timestamp.astimezone(SHANGHAI).date()
+            daily_bars.setdefault(day, []).append(prior)
+        self._completed_daily_amounts = []
+        for day, session in sorted(daily_bars.items()):
+            if day == self._day:
+                continue
+            local_times = {
+                bar.timestamp.astimezone(SHANGHAI).time() for bar in session
+            }
+            if (
+                len(session) == 48
+                and len(local_times) == 48
+                and max(local_times) == time(14, 55)
+                and all(bar.amount is not None for bar in session)
+            ):
+                self._completed_daily_amounts.append(
+                    sum((bar.amount for bar in session), Decimal(0))
+                )
         if self._day is not None:
-            self._day_amount = daily_amounts.pop(self._day, Decimal(0))
-        self._completed_daily_amounts = [
-            daily_amounts[day] for day in sorted(daily_amounts)
-        ]
+            self._day_amount = sum(
+                (
+                    bar.amount
+                    for bar in daily_bars[self._day]
+                    if bar.amount is not None
+                ),
+                Decimal(0),
+            )
         self._last_close: Decimal | None = None
         self._opposite_anchor_closes = 0
         self._anchor_side: int | None = None
@@ -686,9 +712,7 @@ def run_issue85_sequential_replay(bars: tuple[MinuteBar, ...]) -> dict[str, obje
             "limitations": [
                 "no source for independent intraday halt flags (historical provider status accepted per user)",
                 "no independent spread/depth feed; 2% OHLCV participation is a proxy",
-                "the public API requires an upstream forced-risk-exit decision; no documented trigger is inferred",
-                "take-profit is not emitted because the simulator ledger models sell-then-buyback pairs only",
-                "grid-level use/cooling cannot be reconstructed from the current simulator state and is not claimed",
+                "cost and ±10% parameter stress replay is not implemented",
                 "one daily limit-field observation is invalid; no company-action or real-fill evidence",
             ],
         },

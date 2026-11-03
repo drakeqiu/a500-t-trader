@@ -117,10 +117,21 @@ def _bar(timestamp: datetime, price: int, volume: int) -> MinuteBar:
 
 
 def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
-    bars = tuple(
-        _bar(datetime(2024, 10, 1 + index, 15, 0), 5, 1) for index in range(19)
-    )
+    def session(day: int) -> tuple[MinuteBar, ...]:
+        start = datetime(2024, 10, day, 9, 30)
+        morning = tuple(
+            _bar(start + timedelta(minutes=5 * index), 5, 1)
+            for index in range(24)
+        )
+        afternoon_start = datetime(2024, 10, day, 13, 0)
+        afternoon = tuple(
+            _bar(afternoon_start + timedelta(minutes=5 * index), 5, 1)
+            for index in range(24)
+        )
+        return (*morning, *afternoon)
 
+    bars = tuple(bar for day in range(1, 20) for bar in session(day))
     assert _average_daily_amount(bars) is None
-    completed = (*bars, _bar(datetime(2024, 10, 20, 15, 0), 5, 1))
-    assert _average_daily_amount(completed) == Decimal("5")
+    completed = (*bars, *session(20))
+    assert _average_daily_amount(completed) == Decimal("240")
+    assert _average_daily_amount(completed[:-1]) is None
