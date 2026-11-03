@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, time
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -12,6 +12,7 @@ from ..market_data import SHANGHAI, MinuteBar
 from ..strategy.intraday_technical import TECHNICAL_PARAMETER_HASH
 from ..strategy.intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID
 from ..strategy.premarket import AccountSnapshot
+from .session_amount import complete_session_amount
 from .intraday import (
     IntradayBacktestParams,
     TechnicalAnalysisSignalProvider,
@@ -35,26 +36,13 @@ def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
         daily.setdefault(day, []).append(bar)
     sessions: list[tuple[object, Decimal]] = []
     for day, session in daily.items():
-        local_times = {
-            bar.timestamp.astimezone(SHANGHAI).time() for bar in session
-        }
-        if (
-            len(session) != 48
-            or len(local_times) != 48
-            or max(local_times) != time(14, 55)
-            or any(bar.amount is None for bar in session)
-        ):
-            continue
-        sessions.append(
-            (day, sum((bar.amount for bar in session), Decimal(0)))
-        )
+        amount = complete_session_amount(session)
+        if amount is not None:
+            sessions.append((day, amount))
     sessions.sort(key=lambda item: item[0])
     if len(sessions) < 20:
         return None
     return sum((amount for _, amount in sessions[-20:]), Decimal(0)) / 20
-
-
-
 
 
 class _OneBoardLot:

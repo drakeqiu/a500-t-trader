@@ -19,6 +19,7 @@ from .issue83_comparison import (
     START,
     SYMBOL,
 )
+from .session_amount import complete_session_amount
 
 ZERO_SLIPPAGE_ASSUMPTION = {
     "bps_per_side": "0",
@@ -94,18 +95,9 @@ class _SequentialV1Signals:
         for day, session in sorted(daily_bars.items()):
             if day == self._day:
                 continue
-            local_times = {
-                bar.timestamp.astimezone(SHANGHAI).time() for bar in session
-            }
-            if (
-                len(session) == 48
-                and len(local_times) == 48
-                and max(local_times) == time(14, 55)
-                and all(bar.amount is not None for bar in session)
-            ):
-                self._completed_daily_amounts.append(
-                    sum((bar.amount for bar in session), Decimal(0))
-                )
+            amount = complete_session_amount(session)
+            if amount is not None:
+                self._completed_daily_amounts.append(amount)
         if self._day is not None:
             self._day_amount = sum(
                 (
