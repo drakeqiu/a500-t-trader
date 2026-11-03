@@ -222,14 +222,7 @@ class _SequentialV1Signals:
         history = tuple((*self._history, bar)[-181:])
         current_index = int(account_state["bar_index"])
         tick = Decimal("0.001")
-        cost_quantity = 100
-        cost_rate = _round_trip_cost_rate(
-            price,
-            cost_quantity,
-            fee_rate=self._fee_rate,
-            minimum_commission=self._minimum_commission,
-            single_side_impact=self._impact_rate,
-        )
+        cost_rate = Decimal(0)
         pending = bool(account_state["pending_orders"])
         open_pairs = [
             pair
@@ -285,20 +278,12 @@ class _SequentialV1Signals:
             grid_step = analysis.grid_step or Decimal(0)
             atr_value = analysis.indicators.get("atr_14")
             atr_value = atr_value if isinstance(atr_value, Decimal) else Decimal(0)
-            quantity = 100
-            if candidate in {"BUY", "BUYBACK"}:
+            quantity = 0
+            if candidate in {"BUY", "BUYBACK"} and not pending:
                 quantity = self._ordinary_quantity(nav, price, atr_value, grid_step)
                 if candidate == "BUYBACK" and open_pairs:
                     pair = open_pairs[0]
-                    pending_pair = sum(
-                        int(order["quantity"])
-                        for order in account_state["pending_orders"]
-                        if order["intent"] == "buyback"
-                        and order["pair_id"] == pair["pair_id"]
-                    )
-                    pair_limit = max(
-                        0, int(pair["remaining_quantity"]) - pending_pair
-                    )
+                    pair_limit = int(pair["remaining_quantity"])
                     if analysis.trend == "BEAR":
                         pair_limit = min(pair_limit, int(pair["sell_quantity"]) // 4)
                     quantity = min(quantity, pair_limit)
@@ -307,8 +292,24 @@ class _SequentialV1Signals:
                     cash_per_share = price * (
                         Decimal(1) + self._fee_rate + self._impact_rate
                     ) + self._minimum_commission / Decimal(100)
-                    cash_limit = int((free_cash / cash_per_share) // 100) * 100
-                    quantity = min(quantity, cash_limit)
+                    quantity = min(
+                        quantity,
+                        int((free_cash / cash_per_share) // 100) * 100,
+                    )
+                    if (
+                        int(account_state["daily_addition_count"]) >= 3
+                        or int(account_state["remaining_daily_additions"]) <= 0
+                    ):
+                        quantity = 0
+                elif candidate == "BUYBACK":
+                    free_cash = Decimal(str(account_state["free_cash"]))
+                    cash_per_share = price * (
+                        Decimal(1) + self._fee_rate + self._impact_rate
+                    ) + self._minimum_commission / Decimal(100)
+                    quantity = min(
+                        quantity,
+                        int((free_cash / cash_per_share) // 100) * 100,
+                    )
                 quantity = min(
                     quantity,
                     int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
@@ -317,16 +318,13 @@ class _SequentialV1Signals:
                 )
                 if int(account_state["remaining_daily_fills"]) <= 0:
                     quantity = 0
-            elif candidate in {"SELL", "TAKE_PROFIT"}:
+            elif candidate == "SELL" and not pending:
                 holdings = int(account_state["holdings"])
                 sellable = int(account_state["sellable"])
                 floor = int((nav * Decimal("0.30") / price) // 100) * 100
-                permitted = max(0, min(sellable, holdings - floor))
-                if candidate == "TAKE_PROFIT" and active_lots:
-                    permitted = min(permitted, int(active_lots[0]["quantity"]))
                 quantity = min(
+                    max(0, min(sellable, holdings - floor)),
                     self._ordinary_quantity(nav, price, atr_value, grid_step),
-                    permitted,
                     int(
                         Decimal(str(account_state["remaining_daily_sell_notional"]))
                         / price
@@ -334,17 +332,30 @@ class _SequentialV1Signals:
                     // 100
                     * 100,
                 )
-            quantity = quantity // 100 * 100
-            if quantity < 100:
-                quantity = 100
-            next_rate = _round_trip_cost_rate(
-                price,
-                quantity,
-                fee_rate=self._fee_rate,
-                minimum_commission=self._minimum_commission,
-                single_side_impact=self._impact_rate,
+                if int(account_state["remaining_daily_fills"]) <= 0:
+                    quantity = 0
+            elif candidate == "TAKE_PROFIT" and active_lots and not pending:
+                quantity = min(
+                    int(active_lots[0]["quantity"]),
+                    int(account_state["sellable"]),
+                    int(
+                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        / price
+                    ),
+                )
+            next_rate = max(
+                conservative_rate,
+                _round_trip_cost_rate(
+                    price,
+                    quantity,
+                    fee_rate=self._fee_rate,
+                    minimum_commission=self._minimum_commission,
+                    single_side_impact=self._impact_rate,
+                )
+                if quantity >= 100
+                else Decimal(0),
             )
-            conservative_rate = max(conservative_rate, next_rate)
+            conservative_rate = next_rate
             if candidate == previous_candidate and quantity == previous_quantity:
                 cost_rate = next_rate
                 converged = True
