@@ -13,10 +13,11 @@ from a500_t_trader.backtest.intraday import (
 )
 from a500_t_trader.backtest.issue83_comparison import (
     _average_daily_amount,
+    _max_drawdown,
     _round_trip_cost_rate,
     run_issue83_comparison,
+    run_issue85_sequential_replay,
 )
-from a500_t_trader.backtest.issue83_comparison import run_issue85_sequential_replay
 from a500_t_trader.cli.intraday import _load_completed_bars
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
@@ -27,6 +28,16 @@ def test_quantity_based_round_trip_cost_uses_order_notional() -> None:
     # shares incur proportional ¥2.50 fees each side plus 0.04% impact.
     assert _round_trip_cost_rate(Decimal("5"), 100) == Decimal("0.0008")
     assert _round_trip_cost_rate(Decimal("5"), 10000) == Decimal("0.0005")
+
+
+def test_max_drawdown_handles_empty_and_nonempty_histories() -> None:
+    assert _max_drawdown(()) == Decimal(0)
+    states = (
+        {"nav_at_close": "110"},
+        {"nav_at_close": "99"},
+        {"nav_at_close": "105"},
+    )
+    assert _max_drawdown(states, initial_cash=Decimal("100")) == Decimal("0.1")
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -161,11 +172,19 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     bars = _load_completed_bars(str(fixture))
     result = run_issue85_sequential_replay(bars, run_stress_tests=False)
     small_cash_result = run_issue85_sequential_replay(
-        bars, run_stress_tests=False, initial_cash=Decimal("1000")
+        bars, run_stress_tests=False, initial_cash=Decimal("10000")
     )
 
     assert result["decision_bar_count"] == 23_580
     assert small_cash_result["decision_bar_count"] == 23_580
+    assert result["initial_cash"] == "500000"
+    assert small_cash_result["initial_cash"] == "10000"
+    for replay in (result, small_cash_result):
+        initial_cash = Decimal(str(replay["initial_cash"]))
+        final_nav = Decimal(str(replay["final_nav"]))
+        net_pnl = Decimal(str(replay["net_pnl"]))
+        assert net_pnl == final_nav - initial_cash
+        assert Decimal(str(replay["return"])) == net_pnl / initial_cash
     crossover_notional = Decimal("0.1") / Decimal("0.00005")
 
     def eligible_buy_examples(replay: dict[str, object]) -> list[dict[str, object]]:

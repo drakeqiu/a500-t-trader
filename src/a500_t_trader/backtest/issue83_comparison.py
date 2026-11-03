@@ -1067,6 +1067,7 @@ def _max_drawdown(
     states: tuple[dict[str, object], ...], initial_cash: Decimal = Decimal("500000")
 ) -> Decimal:
     peak = initial_cash
+    maximum = Decimal(0)
     for state in states:
         nav = Decimal(str(state["nav_at_close"]))
         peak = max(peak, nav)
