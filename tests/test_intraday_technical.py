@@ -430,3 +430,76 @@ def test_configured_signal_threshold_changes_candidate(
     )["510300"]
 
     assert analysis.candidate == "BUY"
+def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
+    bars = list(_bars(count=16))
+    closes = [Decimal("100")]
+    closes.extend(
+        closes[-1] + Decimal(1 if index % 2 == 0 else -1) for index in range(14)
+    )
+    closes.append(closes[-1] + Decimal(2))
+    offset = len(bars) - len(closes)
+    for index, close in enumerate(closes, start=offset):
+        bars[index] = replace(
+            bars[index],
+            open=close,
+            high=close + Decimal("0.01"),
+            low=close - Decimal("0.01"),
+            close=close,
+            amount=close * bars[index].volume,
+        )
+
+    analysis = analyze_intraday_technical({"510300": tuple(bars)})["510300"]
+
+    expected = Decimal(100) * Decimal("8.5") / Decimal(15)
+    assert abs(analysis.indicators["rsi_14"] - expected) < Decimal("0.0001")
+    assert analysis.indicators["rsi_14_previous"] == Decimal(50)
+    seeded = analyze_intraday_technical({"510300": tuple(bars[:-1])})["510300"]
+    assert seeded.indicators["rsi_14"] == Decimal(50)
+    assert seeded.indicators["rsi_14_previous"] is None
+
+
+def test_rsi_scoring_weight_and_missing_warmup_are_preserved() -> None:
+    short = analyze_intraday_technical({"510300": _bars(count=14)})["510300"]
+    weights = TECHNICAL_PARAMETERS["scores"]["weights"]
+
+    assert weights == {
+        "ema": 20,
+        "bollinger": 20,
+        "kdj": 8,
+        "rsi": 7,
+        "vwap": 25,
+        "atr_grid": 20,
+    }
+    assert sum(weights.values()) == 100
+    assert short.indicators["rsi_14"] is None
+    assert short.indicators["rsi_14_previous"] is None
+    assert short.score_breakdown is None
+
+
+def test_rsi_buy_and_sell_buckets_are_reported_in_public_analysis() -> None:
+    def scored_rsi(
+        seed_gains: int, seed_losses: int, final_change: Decimal
+    ) -> dict[str, float]:
+        changes = [Decimal(1)] * seed_gains + [Decimal(-1)] * seed_losses
+        closes = [Decimal(100)]
+        for change in [changes[index % len(changes)] for index in range(178)]:
+            closes.append(closes[-1] + change)
+        closes.append(closes[-1] + final_change)
+        bars = list(_bars())
+        for index, close in enumerate(closes):
+            bars[index] = replace(
+                bars[index],
+                open=close,
+                high=close + Decimal("0.01"),
+                low=close - Decimal("0.01"),
+                close=close,
+                amount=close * bars[index].volume,
+            )
+        analysis = analyze_intraday_technical({"510300": tuple(bars)})["510300"]
+        assert analysis.score_breakdown is not None
+        return analysis.score_breakdown
+
+    assert scored_rsi(4, 10, Decimal(1))["rsi_buy"] == 7
+    assert scored_rsi(6, 8, Decimal("0.1"))["rsi_buy"] == 4
+    assert scored_rsi(10, 4, Decimal(-3))["rsi_sell"] == 7
+    assert scored_rsi(8, 6, Decimal("-0.1"))["rsi_sell"] == 4
