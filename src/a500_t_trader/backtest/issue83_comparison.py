@@ -10,8 +10,8 @@ from typing import Any
 
 from ..market_data import SHANGHAI, MinuteBar
 from ..strategy.intraday_technical import (
+    TECHNICAL_PARAMETERS,
     TECHNICAL_PARAMETER_HASH,
-    IntradayTechnicalAnalysis,
 )
 from ..strategy.intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID
 from ..strategy.premarket import AccountSnapshot
@@ -64,7 +64,11 @@ class _SequentialV1Signals:
         self,
         warmup: tuple[MinuteBar, ...],
         pre_start: tuple[MinuteBar, ...],
+        threshold_overrides: dict[str, int] | None = None,
+        fee_multiplier: Decimal = Decimal(1),
     ) -> None:
+        self._threshold_overrides = threshold_overrides
+        self._fee_multiplier = fee_multiplier
         self._history = list(warmup[-180:])
         self._grid_date = None
         self._used_levels: set[str] = set()
@@ -208,7 +212,7 @@ class _SequentialV1Signals:
         history = tuple((*self._history, bar)[-181:])
         current_index = int(account_state["bar_index"])
         tick = Decimal("0.001")
-        cost_rate = self._round_trip_cost_rate(nav, price)
+        cost_rate = self._round_trip_cost_rate(nav, price) * self._fee_multiplier
         pending = bool(account_state["pending_orders"])
         paired_state: dict[str, object] = {}
         open_pairs = [
@@ -249,6 +253,7 @@ class _SequentialV1Signals:
             grid_context={symbol: grid_context},
             paired_state={symbol: paired_state} if paired_state else {},
             as_of=bar.timestamp,
+            score_thresholds=self._threshold_overrides,
         )[symbol]
         analysis = _filter_rsi_momentum(analysis)
         self._history.append(bar)
@@ -665,8 +670,13 @@ def _score_weight_hash(weights: dict[str, int]) -> str:
         f"{TECHNICAL_PARAMETER_HASH}:{canonical_weights}".encode()
     ).hexdigest()
 
-def run_issue85_sequential_replay(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
-    """Run the V1 analyzer sequentially through the dynamic account simulator."""
+def _run_issue85_sequential_replay(
+    bars: tuple[MinuteBar, ...],
+    *,
+    score_thresholds: dict[str, int] | None = None,
+    cost_multiplier: Decimal = Decimal(1),
+) -> dict[str, object]:
+    """Run full V1 replay with optional pre-registered stress parameters."""
     from .intraday import run_intraday_backtest
 
     ordered = tuple(
@@ -694,13 +704,18 @@ def run_issue85_sequential_replay(bars: tuple[MinuteBar, ...]) -> dict[str, obje
         symbol=SYMBOL,
         account=account,
         bars=decisions,
-        signals=_SequentialV1Signals(warmup, pre_start),
+        signals=_SequentialV1Signals(
+            warmup,
+            pre_start,
+            threshold_overrides=score_thresholds,
+            fee_multiplier=cost_multiplier,
+        ),
         params=IntradayBacktestParams(
             participation_rate=Decimal("0.02"),
-            fee_bps=Decimal("0.5"),
-            slippage_bps=Decimal(0),
+            fee_bps=Decimal("0.5") * cost_multiplier,
+            slippage_bps=Decimal(0) * cost_multiplier,
             order_lifetime_bars=1,
-            minimum_commission=Decimal("0.1"),
+            minimum_commission=Decimal("0.1") * cost_multiplier,
             dynamic_sizing=True,
         ),
         strategy_parameters={
@@ -712,7 +727,7 @@ def run_issue85_sequential_replay(bars: tuple[MinuteBar, ...]) -> dict[str, obje
             "limitations": [
                 "no source for independent intraday halt flags (historical provider status accepted per user)",
                 "no independent spread/depth feed; 2% OHLCV participation is a proxy",
-                "cost and ±10% parameter stress replay is not implemented",
+                "baseline slippage is zero; 1.5x cost replay scales fees but has no observed impact estimate",
                 "one daily limit-field observation is invalid; no company-action or real-fill evidence",
             ],
         },
@@ -794,11 +809,61 @@ def run_issue85_sequential_replay(bars: tuple[MinuteBar, ...]) -> dict[str, obje
         "losing_pair_count": sum(Decimal(str(pair["realized_net_pnl"])) < 0 for pair in closed),
         "split_70_30": split,
         "five_chronological_windows": windows,
-        "profit_factor": str(gross_profit / gross_loss) if gross_loss else None,
+        "walk_forward": {
+            "assessed": False,
+            "passed": False,
+            "eligible_closed_pairs": len(closed),
+            "reason": (
+                "zero eligible closed pairs; expanding-window test PF cannot be estimated"
+                if not closed
+                else "expanding-window replay not implemented"
+            ),
+        },
         "open_pair_count": sum(pair["status"] == "open" for pair in pairs),
         "cancelled_order_count": len(result.cancellations),
         "limitations": result.strategy_parameters["limitations"],
     }
+
+def run_issue85_sequential_replay(
+    bars: tuple[MinuteBar, ...],
+) -> dict[str, object]:
+    """Run baseline plus full-data cost and one-at-a-time threshold stresses."""
+    baseline = _run_issue85_sequential_replay(bars)
+    cost = _run_issue85_sequential_replay(bars, cost_multiplier=Decimal("1.5"))
+    score_parameters = TECHNICAL_PARAMETERS["scores"]
+    assert isinstance(score_parameters, dict)
+    threshold_stresses: dict[str, object] = {}
+    for name in ("buy", "sell", "take_profit", "buyback", "direction_delta"):
+        original = int(score_parameters[name])
+        for direction, factor in (("minus_10_percent", 0.9), ("plus_10_percent", 1.1)):
+            value = int(original * factor + 0.5)
+            stress = _run_issue85_sequential_replay(
+                bars, score_thresholds={name: value}
+            )
+            threshold_stresses[f"{name}_{direction}"] = {
+                "threshold": value,
+                "net_pnl": stress["net_pnl"],
+                "profit_factor": stress["profit_factor"],
+                "closed_pairs": stress["closed_pairs"],
+                "passed": Decimal(str(stress["net_pnl"])) > 0
+                and stress["profit_factor"] is not None
+                and Decimal(str(stress["profit_factor"])) > 1,
+            }
+    baseline["stress_tests"] = {
+        "cost_1_5x": {
+            "net_pnl": cost["net_pnl"],
+            "profit_factor": cost["profit_factor"],
+            "closed_pairs": cost["closed_pairs"],
+            "fees_scaled": True,
+            "slippage_bps_baseline": 0,
+            "slippage_scaled": True,
+            "passed": Decimal(str(cost["net_pnl"])) > 0
+            and cost["profit_factor"] is not None
+            and Decimal(str(cost["profit_factor"])) > 1,
+        },
+        "individual_score_thresholds_plus_minus_10_percent": threshold_stresses,
+    }
+    return baseline
 
 
 def _max_drawdown(states: tuple[dict[str, object], ...]) -> Decimal:
