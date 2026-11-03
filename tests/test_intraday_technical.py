@@ -446,6 +446,30 @@ def test_configured_signal_threshold_changes_candidate(
         score_thresholds={"buy": 60},
     )["510300"]
     assert stressed.candidate == "BUY"
+    baseline = analyze_intraday_technical(
+        {"510300": _bars()},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+        as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
+    )["510300"]
+    repeated = analyze_intraday_technical(
+        {"510300": _bars()},
+        grid_context={
+            "510300": {
+                "tick_size": Decimal("0.001"),
+                "round_trip_cost_rate": Decimal("0.0001"),
+            }
+        },
+        as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
+        score_thresholds={"buy": 60},
+    )["510300"]
+    assert baseline.parameter_hash == TECHNICAL_PARAMETER_HASH
+    assert stressed.parameter_hash != baseline.parameter_hash
+    assert repeated.parameter_hash == stressed.parameter_hash
 
 
 def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:

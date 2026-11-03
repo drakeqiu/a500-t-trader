@@ -128,6 +128,13 @@ def analyze_intraday_technical(
                 scores[name] = value
         parameters["scores"] = scores
     parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
+    if score_thresholds is not None:
+        canonical_parameters = json.dumps(
+            parameters, sort_keys=True, separators=(",", ":")
+        )
+        parameter_hash = hashlib.sha256(
+            f"{parameter_hash}:{canonical_parameters}".encode()
+        ).hexdigest()
     weights = score_weights
     if weights is None:
         score_section = parameters.get("scores")
