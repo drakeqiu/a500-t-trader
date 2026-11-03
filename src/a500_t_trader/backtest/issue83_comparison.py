@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from decimal import Decimal
 
-from ..market_data import MinuteBar, SHANGHAI
+from ..market_data import SHANGHAI, MinuteBar
 from ..strategy.intraday_technical import (
     RULE_SOURCE_SHA256,
     STRATEGY_ID,
@@ -232,7 +232,10 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         },
         "groups": groups,
         "certification_gates_remaining": [
-            "This is an exploratory historical replay, not certified strategy evidence.",
+            (
+                "This is an exploratory historical replay, not certified strategy "
+                "evidence."
+            ),
             "The fixed one-lot signal quantity is not the V1 account-state sizing, "
             "position cap, or protected-floor policy.",
             "Historical fill assumptions do not establish broker/exchange execution "
