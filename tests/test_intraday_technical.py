@@ -146,6 +146,8 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
     assert analysis.parameter_version == "intraday-etf-t-v1-rsi"
     assert analysis.parameter_hash == config.fingerprint
 
+    assert analysis.scores is not None
+
 
 def test_grid_anchor_uses_session_context_and_retains_step_between_rechecks() -> None:
     bars = tuple(

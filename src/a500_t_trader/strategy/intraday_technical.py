@@ -121,12 +121,10 @@ def analyze_intraday_technical(
     if weights is None:
         score_section = parameters.get("scores")
         weights = (
-            score_section.get("weights")
+            score_section.get("weights", {"kdj": 8, "rsi": 7})
             if isinstance(score_section, Mapping)
-            else None
+            else {"kdj": 8, "rsi": 7}
         )
-    if not isinstance(weights, Mapping):
-        raise ValueError("configured score weights are unavailable")
     if score_weights is not None:
         canonical_weights = json.dumps(
             dict(sorted(score_weights.items())), sort_keys=True, separators=(",", ":")

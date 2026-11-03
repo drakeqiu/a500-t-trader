@@ -9,6 +9,7 @@ from a500_t_trader.backtest.intraday import (
 )
 from a500_t_trader.backtest.issue83_comparison import run_issue83_comparison
 from a500_t_trader.market_data import MinuteBar
+from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
 from a500_t_trader.strategy.premarket import AccountSnapshot
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -37,6 +38,7 @@ def test_comparison_groups_use_distinct_source_score_weights():
         <= groups["kdj8_rsi7"]["signal_count"]
     )
     assert result["execution"]["participation_rate"] == "0.02"
+    assert result["rule_source_sha256"] == RULE_SOURCE_SHA256
 
 
 def test_account_simulation_tracks_lot_cash_position_and_minimum_fee():

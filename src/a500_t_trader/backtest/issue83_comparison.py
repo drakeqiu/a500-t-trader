@@ -6,7 +6,6 @@ import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 from ..market_data import MinuteBar, SHANGHAI
 from ..strategy.intraday_technical import (
@@ -51,7 +50,12 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         raise ValueError("market history is empty")
     if any(bar.symbol != SYMBOL for bar in bars):
         raise ValueError(f"market history must contain only {SYMBOL}")
-    ordered = tuple(sorted((bar for bar in bars if bar.is_completed), key=lambda b: b.timestamp))
+    ordered = tuple(
+        sorted(
+            (bar for bar in bars if bar.is_completed),
+            key=lambda bar: bar.timestamp,
+        )
+    )
     all_warmup_bars = tuple(
         bar for bar in ordered if WARMUP_START <= bar.timestamp < START
     )
@@ -60,7 +64,8 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
     relevant = (*warmup_bars, *decision_bars)
     if len(warmup_bars) < 180:
         raise ValueError(
-            f"Issue 83 requires 180 completed warm-up bars; found {len(all_warmup_bars)}"
+            f"Issue 83 requires 180 completed warm-up bars; found "
+            f"{len(all_warmup_bars)}"
         )
     if len(decision_bars) < 2:
         raise ValueError("market history must contain at least two decision bars")
@@ -84,9 +89,21 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         minimum_commission=Decimal("0.1"),
     )
     group_specs = (
-        ("kdj15_rsi0", {"ema": 20, "bollinger": 20, "kdj": 15, "rsi": 0, "vwap": 25}, False),
-        ("kdj8_rsi7", {"ema": 20, "bollinger": 20, "kdj": 8, "rsi": 7, "vwap": 25}, False),
-        ("kdj8_rsi7_rsi_momentum", {"ema": 20, "bollinger": 20, "kdj": 8, "rsi": 7, "vwap": 25}, True),
+        (
+            "kdj15_rsi0",
+            {"ema": 20, "bollinger": 20, "kdj": 15, "rsi": 0, "vwap": 25},
+            False,
+        ),
+        (
+            "kdj8_rsi7",
+            {"ema": 20, "bollinger": 20, "kdj": 8, "rsi": 7, "vwap": 25},
+            False,
+        ),
+        (
+            "kdj8_rsi7_rsi_momentum",
+            {"ema": 20, "bollinger": 20, "kdj": 8, "rsi": 7, "vwap": 25},
+            True,
+        ),
     )
     groups: dict[str, dict[str, Any]] = {}
     for name, weights, momentum_filter in group_specs:
@@ -157,8 +174,12 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         }
     base_value = Decimal(groups["kdj15_rsi0"]["strategy_final_value"])
     score_value = Decimal(groups["kdj8_rsi7"]["strategy_final_value"])
-    momentum_value = Decimal(groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"])
-    groups["kdj8_rsi7"]["incremental_value_vs_kdj15_rsi0"] = str(score_value - base_value)
+    momentum_value = Decimal(
+        groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"]
+    )
+    groups["kdj8_rsi7"]["incremental_value_vs_kdj15_rsi0"] = str(
+        score_value - base_value
+    )
     groups["kdj8_rsi7_rsi_momentum"]["incremental_value_vs_kdj8_rsi7"] = str(
         momentum_value - score_value
     )
@@ -168,6 +189,7 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         "status": "exploratory_historical_account_simulation_not_certification",
         "strategy_id": STRATEGY_ID,
         "technical_parameter_hash": TECHNICAL_PARAMETER_HASH,
+        "rule_source_sha256": RULE_SOURCE_SHA256,
         "group_analysis_parameter_hashes": {
             name: result["analysis_parameter_hash"] for name, result in groups.items()
         },
@@ -203,18 +225,33 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         "quantity_policy": {
             "type": "fixed_quantity_per_signal",
             "shares": 100,
-            "limitation": "Exploratory order sizing only; not V1 account-state sizing or protected-floor policy.",
+            "limitation": (
+                "Exploratory order sizing only; not V1 account-state sizing or "
+                "protected-floor policy."
+            ),
         },
         "groups": groups,
         "certification_gates_remaining": [
             "This is an exploratory historical replay, not certified strategy evidence.",
-            "The fixed one-lot signal quantity is not the V1 account-state sizing, position cap, or protected-floor policy.",
-            "Historical fill assumptions do not establish broker/exchange execution quality, live order-state reconciliation, or production readiness.",
-            "The supplied market-history file's source completeness and corporate-action/data-quality certification are not established by this runner.",
+            "The fixed one-lot signal quantity is not the V1 account-state sizing, "
+            "position cap, or protected-floor policy.",
+            "Historical fill assumptions do not establish broker/exchange execution "
+            "quality, live order-state reconciliation, or production readiness.",
+            "The supplied market-history file's source completeness and "
+            "corporate-action/data-quality certification are not established by this "
+            "runner.",
         ],
         "reproduction": {
-            "command": "uv run python -m a500_t_trader intraday-compare-563360 --bars data/market-history/563360_5m_20240601_20261028.json --output issue83-comparison.json",
-            "account_and_execution": "All fixed parameters are embedded in run_issue83_comparison; all groups receive the same relevant bars, account snapshot, and simulator parameters.",
+            "command": (
+                "uv run python -m a500_t_trader intraday-compare-563360 --bars "
+                "data/market-history/563360_5m_20240601_20261028.json --output "
+                "issue83-comparison.json"
+            ),
+            "account_and_execution": (
+                "All fixed parameters are embedded in run_issue83_comparison; all "
+                "groups receive the same relevant bars, account snapshot, and "
+                "simulator parameters."
+            ),
         },
     }
 
