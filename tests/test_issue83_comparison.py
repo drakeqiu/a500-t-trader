@@ -13,9 +13,11 @@ from a500_t_trader.backtest.intraday import (
 )
 from a500_t_trader.backtest.issue83_comparison import (
     _average_daily_amount,
+    run_issue83_comparison,
+)
+from a500_t_trader.backtest.issue85_replay import (
     _max_drawdown,
     _round_trip_cost_rate,
-    run_issue83_comparison,
     run_issue85_sequential_replay,
 )
 from a500_t_trader.cli.intraday import _load_completed_bars
@@ -185,6 +187,62 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         net_pnl = Decimal(str(replay["net_pnl"]))
         assert net_pnl == final_nav - initial_cash
         assert Decimal(str(replay["return"])) == net_pnl / initial_cash
+    walk_forward = result["walk_forward"]
+    assert isinstance(walk_forward, dict)
+    folds = walk_forward["windows"]
+    assert isinstance(folds, list) and len(folds) == 5
+    assert walk_forward["assessed"] is all(
+        fold["test_gate"]["assessed"] for fold in folds
+    )
+    assert walk_forward["passed"] is (
+        sum(fold["test_gate"]["passed"] for fold in folds) >= 4
+        and sum(fold["test_gate"]["assessed"] for fold in folds) >= 4
+    )
+    for index, fold in enumerate(folds):
+        assert fold["training_start_day"] == "2024-10-18"
+        assert fold["training_end_day"] < fold["test_start_day"]
+        if index:
+            assert folds[index - 1]["training_end_day"] < fold["training_end_day"]
+            assert folds[index - 1]["test_end_day"] < fold["test_end_day"]
+        assert fold["training_run"]["decision_bar_count"] > 0
+        training_gate = fold["training_gate"]
+        training_run = fold["training_run"]
+        if training_run["closed_pairs"] == 0 or training_run["profit_factor"] is None:
+            assert training_gate["status"] == "undefined"
+            assert training_gate["passed"] is False
+        else:
+            assert training_gate["status"] in {"passed", "failed"}
+        assert fold["test_run"]["decision_bar_count"] > 0
+        test_gate = fold["test_gate"]
+        test_run = fold["test_run"]
+        if test_run["closed_pairs"] == 0 or test_run["profit_factor"] is None:
+            assert test_gate["status"] == "undefined"
+            assert test_gate["passed"] is False
+            assert test_gate["profit_factor"] is None
+        else:
+            expected_pass = (
+                Decimal(str(test_run["paired_realized_net_pnl"])) > 0
+                and Decimal(str(test_run["profit_factor"])) > 1
+            )
+            assert test_gate["passed"] is expected_pass
+            assert test_gate["status"] == ("passed" if expected_pass else "failed")
+    assumptions = result["assumptions"]
+    assert isinstance(assumptions, dict)
+    zero_slippage = assumptions["zero_slippage_assumption"]
+    assert zero_slippage == {
+        "bps_per_side": "0",
+        "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+        "recorded_on": "2026-11-03",
+        "context": "idealized next-available-bar-open baseline; not observed fill or market-impact evidence",
+        "observed": False,
+    }
+    liquidity_examples = result["liquidity_quantity_examples"]
+    assert isinstance(liquidity_examples, list) and liquidity_examples
+    for example in liquidity_examples:
+        quantity = int(example["quantity"])
+        volume = int(example["decision_bar_volume"])
+        assert quantity <= volume * 2 // 100
+        assert quantity % 100 == 0
     crossover_notional = Decimal("0.1") / Decimal("0.00005")
 
     def eligible_buy_examples(replay: dict[str, object]) -> list[dict[str, object]]:

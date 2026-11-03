@@ -10,10 +10,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from ..backtest.intraday_signals import replay_fixed_quantity_signals
-from ..backtest.issue83_comparison import (
-    run_issue83_comparison,
-    run_issue85_sequential_replay,
-)
+from ..backtest.issue83_comparison import run_issue83_comparison
+from ..backtest.issue85_replay import run_issue85_sequential_replay
 from ..market_data import MinuteBar
 from ..strategy.intraday_api import evaluate_intraday_strategy
 from ..strategy.intraday_v1_config import load_intraday_v1_config
