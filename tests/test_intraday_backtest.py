@@ -208,6 +208,32 @@ def test_v1_dynamic_sizing_fails_closed_without_risk_history() -> None:
 
     assert result.fills == ()
     assert result.final_holdings == 10_000
+def test_v1_buy_requires_evidenced_spread_eligibility() -> None:
+    bars = tuple(bar(30, index, "10", 1_000_000) for index in range(15))
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 0},
+        {"510300": Decimal("10")},
+        {"510300": 0},
+        Decimal("100_000"),
+    )
+
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[13].timestamp, "buy", 1_000),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills == ()
+    assert result.account_states[13]["pending_orders"] == []
+
 
 
 def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> None:
@@ -237,8 +263,8 @@ def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> No
         account=starting,
         bars=bars,
         signals=(
-            BarSignal(bars[13].timestamp, "buy", 100),
-            BarSignal(bars[13].timestamp, "buy", 100),
+            BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),
+            BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),
         ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
@@ -288,7 +314,7 @@ def test_v1_dynamic_buy_rechecks_position_capacity_at_fill_price() -> None:
         symbol="510300",
         account=starting,
         bars=bars,
-        signals=(BarSignal(bars[13].timestamp, "buy", 1_600),),
+        signals=(BarSignal(bars[13].timestamp, "buy", 1_600, spread_eligible=True),),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
             dynamic_sizing=True,
@@ -331,7 +357,7 @@ def test_v1_dynamic_cost_grid_uses_risk_sized_order_not_one_lot() -> None:
         symbol="510300",
         account=starting,
         bars=bars,
-        signals=(BarSignal(bars[13].timestamp, "buy", 100),),
+        signals=(BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
             dynamic_sizing=True,
@@ -373,8 +399,8 @@ def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
         bars=bars,
         signals=(
             BarSignal(bars[13].timestamp, "sell", 3_000),
-            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback"),
-            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback"),
+            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True),
+            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True),
         ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
