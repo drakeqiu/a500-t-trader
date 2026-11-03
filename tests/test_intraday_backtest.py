@@ -233,6 +233,32 @@ def test_v1_buy_requires_evidenced_spread_eligibility() -> None:
 
     assert result.fills == ()
     assert result.account_states[13]["pending_orders"] == []
+def test_v1_dynamic_buy_keeps_the_35_percent_nav_cash_reserve() -> None:
+    bars = tuple(bar(30, index, "10", 1_000_000) for index in range(15))
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("0"),
+    )
+
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills == ()
+    assert result.account_states[13]["pending_orders"] == []
+
 
 
 
