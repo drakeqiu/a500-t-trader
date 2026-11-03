@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -453,9 +454,11 @@ def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
         )
 
     analysis = analyze_intraday_technical({"510300": tuple(bars)})["510300"]
-
     expected = Decimal(100) * Decimal("8.5") / Decimal(15)
-    assert abs(analysis.indicators["rsi_14"] - expected) < Decimal("0.0001")
+
+    actual_rsi = analysis.indicators["rsi_14"]
+    assert isinstance(actual_rsi, Decimal)
+    assert abs(actual_rsi - expected) < Decimal("0.0001")
     assert analysis.indicators["rsi_14_previous"] == Decimal(50)
     seeded = analyze_intraday_technical({"510300": tuple(bars[:-1])})["510300"]
     assert seeded.indicators["rsi_14"] == Decimal(50)
@@ -463,8 +466,8 @@ def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
 
 
 def test_rsi_scoring_weight_and_missing_warmup_are_preserved() -> None:
-    short = analyze_intraday_technical({"510300": _bars(count=14)})["510300"]
-    weights = TECHNICAL_PARAMETERS["scores"]["weights"]
+    scores = cast(dict[str, object], TECHNICAL_PARAMETERS["scores"])
+    weights = cast(dict[str, int], scores["weights"])
 
     assert weights == {
         "ema": 20,
@@ -474,7 +477,7 @@ def test_rsi_scoring_weight_and_missing_warmup_are_preserved() -> None:
         "vwap": 25,
         "atr_grid": 20,
     }
-    assert sum(weights.values()) == 100
+    short = analyze_intraday_technical({"510300": _bars(count=14)})["510300"]
     assert short.indicators["rsi_14"] is None
     assert short.indicators["rsi_14_previous"] is None
     assert short.score_breakdown is None

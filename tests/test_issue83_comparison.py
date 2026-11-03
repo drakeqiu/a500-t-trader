@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.backtest.intraday import (
@@ -15,34 +16,38 @@ from a500_t_trader.strategy.premarket import AccountSnapshot
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def test_comparison_groups_use_distinct_source_score_weights():
+def test_comparison_groups_use_distinct_source_score_weights() -> None:
     bars = _bars()
 
     result = run_issue83_comparison(bars)
 
-    groups = result["groups"]
-    assert groups["kdj15_rsi0"]["score_weights"]["kdj"] == 15
-    assert groups["kdj15_rsi0"]["score_weights"]["rsi"] == 0
-    assert groups["kdj8_rsi7"]["score_weights"]["kdj"] == 8
-    assert groups["kdj8_rsi7"]["score_weights"]["rsi"] == 7
-    assert (
-        groups["kdj8_rsi7_rsi_momentum"]["score_weights"]
-        == groups["kdj8_rsi7"]["score_weights"]
+    groups = cast(dict[str, dict[str, object]], result["groups"])
+    base_weights = cast(dict[str, int], groups["kdj15_rsi0"]["score_weights"])
+    score_weights = cast(dict[str, int], groups["kdj8_rsi7"]["score_weights"])
+    momentum_weights = cast(
+        dict[str, int], groups["kdj8_rsi7_rsi_momentum"]["score_weights"]
     )
-    assert groups["kdj8_rsi7_rsi_momentum"]["rsi_momentum_filter"] is True
+    momentum_group = groups["kdj8_rsi7_rsi_momentum"]
+    base_group = groups["kdj8_rsi7"]
+    execution = cast(dict[str, object], result["execution"])
+    assert base_weights["kdj"] == 15
+    assert base_weights["rsi"] == 0
+    assert score_weights["kdj"] == 8
+    assert score_weights["rsi"] == 7
+    assert momentum_weights == score_weights
+    assert momentum_group["rsi_momentum_filter"] is True
     assert (
         groups["kdj15_rsi0"]["analysis_parameter_hash"]
-        != groups["kdj8_rsi7"]["analysis_parameter_hash"]
+        != base_group["analysis_parameter_hash"]
     )
-    assert (
-        groups["kdj8_rsi7_rsi_momentum"]["signal_count"]
-        <= groups["kdj8_rsi7"]["signal_count"]
+    assert cast(int, momentum_group["signal_count"]) <= cast(
+        int, base_group["signal_count"]
     )
-    assert result["execution"]["participation_rate"] == "0.02"
+    assert execution["participation_rate"] == "0.02"
     assert result["rule_source_sha256"] == RULE_SOURCE_SHA256
 
 
-def test_account_simulation_tracks_lot_cash_position_and_minimum_fee():
+def test_account_simulation_tracks_lot_cash_position_and_minimum_fee() -> None:
     bars = (
         _bar(datetime(2024, 10, 18, 14, 0), 5, 10000),
         _bar(datetime(2024, 10, 18, 14, 5), 5, 10000),
@@ -75,7 +80,7 @@ def test_account_simulation_tracks_lot_cash_position_and_minimum_fee():
     assert result.strategy_final_value == Decimal("499999.9")
 
 
-def _bars():
+def _bars() -> tuple[MinuteBar, ...]:
     current = datetime(2024, 10, 15, 9, 30, tzinfo=SHANGHAI)
     bars = []
     while current < datetime(2024, 10, 18, 14, 15, tzinfo=SHANGHAI):
@@ -93,7 +98,7 @@ def _bars():
     return tuple(bars)
 
 
-def _bar(timestamp, price, volume):
+def _bar(timestamp: datetime, price: int, volume: int) -> MinuteBar:
     value = Decimal(str(price))
     return MinuteBar(
         "563360",

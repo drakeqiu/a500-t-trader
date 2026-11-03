@@ -20,11 +20,13 @@ from a500_t_trader.strategy.intraday_state import (
     StrategyRecommendation,
 )
 from a500_t_trader.strategy.intraday_technical import (
-    RULE_SOURCE_SHA256,
     TECHNICAL_PARAMETERS,
     IntradayTechnicalAnalysis,
 )
-from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
+from a500_t_trader.strategy.intraday_v1_config import (
+    RULE_SOURCE_SHA256,
+    IntradayV1Config,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI)
@@ -280,6 +282,8 @@ def test_public_evaluation_blocks_ordinary_candidates_without_rsi_momentum(
 
     signal = result["signal"]
     assert isinstance(signal, dict)
+    assert isinstance(signal["reasons"], list)
+    assert isinstance(result["reasons"], list)
     assert signal["candidate"] == "WAIT"
     assert expected_reason in signal["reasons"]
     assert expected_reason in result["reasons"]
@@ -335,6 +339,7 @@ def test_public_evaluation_does_not_rsi_block_take_profit(
     assert signal["scores"] == analysis.scores
     indicators = signal["indicators"]
     assert isinstance(indicators, dict)
+    assert isinstance(result["reasons"], list)
     assert indicators["rsi_14"] is None
     assert indicators["rsi_14_previous"] is None
     assert not any(reason.startswith("RSI_") for reason in result["reasons"])
@@ -355,10 +360,14 @@ def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
     signal = result["signal"]
     assert isinstance(signal, dict)
     assert signal["candidate"] == "FORCED_RISK_EXIT"
+    assert isinstance(signal["reasons"], list)
+    assert isinstance(result["reasons"], list)
+    execution = result["execution"]
+    assert isinstance(execution, dict)
     assert "RSI_NOT_READY" in signal["reasons"]
     assert "RSI_NOT_READY" not in result["reasons"]
-    assert result["execution"]["quantity"] == 0
-    assert result["execution"]["allowed"] is False
+    assert execution["quantity"] == 0
+    assert execution["allowed"] is False
 
 
 def _paired_api_result(
@@ -436,6 +445,7 @@ def test_uncertified_technical_intent_is_visible_without_actionable_quantity(
     execution = result["execution"]
     assert isinstance(signal, dict)
     assert signal["candidate"] == "BUY"
+    assert isinstance(result["reasons"], list)
     assert isinstance(execution, dict)
     assert execution["allowed"] is False
     assert execution["quantity"] == 0

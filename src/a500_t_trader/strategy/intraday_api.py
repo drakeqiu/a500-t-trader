@@ -14,12 +14,8 @@ from ..backtest.certification import CertificationResult, certification_is_curre
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
 from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
-from .intraday_technical import (
-    RULE_SOURCE_SHA256,
-    IntradayTechnicalAnalysis,
-    analyze_intraday_technical,
-)
-from .intraday_v1_config import IntradayV1Config
+from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
+from .intraday_v1_config import RULE_SOURCE_SHA256, IntradayV1Config
 from .premarket import MAX_INPUT_AGE
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
