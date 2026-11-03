@@ -146,7 +146,7 @@ uv run python -m a500_t_trader intraday-compare-563360 \
 4. The former five date labels were calendar summaries, not walk-forward validation. The corrected runner uses the first 50% of ordered trading sessions as the initial training prefix, then five contiguous 10% later-test blocks; each subsequent training run expands through the sessions preceding that fold's test block. Each training and test segment is replayed independently with the preceding 180 completed bars as indicator warm-up and a fresh ¥500,000 simulation account. It records run metrics and applies gates only when closed-pair samples make PF defined; otherwise status is `undefined`, `assessed=false`, `passed=false`. These results have not been generated for the corrected implementation. No walk-forward performance is inferred from full-data NAV.
 | Full-data stress | Threshold | Net P&L (¥) | Closed pairs | Gate result |
 | --- | ---: | ---: | ---: | --- |
-| 1.5× fees / slippage | — | -2,278.392240 | 0 | Fail; PF undefined |
+| 1.5× fees / slippage | — | -2,108.7603375 | 0 | Fail; PF undefined |
 | Buy −10% | 65 | -5,429.789560 | 0 | Fail; PF undefined |
 | Buy +10% | 79 | -804.079690 | 0 | Fail; PF undefined |
 | Sell −10% | 61 | -2,062.153355 | 0 | Fail; PF undefined |
