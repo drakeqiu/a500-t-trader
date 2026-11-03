@@ -6,7 +6,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from ..market_data import SHANGHAI, MinuteBar
-from ..strategy.intraday_technical import TECHNICAL_PARAMETERS, TECHNICAL_PARAMETER_HASH
+from ..strategy.intraday_technical import TECHNICAL_PARAMETER_HASH, TECHNICAL_PARAMETERS
 from ..strategy.intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID
 from ..strategy.premarket import AccountSnapshot
 from .intraday import (
@@ -40,11 +40,16 @@ def _ohlcv_spread_proxy_eligible(
     proxy = (prior_bar.high - prior_bar.low) / (Decimal(2) * reference_price)
     return proxy <= max(Decimal("0.0015"), Decimal(2) * tick_size / reference_price)
 
+
 ZERO_SLIPPAGE_ASSUMPTION = {
     "bps_per_side": "0",
-    "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+    "source": "exploratory baseline assumption recorded in "
+    "docs/backtest-563360-v1.md",
     "recorded_on": "2026-11-03",
-    "context": "idealized next-available-bar-open baseline; not observed fill or market-impact evidence",
+    "context": (
+        "idealized next-available-bar-open baseline; not observed fill or "
+        "market-impact evidence"
+    ),
     "observed": False,
 }
 
@@ -104,7 +109,9 @@ class _SequentialV1Signals:
         self._seen_fill_count = 0
         self._last_fill_by_side: dict[str, dict[str, object]] = {}
         self._daily_start_nav: Decimal | None = None
-        self._day = pre_start[-1].timestamp.astimezone(SHANGHAI).date() if pre_start else None
+        self._day = (
+            pre_start[-1].timestamp.astimezone(SHANGHAI).date() if pre_start else None
+        )
         self._day_amount = Decimal(0)
         daily_bars: dict[object, list[MinuteBar]] = {}
         for prior in pre_start:
@@ -119,11 +126,7 @@ class _SequentialV1Signals:
                 self._completed_daily_amounts.append(amount)
         if self._day is not None:
             self._day_amount = sum(
-                (
-                    bar.amount
-                    for bar in daily_bars[self._day]
-                    if bar.amount is not None
-                ),
+                (bar.amount for bar in daily_bars[self._day] if bar.amount is not None),
                 Decimal(0),
             )
         self._last_close: Decimal | None = None
@@ -214,7 +217,9 @@ class _SequentialV1Signals:
                 self._completed_daily_amounts.append(self._day_amount)
             self._day = session_date
             self._day_amount = Decimal(0)
-            self._daily_start_nav = self._last_nav if self._last_nav is not None else nav
+            self._daily_start_nav = (
+                self._last_nav if self._last_nav is not None else nav
+            )
             self._daily_reset_examples.append(
                 {
                     "date": session_date.isoformat(),
@@ -469,7 +474,10 @@ class _SequentialV1Signals:
         if pending:
             return ()
         candidate = analysis.candidate
-        if daily_return <= Decimal("-0.008") or current_index <= self._entry_pause_until:
+        if (
+            daily_return <= Decimal("-0.008")
+            or current_index <= self._entry_pause_until
+        ):
             if candidate in {"BUY", "BUYBACK"}:
                 return ()
         side = "buy" if candidate in {"BUY", "BUYBACK"} else "sell"
@@ -494,7 +502,9 @@ class _SequentialV1Signals:
             )
             quantity = min(
                 pair_limit,
-                self._ordinary_quantity(nav, price, atr or Decimal(0), grid or Decimal(0)),
+                self._ordinary_quantity(
+                    nav, price, atr or Decimal(0), grid or Decimal(0)
+                ),
                 max_affordable,
                 int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
                 // 100
@@ -525,17 +535,19 @@ class _SequentialV1Signals:
             return ()
         if candidate == "TAKE_PROFIT" and active_lots and sellable:
             lot = active_lots[0]
-            quantity = min(
-                int(lot["quantity"]),
-                sellable,
-                int(
-                    Decimal(
-                        str(account_state["remaining_daily_sell_notional"])
-                    )
-                    / price
-                ),
-                self._liquidity_quantity(bar),
-            ) // 100 * 100
+            quantity = (
+                min(
+                    int(lot["quantity"]),
+                    sellable,
+                    int(
+                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        / price
+                    ),
+                    self._liquidity_quantity(bar),
+                )
+                // 100
+                * 100
+            )
             if quantity:
                 return (
                     BarSignal(
@@ -619,8 +631,7 @@ class _SequentialV1Signals:
                 sellable,
                 self._ordinary_quantity(nav, price, atr, grid),
                 int(
-                    Decimal(str(account_state["remaining_daily_sell_notional"]))
-                    / price
+                    Decimal(str(account_state["remaining_daily_sell_notional"])) / price
                 ),
             )
             quantity = quantity // 100 * 100
@@ -637,6 +648,8 @@ class _SequentialV1Signals:
                     ),
                 )
         return ()
+
+
 def _walk_forward_gate(run: dict[str, object]) -> dict[str, object]:
     profit_factor = run["profit_factor"]
     enough_samples = int(run["closed_pairs"]) > 0 and profit_factor is not None
@@ -726,6 +739,8 @@ def _run_walk_forward(
         "passed": passed,
         "windows": windows,
     }
+
+
 def _run_chronological_split(
     bars: tuple[MinuteBar, ...],
     trading_days: list[date],
@@ -742,13 +757,9 @@ def _run_chronological_split(
         initial_cash=initial_cash,
         decision_start=max(
             START,
-            datetime.combine(
-                training_days[0], time.min, tzinfo=SHANGHAI
-            ),
+            datetime.combine(training_days[0], time.min, tzinfo=SHANGHAI),
         ),
-        decision_end=datetime.combine(
-            training_days[-1], time.max, tzinfo=SHANGHAI
-        ),
+        decision_end=datetime.combine(training_days[-1], time.max, tzinfo=SHANGHAI),
         include_walk_forward=False,
     )
     test_run = _run_issue85_sequential_replay(
@@ -845,11 +856,21 @@ def _run_issue85_sequential_replay(
             "sequential_decision_callback": True,
             "zero_slippage_assumption": ZERO_SLIPPAGE_ASSUMPTION,
             "limitations": [
-                "no source for independent intraday halt flags (historical provider status accepted per user)",
-                "baseline slippage is a recorded zero-bps assumption; 1.5x cost replay scales fees, minimum commission, modeled impact, and slippage input (which remains zero), without observed impact evidence",
-                "modeled 0.02% per-side impact is used for policy cost estimates and is not applied a second time to simulated fill prices",
-                "AmazingData's 2026-04-20 limit fields are invalid; its theoretical 1.188/1.452 band is reconstructed from the 2026-04-17 SSE close and published 10%/0.001 rules, not a direct historical limit field",
-                "complete corporate-action ledger and broker-authenticated realized fills/impact remain unavailable and were waived by the user as certification prerequisites",
+                "no source for independent intraday halt flags "
+                "(historical provider status accepted per user)",
+                "baseline slippage is a recorded zero-bps assumption; 1.5x cost "
+                "replay scales fees, minimum commission, modeled impact, and "
+                "slippage input (which remains zero), without observed impact "
+                "evidence",
+                "modeled 0.02% per-side impact is used for policy cost estimates "
+                "and is not applied a second time to simulated fill prices",
+                "AmazingData's 2026-04-20 limit fields are invalid; its theoretical "
+                "1.188/1.452 band is reconstructed from the 2026-04-17 SSE close "
+                "and published 10%/0.001 rules, not a direct historical limit "
+                "field",
+                "complete corporate-action ledger and broker-authenticated "
+                "realized fills/impact remain unavailable and were waived by the "
+                "user as certification prerequisites",
             ],
         },
         implementation_version="issue85-sequential-replay-1",
@@ -883,7 +904,10 @@ def _run_issue85_sequential_replay(
     limitations = result.strategy_parameters["limitations"]
     return {
         "status": result.status,
-        "research_scope": "candidate-driven sequential simulator; not complete V1 certification replay",
+        "research_scope": (
+            "candidate-driven sequential simulator; not complete V1 "
+            "certification replay"
+        ),
         "decision_bar_count": len(decisions),
         "first_decision_bar": decisions[0].timestamp.isoformat(),
         "last_decision_bar": decisions[-1].timestamp.isoformat(),
@@ -900,8 +924,12 @@ def _run_issue85_sequential_replay(
         "fill_count": len(result.fills),
         "pair_count": len(pairs),
         **pair_metrics(closed),
-        "winning_pair_count": sum(Decimal(str(pair["realized_net_pnl"])) > 0 for pair in closed),
-        "losing_pair_count": sum(Decimal(str(pair["realized_net_pnl"])) < 0 for pair in closed),
+        "winning_pair_count": sum(
+            Decimal(str(pair["realized_net_pnl"])) > 0 for pair in closed
+        ),
+        "losing_pair_count": sum(
+            Decimal(str(pair["realized_net_pnl"])) < 0 for pair in closed
+        ),
         "chronological_split": chronological_split,
         "walk_forward": walk_forward,
         "inputs": {
@@ -917,36 +945,42 @@ def _run_issue85_sequential_replay(
             "fee": {
                 "value": str(execution_params.fee_bps),
                 "unit": "bps per side",
-                "source": "user-provided commission rate, recorded in docs/backtest-563360-v1.md",
+                "source": "user-provided commission rate, recorded in "
+                "docs/backtest-563360-v1.md",
                 "context": "applied independently to each simulated fill",
                 "observed": False,
             },
             "minimum_commission": {
                 "value": str(execution_params.minimum_commission),
                 "unit": "CNY per fill",
-                "source": "user-provided minimum commission, recorded in docs/backtest-563360-v1.md",
+                "source": "user-provided minimum commission, recorded in "
+                "docs/backtest-563360-v1.md",
                 "context": "applied independently to each simulated fill",
                 "observed": False,
             },
             "slippage": {
                 "value": str(execution_params.slippage_bps),
                 "unit": "bps per side",
-                "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
-                "context": "idealized next-available-bar-open baseline; not observed fill evidence",
+                "source": "exploratory baseline assumption recorded in "
+                "docs/backtest-563360-v1.md",
+                "context": "idealized next-available-bar-open baseline; not "
+                "observed fill evidence",
                 "observed": False,
             },
             "impact": {
                 "value": str(Decimal("0.0002") * cost_multiplier * Decimal(10000)),
                 "unit": "bps per side",
                 "source": "modeled cost-grid assumption in the Issue 85 replay",
-                "context": "used to estimate candidate cost only; not applied again to simulated fill prices",
+                "context": "used to estimate candidate cost only; not applied "
+                "again to simulated fill prices",
                 "observed": False,
             },
             "cost_multiplier": {
                 "value": str(cost_multiplier),
                 "unit": "x",
                 "source": "registered baseline or stress replay configuration",
-                "context": "multiplies modeled fees, minimum commission, slippage, and impact inputs",
+                "context": "multiplies modeled fees, minimum commission, "
+                "slippage, and impact inputs",
             },
             "zero_slippage_assumption": ZERO_SLIPPAGE_ASSUMPTION,
             "spread_proxy": {
@@ -954,7 +988,8 @@ def _run_issue85_sequential_replay(
                 "eligibility_limit": "max(0.0015, 2 * tick_size / decision price)",
                 "tick_size": "0.001",
                 "source": "user-approved OHLCV modeling substitute",
-                "context": "proxy only; not observed historical bid/ask spread or execution evidence",
+                "context": "proxy only; not observed historical bid/ask spread "
+                "or execution evidence",
                 "observed": False,
             },
         },
@@ -964,6 +999,7 @@ def _run_issue85_sequential_replay(
         "limitations": limitations,
         "cost_grid_examples": signals._cost_grid_examples,
     }
+
 
 def run_issue85_sequential_replay(
     bars: tuple[MinuteBar, ...],

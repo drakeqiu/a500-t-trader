@@ -63,10 +63,12 @@ class BarSignal:
         if self.grid_step is not None and self.grid_step <= 0:
             raise ValueError("signal grid step must be positive")
 
+
 class StrategySignalProvider(Protocol):
     def signals(
         self, symbol: str, bars: tuple[MinuteBar, ...]
     ) -> tuple[BarSignal, ...]: ...
+
 
 class EventDrivenSignalProvider(Protocol):
     def signals_at(
@@ -75,7 +77,6 @@ class EventDrivenSignalProvider(Protocol):
         bars: tuple[MinuteBar, ...],
         account_state: Mapping[str, object],
     ) -> tuple[BarSignal, ...]: ...
-
 
 
 class CandidateQuantityResolver(Protocol):
@@ -159,7 +160,9 @@ class TechnicalAnalysisSignalProvider:
                 if analysis.candidate == "TAKE_PROFIT"
                 else "ordinary"
             )
-            direction = "buy" if analysis.candidate == "BUYBACK" else analysis.candidate.lower()
+            direction = (
+                "buy" if analysis.candidate == "BUYBACK" else analysis.candidate.lower()
+            )
             if (
                 self._rsi_momentum_filter
                 and direction in {"buy", "sell"}
@@ -210,7 +213,6 @@ class IntradayBacktestParams:
             raise ValueError("protected_floor_fraction must be in [0, 1]")
 
 
-
 @dataclass(frozen=True, slots=True)
 class IntradayFill:
     side: str
@@ -225,6 +227,7 @@ class IntradayFill:
     atr: Decimal | None = None
     grid_step: Decimal | None = None
     grid_level: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class IntradayBacktestResult:
@@ -263,7 +266,10 @@ def run_intraday_backtest(
     symbol: str,
     account: AccountSnapshot,
     bars: tuple[MinuteBar, ...],
-    signals: tuple[BarSignal, ...] | StrategySignalProvider | EventDrivenSignalProvider | None,
+    signals: tuple[BarSignal, ...]
+    | StrategySignalProvider
+    | EventDrivenSignalProvider
+    | None,
     params: IntradayBacktestParams,
     strategy_parameters: dict[str, object],
     implementation_version: str,
@@ -289,9 +295,7 @@ def run_intraday_backtest(
         raise ValueError("bar timestamps must include time zones")
     if account.as_of > selected[0].timestamp:
         raise ValueError("account snapshot must not follow first bar")
-    event_provider = (
-        signals if hasattr(signals, "signals_at") else None
-    )
+    event_provider = signals if hasattr(signals, "signals_at") else None
     if event_provider is not None:
         signals = ()
     elif not isinstance(signals, tuple):
@@ -487,9 +491,7 @@ def run_intraday_backtest(
                                 * BOARD_LOT,
                                 int(
                                     (
-                                        Decimal("0.08")
-                                        * nav_at_fill
-                                        / fill_price
+                                        Decimal("0.08") * nav_at_fill / fill_price
                                     ).to_integral_value(rounding=ROUND_DOWN)
                                 )
                                 // BOARD_LOT
@@ -539,10 +541,7 @@ def run_intraday_backtest(
                                 (
                                     candidate.remaining
                                     * bar.open
-                                    * (
-                                        Decimal(1)
-                                        - params.slippage_bps / BASIS_POINTS
-                                    )
+                                    * (Decimal(1) - params.slippage_bps / BASIS_POINTS)
                                     for candidate in tuple(orders)[:order_position]
                                     if candidate.signal.direction == "sell"
                                     and candidate.signal.intent
@@ -610,7 +609,11 @@ def run_intraday_backtest(
                     )
                     if order.signal.direction == "sell":
                         daily_sell_notional += notional
-                        if order.signal.intent not in {"buyback", "risk_exit", "take_profit"}:
+                        if order.signal.intent not in {
+                            "buyback",
+                            "risk_exit",
+                            "take_profit",
+                        }:
                             pair_ledger.append(
                                 {
                                     "pair_id": f"pair-{pair_sequence}",
@@ -637,12 +640,20 @@ def run_intraday_backtest(
                             pair_sequence += 1
                     elif order.signal.intent == "buyback":
                         pair = next(
-                            (item for item in pair_ledger if item["pair_id"] == order.signal.pair_id),
+                            (
+                                item
+                                for item in pair_ledger
+                                if item["pair_id"] == order.signal.pair_id
+                            ),
                             None,
                         )
                         if pair is not None:
-                            pair["remaining_quantity"] = int(pair["remaining_quantity"]) - quantity
-                            pair["buyback_quantity"] = int(pair["buyback_quantity"]) + quantity
+                            pair["remaining_quantity"] = (
+                                int(pair["remaining_quantity"]) - quantity
+                            )
+                            pair["buyback_quantity"] = (
+                                int(pair["buyback_quantity"]) + quantity
+                            )
                             pair["buyback_gross"] = str(
                                 Decimal(str(pair["buyback_gross"])) + notional
                             )
@@ -714,9 +725,7 @@ def run_intraday_backtest(
                         "pair_id": fill.pair_id,
                         "atr": str(fill.atr) if fill.atr is not None else None,
                         "grid_step": (
-                            str(fill.grid_step)
-                            if fill.grid_step is not None
-                            else None
+                            str(fill.grid_step) if fill.grid_step is not None else None
                         ),
                         "grid_level": fill.grid_level,
                     }
@@ -752,9 +761,7 @@ def run_intraday_backtest(
                         ),
                     )
                 ),
-                "remaining_daily_fills": max(
-                    0, 8 - daily_fill_count - len(orders)
-                ),
+                "remaining_daily_fills": max(0, 8 - daily_fill_count - len(orders)),
                 "remaining_daily_additions": max(
                     0,
                     3
@@ -799,7 +806,9 @@ def run_intraday_backtest(
                         item
                         for item in pair_ledger
                         if item["status"] == "open"
-                        and (signal.pair_id is None or item["pair_id"] == signal.pair_id)
+                        and (
+                            signal.pair_id is None or item["pair_id"] == signal.pair_id
+                        )
                     ),
                     None,
                 )
@@ -831,7 +840,11 @@ def run_intraday_backtest(
             if params.dynamic_sizing:
                 nav = cash + holdings * bar.close
                 reserved_cash = sum(
-                    (order.reserved_cash for order in orders if order.signal.direction == "buy"),
+                    (
+                        order.reserved_cash
+                        for order in orders
+                        if order.signal.direction == "buy"
+                    ),
                     Decimal(0),
                 )
                 pending_buy_quantity = sum(
@@ -844,7 +857,8 @@ def run_intraday_backtest(
                         (
                             item
                             for item in pair_ledger
-                            if item["pair_id"] == signal.pair_id and item["status"] == "open"
+                            if item["pair_id"] == signal.pair_id
+                            and item["status"] == "open"
                         ),
                         None,
                     )
@@ -898,7 +912,9 @@ def run_intraday_backtest(
                         )
                 else:
                     protected = (
-                        0 if signal.intent is SignalIntent.RISK_EXIT else min(protected_floor, holdings)
+                        0
+                        if signal.intent is SignalIntent.RISK_EXIT
+                        else min(protected_floor, holdings)
                     )
                     sellable_above_floor = max(0, min(sellable, holdings - protected))
                     pending_ordinary_sells = sum(
@@ -944,14 +960,18 @@ def run_intraday_backtest(
                         * BOARD_LOT
                     )
             if signal.direction == "buy":
-                free_cash = max(Decimal(0), cash - sum(
-                    (
-                        order.reserved_cash
-                        for order in orders
-                        if order.signal.direction == "buy"
-                    ),
+                free_cash = max(
                     Decimal(0),
-                ))
+                    cash
+                    - sum(
+                        (
+                            order.reserved_cash
+                            for order in orders
+                            if order.signal.direction == "buy"
+                        ),
+                        Decimal(0),
+                    ),
+                )
                 estimated_price = bar.close * (
                     Decimal(1) + params.slippage_bps / BASIS_POINTS
                 )
@@ -987,7 +1007,11 @@ def run_intraday_backtest(
                 "nav_at_close": str(cash + holdings * bar.close),
                 "reserved_cash": str(
                     sum(
-                        (order.reserved_cash for order in orders if order.signal.direction == "buy"),
+                        (
+                            order.reserved_cash
+                            for order in orders
+                            if order.signal.direction == "buy"
+                        ),
                         Decimal(0),
                     )
                 ),
@@ -1126,6 +1150,8 @@ def _bar_dict(bar: MinuteBar) -> dict[str, object]:
         "volume": bar.volume,
         "is_completed": bar.is_completed,
     }
+
+
 def _risk_quantity(
     bars: tuple[MinuteBar, ...],
     index: int,
@@ -1162,15 +1188,10 @@ def _risk_quantity(
     grid = Decimal(0)
     for _ in range(8):
         notional = price * quantity
-        round_trip_cost_rate = (
-            Decimal(2)
-            * max(
-                params.minimum_commission,
-                notional * params.fee_bps / BASIS_POINTS,
-            )
-            / notional
-            + Decimal("0.0004")
-        )
+        round_trip_cost_rate = Decimal(2) * max(
+            params.minimum_commission,
+            notional * params.fee_bps / BASIS_POINTS,
+        ) / notional + Decimal("0.0004")
         grid_ratio = max(
             Decimal("0.9") * atr / price,
             Decimal("0.0025"),
@@ -1187,12 +1208,10 @@ def _risk_quantity(
             Decimal("1.2") * grid,
             Decimal("0.004") * price,
         )
-        next_quantity = (
-            Decimal("0.0015") * nav / stop_distance
-        ).to_integral_value(rounding=ROUND_DOWN)
-        next_quantity = max(
-            Decimal(BOARD_LOT), next_quantity // BOARD_LOT * BOARD_LOT
+        next_quantity = (Decimal("0.0015") * nav / stop_distance).to_integral_value(
+            rounding=ROUND_DOWN
         )
+        next_quantity = max(Decimal(BOARD_LOT), next_quantity // BOARD_LOT * BOARD_LOT)
         if next_quantity == quantity:
             break
         quantity = next_quantity
@@ -1246,8 +1265,4 @@ def _dynamic_buy_quantity(
     if requested is not None:
         limits.append(Decimal(requested))
     capacity = min(limits)
-    return (
-        int(capacity.to_integral_value(rounding=ROUND_DOWN))
-        // BOARD_LOT
-        * BOARD_LOT
-    )
+    return int(capacity.to_integral_value(rounding=ROUND_DOWN)) // BOARD_LOT * BOARD_LOT

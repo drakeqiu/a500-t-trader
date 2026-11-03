@@ -28,6 +28,7 @@ from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
 from a500_t_trader.strategy.premarket import AccountSnapshot
 
+
 def test_quantity_based_round_trip_cost_uses_order_notional() -> None:
     # At ¥5, 100 shares incur two ¥0.10 minimum commissions; 10,000
     # shares incur proportional ¥2.50 fees each side plus 0.04% impact.
@@ -149,8 +150,7 @@ def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
     def session(day: int) -> tuple[MinuteBar, ...]:
         start = datetime(2024, 10, day, 9, 30)
         morning = tuple(
-            _bar(start + timedelta(minutes=5 * index), 5, 1)
-            for index in range(24)
+            _bar(start + timedelta(minutes=5 * index), 5, 1) for index in range(24)
         )
         afternoon_start = datetime(2024, 10, day, 13, 0)
         afternoon = tuple(
@@ -228,25 +228,16 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert small_cash_result["decision_bar_count"] == 23_580
     assert result["initial_cash"] == "500000"
     assert small_cash_result["initial_cash"] == "10000"
-    submitted_signals = cast(
-        list[dict[str, object]], result["submitted_signals"]
-    )
+    submitted_signals = cast(list[dict[str, object]], result["submitted_signals"])
     assert any(signal["direction"] == "sell" for signal in submitted_signals)
-    chronological_split = cast(
-        dict[str, object], result["chronological_split"]
-    )
-    assert (
-        chronological_split["method"]
-        == "chronological 70/30 trading-day split"
-    )
+    chronological_split = cast(dict[str, object], result["chronological_split"])
+    assert chronological_split["method"] == "chronological 70/30 trading-day split"
     assert chronological_split["training_day_count"] == 344
     assert chronological_split["test_day_count"] == 148
     assert str(chronological_split["training_end_day"]) < str(
         chronological_split["test_start_day"]
     )
-    training_gate = cast(
-        dict[str, object], chronological_split["training_gate"]
-    )
+    training_gate = cast(dict[str, object], chronological_split["training_gate"])
     test_gate = cast(dict[str, object], chronological_split["test_gate"])
     assert training_gate["status"] in {"passed", "failed", "undefined"}
     assert test_gate["status"] in {"passed", "failed", "undefined"}
@@ -326,42 +317,50 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert assumptions["fee"] == {
         "value": "0.5",
         "unit": "bps per side",
-        "source": "user-provided commission rate, recorded in docs/backtest-563360-v1.md",
+        "source": "user-provided commission rate, recorded in "
+        "docs/backtest-563360-v1.md",
         "context": "applied independently to each simulated fill",
         "observed": False,
     }
     assert assumptions["minimum_commission"] == {
         "value": "0.1",
         "unit": "CNY per fill",
-        "source": "user-provided minimum commission, recorded in docs/backtest-563360-v1.md",
+        "source": "user-provided minimum commission, recorded in "
+        "docs/backtest-563360-v1.md",
         "context": "applied independently to each simulated fill",
         "observed": False,
     }
     assert assumptions["slippage"] == {
         "value": "0",
         "unit": "bps per side",
-        "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
-        "context": "idealized next-available-bar-open baseline; not observed fill evidence",
+        "source": "exploratory baseline assumption recorded in "
+        "docs/backtest-563360-v1.md",
+        "context": "idealized next-available-bar-open baseline; not observed "
+        "fill evidence",
         "observed": False,
     }
     assert assumptions["impact"] == {
         "value": "2.0000",
         "unit": "bps per side",
         "source": "modeled cost-grid assumption in the Issue 85 replay",
-        "context": "used to estimate candidate cost only; not applied again to simulated fill prices",
+        "context": "used to estimate candidate cost only; not applied again to "
+        "simulated fill prices",
         "observed": False,
     }
     assert assumptions["cost_multiplier"] == {
         "value": "1",
         "unit": "x",
         "source": "registered baseline or stress replay configuration",
-        "context": "multiplies modeled fees, minimum commission, slippage, and impact inputs",
+        "context": "multiplies modeled fees, minimum commission, slippage, and "
+        "impact inputs",
     }
     assert assumptions["zero_slippage_assumption"] == {
         "bps_per_side": "0",
-        "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+        "source": "exploratory baseline assumption recorded in "
+        "docs/backtest-563360-v1.md",
         "recorded_on": "2026-11-03",
-        "context": "idealized next-available-bar-open baseline; not observed fill or market-impact evidence",
+        "context": "idealized next-available-bar-open baseline; not observed "
+        "fill or market-impact evidence",
         "observed": False,
     }
     stress_tests = result["stress_tests"]
@@ -396,12 +395,9 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
             quantity = int(example["quantity"])
             price = Decimal(str(example["price"]))
             notional = price * quantity
-            expected = (
-                Decimal("2")
-                * max(Decimal("0.1"), notional * Decimal("0.00005"))
-                / notional
-                + Decimal("0.0004")
-            )
+            expected = Decimal("2") * max(
+                Decimal("0.1"), notional * Decimal("0.00005")
+            ) / notional + Decimal("0.0004")
             assert quantity >= 100 and quantity % 100 == 0
             assert Decimal(str(example["quantity_cost_rate"])) == expected
             assert Decimal(str(example["grid_step"])) > 0

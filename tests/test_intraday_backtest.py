@@ -59,9 +59,7 @@ def test_ohlcv_spread_proxy_uses_half_of_prior_completed_bar_range() -> None:
         tight.volume,
         is_completed=False,
     )
-    assert not _ohlcv_spread_proxy_eligible(
-        incomplete, Decimal("10"), Decimal("0.001")
-    )
+    assert not _ohlcv_spread_proxy_eligible(incomplete, Decimal("10"), Decimal("0.001"))
 
 
 def bar(day: int, minute: int, price: str, volume: int = 1000) -> MinuteBar:
@@ -122,10 +120,13 @@ def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     assert first_state["remaining_daily_additions"] == 3
     assert first_state["free_cash"] == "10000"
     assert len(result.fills) == 1
-    assert result.assumptions["submitted_signals"][0]["timestamp"] == bars[0].timestamp.isoformat()
+    assert (
+        result.assumptions["submitted_signals"][0]["timestamp"]
+        == bars[0].timestamp.isoformat()
+    )
+
 
 def test_partial_fills_costs_t1_and_hold_baseline() -> None:
-
 
     bars = (
         bar(30, 0, "10"),
@@ -226,8 +227,8 @@ def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
         ("sell", bars[3].timestamp),
     ]
     assert result.final_holdings == 0
-    
-    
+
+
 def test_v1_dynamic_sizing_fails_closed_without_risk_history() -> None:
     bars = (bar(30, 0, "10"), bar(30, 1, "10"))
     starting = AccountSnapshot(
@@ -253,6 +254,8 @@ def test_v1_dynamic_sizing_fails_closed_without_risk_history() -> None:
 
     assert result.fills == ()
     assert result.final_holdings == 10_000
+
+
 def test_v1_buy_requires_explicit_spread_eligibility() -> None:
     bars = tuple(bar(30, index, "10", 1_000_000) for index in range(15))
     starting = AccountSnapshot(
@@ -278,6 +281,8 @@ def test_v1_buy_requires_explicit_spread_eligibility() -> None:
 
     assert result.fills == ()
     assert result.account_states[13]["pending_orders"] == []
+
+
 def test_v1_dynamic_buy_keeps_the_35_percent_nav_cash_reserve() -> None:
     bars = tuple(bar(30, index, "10", 1_000_000) for index in range(15))
     starting = AccountSnapshot(
@@ -303,8 +308,6 @@ def test_v1_dynamic_buy_keeps_the_35_percent_nav_cash_reserve() -> None:
 
     assert result.fills == ()
     assert result.account_states[13]["pending_orders"] == []
-
-
 
 
 def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> None:
@@ -358,6 +361,8 @@ def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> No
     assert submitted["nav_at_close"] == "200000"
     assert result.account_states[-1]["holdings"] == 11_900
     assert result.account_states[-1]["protected_floor"] == 7_000
+
+
 def test_v1_dynamic_buy_rechecks_position_capacity_at_fill_price() -> None:
     bars = tuple(
         MinuteBar(
@@ -470,8 +475,12 @@ def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
         bars=bars,
         signals=(
             BarSignal(bars[13].timestamp, "sell", 3_000),
-            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True),
-            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True),
+            BarSignal(
+                bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True
+            ),
+            BarSignal(
+                bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True
+            ),
         ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
@@ -490,6 +499,7 @@ def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
     assert result.pair_ledger[0]["status"] == "closed"
     assert result.pair_ledger[0]["remaining_quantity"] == 0
     assert result.pair_ledger[0]["buyback_quantity"] == 3_000
+
 
 def test_v1_pending_ordinary_sells_reserve_daily_sell_capacity() -> None:
     bars = tuple(
@@ -530,7 +540,10 @@ def test_v1_pending_ordinary_sells_reserve_daily_sell_capacity() -> None:
         implementation_version="test-v1",
     )
 
-    assert sum(order["quantity"] for order in result.account_states[13]["pending_orders"]) == 1_000
+    assert (
+        sum(order["quantity"] for order in result.account_states[13]["pending_orders"])
+        == 1_000
+    )
 
 
 def test_v1_partial_fills_stop_at_daily_fill_limit() -> None:
@@ -600,10 +613,7 @@ def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
     )
     signals = (
         BarSignal(bars[13].timestamp, "sell", 10_000, SignalIntent.RISK_EXIT),
-        *(
-            BarSignal(bars[index].timestamp, "buy", 2_000)
-            for index in range(14, 24)
-        ),
+        *(BarSignal(bars[index].timestamp, "buy", 2_000) for index in range(14, 24)),
     )
     result = run_intraday_backtest(
         symbol="510300",
@@ -620,6 +630,7 @@ def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
     )
 
     assert Decimal(result.account_states[24]["daily_turnover"]) <= Decimal("150000")
+
 
 def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
     bars = (bar(30, 0, "10", 100_000), bar(30, 1, "10", 100_000))

@@ -9,16 +9,19 @@ from decimal import Decimal
 from typing import Any
 
 from ..market_data import SHANGHAI, MinuteBar
-from ..strategy.intraday_technical import TECHNICAL_PARAMETER_HASH
+from ..strategy.intraday_technical import (
+    TECHNICAL_PARAMETER_HASH,
+    IntradayTechnicalAnalysis,
+)
 from ..strategy.intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID
 from ..strategy.premarket import AccountSnapshot
-from .session_amount import complete_session_amount
 from .intraday import (
     IntradayBacktestParams,
     TechnicalAnalysisSignalProvider,
     TechnicalGridContextProvider,
     run_intraday_backtest,
 )
+from .session_amount import complete_session_amount
 
 SYMBOL = "563360"
 START = datetime(2024, 10, 18, 14, 0, tzinfo=SHANGHAI)

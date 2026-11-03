@@ -29,9 +29,6 @@ from .intraday import (
     BarSignal as BarSignal,
 )
 from .intraday import (
-    SignalIntent as SignalIntent,
-)
-from .intraday import (
     CandidateQuantityResolver as CandidateQuantityResolver,
 )
 from .intraday import (
@@ -42,6 +39,9 @@ from .intraday import (
 )
 from .intraday import (
     IntradayFill as IntradayFill,
+)
+from .intraday import (
+    SignalIntent as SignalIntent,
 )
 from .intraday import (
     StrategyRulesUnavailableError as StrategyRulesUnavailableError,
