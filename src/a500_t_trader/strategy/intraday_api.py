@@ -69,6 +69,10 @@ def evaluate_intraday_strategy(
                 as_of=as_of,
                 paired_state=paired_state,
             )
+            analyses = {
+                symbol: _filter_rsi_momentum(analysis)
+                for symbol, analysis in analyses.items()
+            }
         except (ValueError, TypeError, ArithmeticError) as error:
             analyzer_error = f"source-exact technical analysis unavailable: {error}"
     else:
@@ -378,7 +382,44 @@ def evaluate_intraday_strategy(
             },
             "reasons": reasons,
         }
+
     return results
+
+
+def _filter_rsi_momentum(
+    analysis: IntradayTechnicalAnalysis,
+) -> IntradayTechnicalAnalysis:
+    """Apply the RSI hard gate after price/KDJ analysis has formed a candidate."""
+    if analysis.candidate not in {"BUY", "BUYBACK", "SELL"}:
+        return analysis
+
+    current = _rsi_value(analysis.indicators.get("rsi_14"))
+    previous = _rsi_value(analysis.indicators.get("rsi_14_previous"))
+    if current is None or previous is None:
+        reason = "RSI_NOT_READY"
+    elif analysis.candidate in {"BUY", "BUYBACK"}:
+        if current > 30 and current > previous:
+            return analysis
+        reason = "RSI_BUY_MOMENTUM_NOT_CONFIRMED"
+    else:
+        if current < 70 and current < previous:
+            return analysis
+        reason = "RSI_SELL_MOMENTUM_NOT_CONFIRMED"
+    return replace(
+        analysis,
+        candidate="WAIT",
+        reasons=tuple(dict.fromkeys((*analysis.reasons, reason))),
+    )
+
+
+def _rsi_value(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
 
 
 def _state_parameters(

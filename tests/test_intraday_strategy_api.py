@@ -229,17 +229,115 @@ def _seed_pair(
         )
 
 
-def _candidate_analysis(candidate: str) -> IntradayTechnicalAnalysis:
+def _candidate_analysis(
+    candidate: str,
+    current_rsi: Decimal | None = Decimal("35"),
+    previous_rsi: Decimal | None = Decimal("34"),
+) -> IntradayTechnicalAnalysis:
     return IntradayTechnicalAnalysis(
         symbol="510300",
         trend="RANGE",
-        indicators={"close": Decimal("4.00")},
+        indicators={
+            "close": Decimal("4.00"),
+            "rsi_14": current_rsi,
+            "rsi_14_previous": previous_rsi,
+        },
         scores={"buy": 80.0, "sell": 80.0, "delta": 20.0},
         candidate=candidate,
         risk_status="READY",
         reasons=(),
         completed_valid_bars=180,
     )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "current_rsi", "previous_rsi", "expected_reason"),
+    (
+        ("BUY", None, Decimal("29"), "RSI_NOT_READY"),
+        ("BUY", Decimal("30"), Decimal("29"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("BUY", Decimal("35"), Decimal("35"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("BUYBACK", Decimal("25"), Decimal("22"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", Decimal("70"), Decimal("71"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", Decimal("65"), Decimal("65"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", None, Decimal("71"), "RSI_NOT_READY"),
+    ),
+)
+def test_public_evaluation_blocks_ordinary_candidates_without_rsi_momentum(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: str,
+    current_rsi: Decimal | None,
+    previous_rsi: Decimal | None,
+    expected_reason: str,
+) -> None:
+    analysis = _candidate_analysis(candidate, current_rsi, previous_rsi)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "WAIT"
+    assert expected_reason in signal["reasons"]
+    assert expected_reason in result["reasons"]
+    execution = result["execution"]
+    assert isinstance(execution, dict)
+    assert execution["allowed"] is False
+    assert execution["quantity"] == 0
+
+
+@pytest.mark.parametrize(
+    ("candidate", "current_rsi", "previous_rsi"),
+    (
+        ("BUY", Decimal("31"), Decimal("30")),
+        ("BUYBACK", Decimal("31"), Decimal("30")),
+        ("SELL", Decimal("69"), Decimal("70")),
+    ),
+)
+def test_public_evaluation_preserves_rsi_confirmed_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: str,
+    current_rsi: Decimal,
+    previous_rsi: Decimal,
+) -> None:
+    analysis = _candidate_analysis(candidate, current_rsi, previous_rsi)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == candidate
+
+
+def test_public_evaluation_does_not_rsi_block_take_profit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analysis = _candidate_analysis("TAKE_PROFIT", None, None)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "TAKE_PROFIT"
+    assert signal["scores"] == analysis.scores
+    indicators = signal["indicators"]
+    assert isinstance(indicators, dict)
+    assert indicators["rsi_14"] is None
+    assert indicators["rsi_14_previous"] is None
+    assert not any(reason.startswith("RSI_") for reason in result["reasons"])
 
 
 def _paired_api_result(
