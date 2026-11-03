@@ -18,7 +18,12 @@ def main(
 ) -> int:
     """Run CLI commands; injected data/time form the public CLI-to-app seam."""
     args = build_parser().parse_args(argv)
-    if args.command in {"intraday-config", "intraday-strategy", "intraday-signals"}:
+    if args.command in {
+        "intraday-config",
+        "intraday-strategy",
+        "intraday-signals",
+        "intraday-compare-563360",
+    }:
         return intraday.handle(args)
     if args.command in {
         "account-snapshot",

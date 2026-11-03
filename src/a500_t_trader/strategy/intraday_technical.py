@@ -104,6 +104,7 @@ def analyze_intraday_technical(
     grid_context: Mapping[str, Mapping[str, object]] | None = None,
     as_of: datetime | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
+    score_weights: Mapping[str, float] | None = None,
 ) -> dict[str, IntradayTechnicalAnalysis]:
     """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
@@ -116,6 +117,23 @@ def analyze_intraday_technical(
         )
     parameters = TECHNICAL_PARAMETERS if config is None else config.parameters
     parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
+    weights = score_weights
+    if weights is None:
+        score_section = parameters.get("scores")
+        weights = (
+            score_section.get("weights")
+            if isinstance(score_section, Mapping)
+            else None
+        )
+    if not isinstance(weights, Mapping):
+        raise ValueError("configured score weights are unavailable")
+    if score_weights is not None:
+        canonical_weights = json.dumps(
+            dict(sorted(score_weights.items())), sort_keys=True, separators=(",", ":")
+        )
+        parameter_hash = hashlib.sha256(
+            f"{parameter_hash}:{canonical_weights}".encode()
+        ).hexdigest()
     return {
         symbol: _analyze_symbol(
             symbol,
@@ -124,6 +142,7 @@ def analyze_intraday_technical(
             as_of,
             parameter_hash,
             parameters,
+            weights,
             (paired_state or {}).get(symbol),
         )
         for symbol, bars in bars_by_symbol.items()
@@ -137,6 +156,7 @@ def _analyze_symbol(
     as_of: datetime | None,
     parameter_hash: str,
     parameters: Mapping[str, object],
+    score_weights: Mapping[str, float],
     paired_context: Mapping[str, object] | None,
 ) -> IntradayTechnicalAnalysis:
     direction_confirmed = (False, False)
@@ -177,7 +197,11 @@ def _analyze_symbol(
     trend = _trend(valid, indicators) if enough_history else None
     if indicators["vwap_0945"] is None:
         reasons.append("missing 09:45 VWAP anchor")
-    breakdown = _score_components(valid, indicators, trend) if enough_history else None
+    breakdown = (
+        _score_components(valid, indicators, trend, score_weights)
+        if enough_history
+        else None
+    )
     grid_step: Decimal | None = None
     grid_buy_level: str | None = None
     grid_sell_level: str | None = None
@@ -600,8 +624,15 @@ def _rsi_value(average_gain: Decimal, average_loss: Decimal) -> Decimal:
 
 
 def _score_components(
-    bars: list[MinuteBar], indicators: dict[str, Decimal | None], trend: str | None
+    bars: list[MinuteBar],
+    indicators: dict[str, Decimal | None],
+    trend: str | None,
+    weights: object,
 ) -> dict[str, float]:
+    if not isinstance(weights, Mapping):
+        raise ValueError("configured score weights are unavailable")
+    kdj_weight = Decimal(str(weights.get("kdj", 8)))
+    rsi_weight = Decimal(str(weights.get("rsi", 7)))
     close = indicators["close"]
     mid, sigma = indicators["bollinger_mid"], indicators["bollinger_sigma"]
     atr, vwap = indicators["atr_14"], indicators["vwap"]
@@ -644,8 +675,8 @@ def _score_components(
         indicators["kdj_previous_d"],
         indicators["kdj_recent_min_k"],
     )
-    kdj_buy = 0
-    kdj_sell = 0
+    kdj_buy = ZERO
+    kdj_sell = ZERO
     if (
         k is not None
         and d is not None
@@ -654,26 +685,26 @@ def _score_components(
         and recent_min is not None
     ):
         if pk <= pd and k > d and recent_min <= 35:
-            kdj_buy = 8
+            kdj_buy = kdj_weight
         elif k > d and k > pk and k <= 45:
-            kdj_buy = 4
+            kdj_buy = kdj_weight / Decimal(2)
         if pk >= pd and k < d and max(pk, k) >= 65:
-            kdj_sell = 8
+            kdj_sell = kdj_weight
         elif k < d and k < pk and k >= 55:
-            kdj_sell = 4
+            kdj_sell = kdj_weight / Decimal(2)
     rsi = indicators["rsi_14"]
     previous_rsi = indicators["rsi_14_previous"]
-    rsi_buy = 0
-    rsi_sell = 0
+    rsi_buy = ZERO
+    rsi_sell = ZERO
     if rsi is not None and previous_rsi is not None:
         if previous_rsi <= 30 and rsi > 30:
-            rsi_buy = 7
+            rsi_buy = rsi_weight
         elif 30 < rsi <= 45 and rsi > previous_rsi:
-            rsi_buy = 4
+            rsi_buy = rsi_weight * Decimal(4) / Decimal(7)
         if previous_rsi >= 70 and rsi < 70:
-            rsi_sell = 7
+            rsi_sell = rsi_weight
         elif 55 <= rsi < 70 and rsi < previous_rsi:
-            rsi_sell = 4
+            rsi_sell = rsi_weight * Decimal(4) / Decimal(7)
     v = (close - vwap) / atr
     vwap_buy = Decimal(25) * _clip((-v - Decimal("0.30")) / Decimal("0.90"))
     vwap_sell = Decimal(25) * _clip((v - Decimal("0.30")) / Decimal("0.90"))

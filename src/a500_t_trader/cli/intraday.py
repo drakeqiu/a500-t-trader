@@ -13,6 +13,7 @@ from ..backtest.intraday_signals import replay_fixed_quantity_signals
 from ..market_data import MinuteBar
 from ..strategy.intraday_api import evaluate_intraday_strategy
 from ..strategy.intraday_v1_config import load_intraday_v1_config
+from ..backtest.issue83_comparison import run_issue83_comparison
 from .common import json_default
 
 
@@ -46,6 +47,16 @@ def register_commands(
         "--quantity", type=int, default=40000, help="fixed signal quantity in shares"
     )
     signal_replay.add_argument("--output", help="optional JSON output file")
+    comparison = commands.add_parser(
+        "intraday-compare-563360",
+        help="run the exploratory Issue 83 three-group account comparison",
+    )
+    comparison.add_argument(
+        "--bars",
+        default="data/market-history/563360_5m_20240601_20261028.json",
+        help="saved five-minute history JSON",
+    )
+    comparison.add_argument("--output", help="optional JSON output file")
 
 
 def handle(args: argparse.Namespace) -> int:
@@ -71,6 +82,35 @@ def handle(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    if args.command == "intraday-compare-563360":
+        try:
+            with open(args.bars, encoding="utf-8") as stream:
+                document = json.load(stream)
+            if not isinstance(document, dict) or not isinstance(
+                document.get("bars"), list
+            ):
+                raise ValueError("bars input must be a JSON object containing bars")
+            minute_bars = tuple(
+                MinuteBar(
+                    item["symbol"],
+                    datetime.fromisoformat(item["timestamp"]),
+                    item["interval_minutes"],
+                    Decimal(str(item["open"])),
+                    Decimal(str(item["high"])),
+                    Decimal(str(item["low"])),
+                    Decimal(str(item["close"])),
+                    item["volume"],
+                    None
+                    if item.get("amount") is None
+                    else Decimal(str(item["amount"])),
+                    item.get("is_completed", True),
+                )
+                for item in document["bars"]
+            )
+            return _print_result(run_issue83_comparison(minute_bars), args.output)
+        except Exception as error:
+            print(f"Unable to run Issue 83 comparison: {error}", file=sys.stderr)
+            return 2
     if args.command == "intraday-signals":
         try:
             with open(args.bars, encoding="utf-8") as stream:
