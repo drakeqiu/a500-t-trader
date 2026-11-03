@@ -14,12 +14,8 @@ from ..backtest.certification import CertificationResult, certification_is_curre
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
 from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
-from .intraday_technical import (
-    RULE_SOURCE_SHA256,
-    IntradayTechnicalAnalysis,
-    analyze_intraday_technical,
-)
-from .intraday_v1_config import IntradayV1Config
+from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
+from .intraday_v1_config import RULE_SOURCE_SHA256, IntradayV1Config
 from .premarket import MAX_INPUT_AGE
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -36,8 +32,9 @@ def evaluate_intraday_strategy(
     certification_binding: Mapping[str, object] | None = None,
     state_store: IntradayStrategyStateStore | None = None,
     pending_order_state: str | None = None,
-    grid_context: Mapping[str, Mapping[str, object]] | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
+    grid_context: Mapping[str, Mapping[str, object]] | None = None,
+    risk_exit_required: Mapping[str, bool] | None = None,
 ) -> dict[str, dict[str, object]]:
     """Evaluate source-exact candidates, then apply durable and sizing vetoes.
 
@@ -49,6 +46,9 @@ def evaluate_intraday_strategy(
     per-symbol mapping with optional ``take_profit`` and ``buyback`` records;
     each record supplies a cost-adjusted ``target_price`` and outstanding
     pair ``quantity``. Missing or malformed pair data never creates an intent.
+    ``risk_exit_required`` carries an explicit per-symbol upstream risk decision;
+    routing it bypasses only the RSI momentum gate, not execution safety checks.
+    The risk trigger itself must be supplied by the caller.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
@@ -69,6 +69,16 @@ def evaluate_intraday_strategy(
                 as_of=as_of,
                 paired_state=paired_state,
             )
+            analyses = {
+                symbol: _route_forced_risk_exit(
+                    analysis, (risk_exit_required or {}).get(symbol, False)
+                )
+                for symbol, analysis in analyses.items()
+            }
+            analyses = {
+                symbol: _filter_rsi_momentum(analysis)
+                for symbol, analysis in analyses.items()
+            }
         except (ValueError, TypeError, ArithmeticError) as error:
             analyzer_error = f"source-exact technical analysis unavailable: {error}"
     else:
@@ -124,7 +134,14 @@ def evaluate_intraday_strategy(
         elif analysis is None:
             reasons.append(f"technical candidate unavailable for {symbol}")
         else:
-            reasons.extend(analysis.reasons)
+            reasons.extend(
+                reason
+                for reason in analysis.reasons
+                if not (
+                    analysis.candidate == "FORCED_RISK_EXIT"
+                    and reason == "RSI_NOT_READY"
+                )
+            )
 
         certification_reasons = _certification_reasons(
             certification,
@@ -134,7 +151,8 @@ def evaluate_intraday_strategy(
         reasons.extend(certification_reasons)
         side = (
             "sell"
-            if analysis is not None and analysis.candidate == "TAKE_PROFIT"
+            if analysis is not None
+            and analysis.candidate in {"TAKE_PROFIT", "FORCED_RISK_EXIT"}
             else "buy"
             if analysis is not None and analysis.candidate == "BUYBACK"
             else analysis.candidate.lower()
@@ -378,7 +396,64 @@ def evaluate_intraday_strategy(
             },
             "reasons": reasons,
         }
+
     return results
+
+
+def _route_forced_risk_exit(
+    analysis: IntradayTechnicalAnalysis,
+    required: bool,
+) -> IntradayTechnicalAnalysis:
+    """Route an explicit upstream risk decision without applying RSI momentum."""
+    if required is not True or analysis.risk_status != "READY":
+        return analysis
+    reasons = [reason for reason in analysis.reasons if not reason.startswith("RSI_")]
+    if (
+        _rsi_value(analysis.indicators.get("rsi_14")) is None
+        or _rsi_value(analysis.indicators.get("rsi_14_previous")) is None
+    ):
+        reasons.append("RSI_NOT_READY")
+    return replace(
+        analysis,
+        candidate="FORCED_RISK_EXIT",
+        reasons=tuple(reasons),
+    )
+
+
+def _filter_rsi_momentum(
+    analysis: IntradayTechnicalAnalysis,
+) -> IntradayTechnicalAnalysis:
+    """Apply the RSI hard gate after price/KDJ analysis has formed a candidate."""
+    if analysis.candidate not in {"BUY", "BUYBACK", "SELL"}:
+        return analysis
+
+    current = _rsi_value(analysis.indicators.get("rsi_14"))
+    previous = _rsi_value(analysis.indicators.get("rsi_14_previous"))
+    if current is None or previous is None:
+        reason = "RSI_NOT_READY"
+    elif analysis.candidate in {"BUY", "BUYBACK"}:
+        if current > 30 and current > previous:
+            return analysis
+        reason = "RSI_BUY_MOMENTUM_NOT_CONFIRMED"
+    else:
+        if current < 70 and current < previous:
+            return analysis
+        reason = "RSI_SELL_MOMENTUM_NOT_CONFIRMED"
+    return replace(
+        analysis,
+        candidate="WAIT",
+        reasons=tuple(dict.fromkeys((*analysis.reasons, reason))),
+    )
+
+
+def _rsi_value(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except InvalidOperation, TypeError, ValueError:
+        return None
+    return parsed if parsed.is_finite() else None
 
 
 def _state_parameters(
@@ -463,6 +538,7 @@ def _certification_reasons(
     if config is None or binding is None:
         return ["certification binding unavailable"]
     expected = {
+        "strategy_id": config.strategy_id,
         "rule_source_sha256": config.rule_source_sha256,
         "rule_version": config.rule_version,
         "parameters": config.parameters,
@@ -475,12 +551,14 @@ def _certification_reasons(
     ):
         return ["certification rule source does not match current technical rules"]
     missing = (
+        "strategy_id",
         "rule_source_sha256",
         "rule_version",
         "parameters",
         "implementation_version",
         "data_snapshot_sha256",
         "cost_model",
+        "execution_assumptions",
     )
     absent = [
         field

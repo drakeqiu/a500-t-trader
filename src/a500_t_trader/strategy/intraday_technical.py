@@ -10,17 +10,22 @@ from datetime import datetime, time, timedelta
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 
 from ..market_data import SHANGHAI, MinuteBar
-from .intraday_v1_config import IntradayV1Config
-
-RULE_SOURCE_SHA256 = "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+from .intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID, IntradayV1Config
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
 BAR_INTERVAL = 5
 MINIMUM_HISTORY = 180
-TECHNICAL_PARAMETER_VERSION = "intraday-etf-t-v1"
+TECHNICAL_PARAMETER_VERSION = STRATEGY_ID
+
 TECHNICAL_PARAMETERS = {
-    "indicators": {"ema": [20, 60], "bollinger": [20, 2], "kdj": [9, 3, 3], "atr": 14},
+    "indicators": {
+        "ema": [20, 60],
+        "bollinger": [20, 2],
+        "kdj": [9, 3, 3],
+        "rsi": 14,
+        "atr": 14,
+    },
     "trend": {
         "bull_d": "0.20",
         "bull_m": "0.05",
@@ -28,7 +33,14 @@ TECHNICAL_PARAMETERS = {
         "strong_m": "0.25",
     },
     "scores": {
-        "weights": {"ema": 20, "bollinger": 20, "kdj": 15, "vwap": 25, "atr_grid": 20},
+        "weights": {
+            "ema": 20,
+            "bollinger": 20,
+            "kdj": 8,
+            "rsi": 7,
+            "vwap": 25,
+            "atr_grid": 20,
+        },
         "bollinger_z_start": "0.35",
         "bollinger_z_full": "1.00",
         "vwap_atr_start": "0.30",
@@ -92,10 +104,11 @@ def analyze_intraday_technical(
     grid_context: Mapping[str, Mapping[str, object]] | None = None,
     as_of: datetime | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
+    score_weights: Mapping[str, float] | None = None,
 ) -> dict[str, IntradayTechnicalAnalysis]:
     """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
-        config.strategy_id != TECHNICAL_PARAMETER_VERSION
+        config.strategy_id != STRATEGY_ID
         or config.rule_version != "V1.0"
         or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
     ):
@@ -104,6 +117,21 @@ def analyze_intraday_technical(
         )
     parameters = TECHNICAL_PARAMETERS if config is None else config.parameters
     parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
+    weights = score_weights
+    if weights is None:
+        score_section = parameters.get("scores")
+        weights = (
+            score_section.get("weights", {"kdj": 8, "rsi": 7})
+            if isinstance(score_section, Mapping)
+            else {"kdj": 8, "rsi": 7}
+        )
+    if score_weights is not None:
+        canonical_weights = json.dumps(
+            dict(sorted(score_weights.items())), sort_keys=True, separators=(",", ":")
+        )
+        parameter_hash = hashlib.sha256(
+            f"{parameter_hash}:{canonical_weights}".encode()
+        ).hexdigest()
     return {
         symbol: _analyze_symbol(
             symbol,
@@ -112,6 +140,7 @@ def analyze_intraday_technical(
             as_of,
             parameter_hash,
             parameters,
+            weights,
             (paired_state or {}).get(symbol),
         )
         for symbol, bars in bars_by_symbol.items()
@@ -125,6 +154,7 @@ def _analyze_symbol(
     as_of: datetime | None,
     parameter_hash: str,
     parameters: Mapping[str, object],
+    score_weights: Mapping[str, float],
     paired_context: Mapping[str, object] | None,
 ) -> IntradayTechnicalAnalysis:
     direction_confirmed = (False, False)
@@ -165,7 +195,11 @@ def _analyze_symbol(
     trend = _trend(valid, indicators) if enough_history else None
     if indicators["vwap_0945"] is None:
         reasons.append("missing 09:45 VWAP anchor")
-    breakdown = _score_components(valid, indicators, trend) if enough_history else None
+    breakdown = (
+        _score_components(valid, indicators, trend, score_weights)
+        if enough_history
+        else None
+    )
     grid_step: Decimal | None = None
     grid_buy_level: str | None = None
     grid_sell_level: str | None = None
@@ -347,10 +381,12 @@ def _analyze_symbol(
                 "kdj_buy",
                 "vwap_buy",
                 "atr_grid_buy",
+                "rsi_buy",
                 "ema_sell",
                 "boll_sell",
                 "kdj_sell",
                 "vwap_sell",
+                "rsi_sell",
                 "atr_grid_sell",
             )
         },
@@ -411,6 +447,7 @@ def _indicators(bars: list[MinuteBar]) -> dict[str, Decimal | None]:
         boll_upper = boll_mid + Decimal(2) * boll_sigma
         boll_lower = boll_mid - Decimal(2) * boll_sigma
     kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(bars)
+    rsi, previous_rsi = _wilder_rsi(closes, 14)
     atr = _wilder_atr(bars, 14)
     vwap, vwap_anchor = _session_vwaps(bars)
     return {
@@ -427,6 +464,8 @@ def _indicators(bars: list[MinuteBar]) -> dict[str, Decimal | None]:
         "kdj_previous_k": kdj_prev_k,
         "kdj_previous_d": kdj_prev_d,
         "kdj_recent_min_k": kdj_min,
+        "rsi_14": rsi,
+        "rsi_14_previous": previous_rsi,
         "atr_14": atr,
         "vwap": vwap,
         "vwap_0945": vwap_anchor,
@@ -546,9 +585,53 @@ def _clip(value: Decimal) -> Decimal:
     return min(ONE, max(ZERO, value))
 
 
+def _wilder_rsi(
+    values: list[Decimal], period: int
+) -> tuple[Decimal | None, Decimal | None]:
+    if len(values) <= period:
+        return None, None
+    gains = losses = ZERO
+    for index in range(1, period + 1):
+        change = values[index] - values[index - 1]
+        gains += max(change, ZERO)
+        losses += max(-change, ZERO)
+    average_gain = gains / Decimal(period)
+    average_loss = losses / Decimal(period)
+    current = _rsi_value(average_gain, average_loss)
+    previous = None
+    for index in range(period + 1, len(values)):
+        change = values[index] - values[index - 1]
+        average_gain = (
+            average_gain * Decimal(period - 1) + max(change, ZERO)
+        ) / Decimal(period)
+        average_loss = (
+            average_loss * Decimal(period - 1) + max(-change, ZERO)
+        ) / Decimal(period)
+        previous = current
+        current = _rsi_value(average_gain, average_loss)
+    return current, previous
+
+
+def _rsi_value(average_gain: Decimal, average_loss: Decimal) -> Decimal:
+    if average_gain == ZERO and average_loss == ZERO:
+        return Decimal(50)
+    if average_loss == ZERO:
+        return Decimal(100)
+    if average_gain == ZERO:
+        return ZERO
+    return Decimal(100) * average_gain / (average_gain + average_loss)
+
+
 def _score_components(
-    bars: list[MinuteBar], indicators: dict[str, Decimal | None], trend: str | None
+    bars: list[MinuteBar],
+    indicators: dict[str, Decimal | None],
+    trend: str | None,
+    weights: object,
 ) -> dict[str, float]:
+    if not isinstance(weights, Mapping):
+        raise ValueError("configured score weights are unavailable")
+    kdj_weight = Decimal(str(weights.get("kdj", 8)))
+    rsi_weight = Decimal(str(weights.get("rsi", 7)))
     close = indicators["close"]
     mid, sigma = indicators["bollinger_mid"], indicators["bollinger_sigma"]
     atr, vwap = indicators["atr_14"], indicators["vwap"]
@@ -567,6 +650,8 @@ def _score_components(
             "boll_sell": 0.0,
             "kdj_buy": 0.0,
             "kdj_sell": 0.0,
+            "rsi_buy": 0.0,
+            "rsi_sell": 0.0,
             "vwap_buy": 0.0,
             "vwap_sell": 0.0,
             "atr_grid": 0.0,
@@ -589,8 +674,8 @@ def _score_components(
         indicators["kdj_previous_d"],
         indicators["kdj_recent_min_k"],
     )
-    kdj_buy = 0
-    kdj_sell = 0
+    kdj_buy = ZERO
+    kdj_sell = ZERO
     if (
         k is not None
         and d is not None
@@ -599,13 +684,26 @@ def _score_components(
         and recent_min is not None
     ):
         if pk <= pd and k > d and recent_min <= 35:
-            kdj_buy = 15
+            kdj_buy = kdj_weight
         elif k > d and k > pk and k <= 45:
-            kdj_buy = 8
+            kdj_buy = kdj_weight / Decimal(2)
         if pk >= pd and k < d and max(pk, k) >= 65:
-            kdj_sell = 15
+            kdj_sell = kdj_weight
         elif k < d and k < pk and k >= 55:
-            kdj_sell = 8
+            kdj_sell = kdj_weight / Decimal(2)
+    rsi = indicators["rsi_14"]
+    previous_rsi = indicators["rsi_14_previous"]
+    rsi_buy = ZERO
+    rsi_sell = ZERO
+    if rsi is not None and previous_rsi is not None:
+        if previous_rsi <= 30 and rsi > 30:
+            rsi_buy = rsi_weight
+        elif 30 < rsi <= 45 and rsi > previous_rsi:
+            rsi_buy = rsi_weight * Decimal(4) / Decimal(7)
+        if previous_rsi >= 70 and rsi < 70:
+            rsi_sell = rsi_weight
+        elif 55 <= rsi < 70 and rsi < previous_rsi:
+            rsi_sell = rsi_weight * Decimal(4) / Decimal(7)
     v = (close - vwap) / atr
     vwap_buy = Decimal(25) * _clip((-v - Decimal("0.30")) / Decimal("0.90"))
     vwap_sell = Decimal(25) * _clip((v - Decimal("0.30")) / Decimal("0.90"))
@@ -616,11 +714,13 @@ def _score_components(
         "boll_sell": float(boll_sell),
         "kdj_buy": float(kdj_buy),
         "kdj_sell": float(kdj_sell),
+        "rsi_buy": float(rsi_buy),
+        "rsi_sell": float(rsi_sell),
         "vwap_buy": float(vwap_buy),
         "vwap_sell": float(vwap_sell),
         "atr_grid": 0.0,
-        "buy_total": float(ema_buy + boll_buy + kdj_buy + vwap_buy),
-        "sell_total": float(ema_sell + boll_sell + kdj_sell + vwap_sell),
+        "buy_total": float(ema_buy + boll_buy + kdj_buy + rsi_buy + vwap_buy),
+        "sell_total": float(ema_sell + boll_sell + kdj_sell + rsi_sell + vwap_sell),
     }
 
 

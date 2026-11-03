@@ -79,6 +79,8 @@ class TechnicalAnalysisSignalProvider:
         grid_context: Mapping[str, Mapping[str, object]] | None = None,
         grid_context_for: TechnicalGridContextProvider | None = None,
         max_history_bars: int | None = None,
+        score_weights: Mapping[str, float] | None = None,
+        rsi_momentum_filter: bool = False,
     ) -> None:
         if max_history_bars is not None and max_history_bars <= 0:
             raise ValueError("max_history_bars must be positive")
@@ -87,6 +89,8 @@ class TechnicalAnalysisSignalProvider:
         self._grid_context = grid_context
         self._grid_context_for = grid_context_for
         self._max_history_bars = max_history_bars
+        self._score_weights = score_weights
+        self._rsi_momentum_filter = rsi_momentum_filter
 
     def signals(
         self, symbol: str, bars: tuple[MinuteBar, ...]
@@ -113,14 +117,31 @@ class TechnicalAnalysisSignalProvider:
                 config=self._config,
                 grid_context=None if context is None else {symbol: context},
                 as_of=bar.timestamp,
+                score_weights=self._score_weights,
             )[symbol]
             direction = analysis.candidate.lower()
+            if (
+                self._rsi_momentum_filter
+                and direction in {"buy", "sell"}
+                and not _rsi_momentum_allowed(analysis, direction)
+            ):
+                continue
             if analysis.risk_status != "READY" or direction not in {"buy", "sell"}:
                 continue
             quantity = self._quantity_for.quantity_for(symbol, analysis, history_tuple)
             if quantity is not None:
                 signals.append(BarSignal(bar.timestamp, direction, quantity))
         return tuple(signals)
+
+
+def _rsi_momentum_allowed(analysis: IntradayTechnicalAnalysis, direction: str) -> bool:
+    current = analysis.indicators.get("rsi_14")
+    previous = analysis.indicators.get("rsi_14_previous")
+    if not isinstance(current, Decimal) or not isinstance(previous, Decimal):
+        return False
+    if direction == "buy":
+        return current > Decimal(30) and current > previous
+    return direction == "sell" and current < Decimal(70) and current < previous
 
 
 @dataclass(frozen=True, slots=True)

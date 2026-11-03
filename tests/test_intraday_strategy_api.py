@@ -20,11 +20,13 @@ from a500_t_trader.strategy.intraday_state import (
     StrategyRecommendation,
 )
 from a500_t_trader.strategy.intraday_technical import (
-    RULE_SOURCE_SHA256,
     TECHNICAL_PARAMETERS,
     IntradayTechnicalAnalysis,
 )
-from a500_t_trader.strategy.intraday_v1_config import IntradayV1Config
+from a500_t_trader.strategy.intraday_v1_config import (
+    RULE_SOURCE_SHA256,
+    IntradayV1Config,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI)
@@ -123,7 +125,7 @@ def _config(
         "liquidity": {"minimum_amount": "0"},
     }
     return IntradayV1Config(
-        "intraday-etf-t-v1",
+        "intraday-etf-t-v1-rsi",
         "V1.0",
         "commit:test",
         "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
@@ -229,17 +231,143 @@ def _seed_pair(
         )
 
 
-def _candidate_analysis(candidate: str) -> IntradayTechnicalAnalysis:
+def _candidate_analysis(
+    candidate: str,
+    current_rsi: Decimal | None = Decimal("35"),
+    previous_rsi: Decimal | None = Decimal("34"),
+) -> IntradayTechnicalAnalysis:
     return IntradayTechnicalAnalysis(
         symbol="510300",
         trend="RANGE",
-        indicators={"close": Decimal("4.00")},
+        indicators={
+            "close": Decimal("4.00"),
+            "rsi_14": current_rsi,
+            "rsi_14_previous": previous_rsi,
+        },
         scores={"buy": 80.0, "sell": 80.0, "delta": 20.0},
         candidate=candidate,
         risk_status="READY",
         reasons=(),
         completed_valid_bars=180,
     )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "current_rsi", "previous_rsi", "expected_reason"),
+    (
+        ("BUY", None, Decimal("29"), "RSI_NOT_READY"),
+        ("BUY", Decimal("30"), Decimal("29"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("BUY", Decimal("35"), Decimal("35"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("BUYBACK", Decimal("25"), Decimal("22"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", Decimal("70"), Decimal("71"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", Decimal("65"), Decimal("65"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
+        ("SELL", None, Decimal("71"), "RSI_NOT_READY"),
+    ),
+)
+def test_public_evaluation_blocks_ordinary_candidates_without_rsi_momentum(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: str,
+    current_rsi: Decimal | None,
+    previous_rsi: Decimal | None,
+    expected_reason: str,
+) -> None:
+    analysis = _candidate_analysis(candidate, current_rsi, previous_rsi)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert isinstance(signal["reasons"], list)
+    assert isinstance(result["reasons"], list)
+    assert signal["candidate"] == "WAIT"
+    assert expected_reason in signal["reasons"]
+    assert expected_reason in result["reasons"]
+    execution = result["execution"]
+    assert isinstance(execution, dict)
+    assert execution["allowed"] is False
+    assert execution["quantity"] == 0
+
+
+@pytest.mark.parametrize(
+    ("candidate", "current_rsi", "previous_rsi"),
+    (
+        ("BUY", Decimal("31"), Decimal("30")),
+        ("BUYBACK", Decimal("31"), Decimal("30")),
+        ("SELL", Decimal("69"), Decimal("70")),
+    ),
+)
+def test_public_evaluation_preserves_rsi_confirmed_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: str,
+    current_rsi: Decimal,
+    previous_rsi: Decimal,
+) -> None:
+    analysis = _candidate_analysis(candidate, current_rsi, previous_rsi)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == candidate
+
+
+def test_public_evaluation_does_not_rsi_block_take_profit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analysis = _candidate_analysis("TAKE_PROFIT", None, None)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "TAKE_PROFIT"
+    assert signal["scores"] == analysis.scores
+    indicators = signal["indicators"]
+    assert isinstance(indicators, dict)
+    assert isinstance(result["reasons"], list)
+    assert indicators["rsi_14"] is None
+    assert indicators["rsi_14_previous"] is None
+    assert not any(reason.startswith("RSI_") for reason in result["reasons"])
+
+
+def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analysis = _candidate_analysis("SELL", None, None)
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate(risk_exit_required={"510300": True})["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "FORCED_RISK_EXIT"
+    assert isinstance(signal["reasons"], list)
+    assert isinstance(result["reasons"], list)
+    execution = result["execution"]
+    assert isinstance(execution, dict)
+    assert "RSI_NOT_READY" in signal["reasons"]
+    assert "RSI_NOT_READY" not in result["reasons"]
+    assert execution["quantity"] == 0
+    assert execution["allowed"] is False
 
 
 def _paired_api_result(
@@ -272,12 +400,17 @@ def _paired_api_result(
 
 def _current_binding(config: IntradayV1Config) -> dict[str, object]:
     return {
+        "strategy_id": config.strategy_id,
         "rule_source_sha256": config.rule_source_sha256,
         "rule_version": config.rule_version,
         "parameters": config.parameters,
         "implementation_version": config.implementation_version,
         "data_snapshot_sha256": "b" * 64,
         "cost_model": config.fees,
+        "execution_assumptions": {
+            "fill_model": "next-bar-open",
+            "initial_account": "full-ledger",
+        },
     }
 
 
@@ -295,6 +428,28 @@ def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context(
         in signal["reasons"]
     )
     assert result["risk"]["status"] == "BLOCKED"  # type: ignore[index]
+
+
+def test_uncertified_technical_intent_is_visible_without_actionable_quantity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda *args, **kwargs: {"510300": _candidate_analysis("BUY")},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    execution = result["execution"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "BUY"
+    assert isinstance(result["reasons"], list)
+    assert isinstance(execution, dict)
+    assert execution["allowed"] is False
+    assert execution["quantity"] == 0
+    assert "certification evidence unavailable" in result["reasons"]
 
 
 def test_certification_gate_reports_missing_failed_and_mismatched_binding() -> None:

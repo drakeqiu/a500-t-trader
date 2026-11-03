@@ -9,9 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
-STRATEGY_ID = "intraday-etf-t-v1"
-
+CONFIG_SCHEMA_VERSION = "2.0"
+STRATEGY_ID = "intraday-etf-t-v1-rsi"
+RULE_SOURCE = (
+    "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
+)
+RULE_SOURCE_SHA256 = "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
 _REQUIRED_TOP_LEVEL = (
+    "schema_version",
     "strategy_id",
     "rule_version",
     "implementation_version",
@@ -23,6 +28,7 @@ _REQUIRED_TOP_LEVEL = (
     "account",
     "securities",
 )
+
 _REQUIRED_PARAMETER_SECTIONS = (
     "indicators",
     "trend",
@@ -33,6 +39,7 @@ _REQUIRED_PARAMETER_SECTIONS = (
     "liquidity",
     "timing",
 )
+
 _REQUIRED_CERTIFICATION_FIELDS = (
     "net_return_minimum",
     "paired_trade_average_net_profit_minimum",
@@ -45,6 +52,7 @@ _REQUIRED_CERTIFICATION_FIELDS = (
     "walk_forward",
     "neighbor_parameter_perturbation",
 )
+
 _REQUIRED_FEE_FIELDS = (
     "commission_rate",
     "minimum_commission",
@@ -52,6 +60,7 @@ _REQUIRED_FEE_FIELDS = (
     "source",
     "as_of",
 )
+
 _REQUIRED_ACCOUNT_FIELDS = ("as_of", "cash", "positions")
 _REQUIRED_POSITION_FIELDS = (
     "quantity",
@@ -87,26 +96,44 @@ class IntradayV1Config:
     securities: dict[str, dict[str, object]]
     fingerprint: str
 
+    @property
+    def schema_version(self) -> str:
+        return CONFIG_SCHEMA_VERSION
+
 
 def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     """Load the complete V1 configuration without supplying implicit values."""
     document = json.loads(Path(path).read_text(encoding="utf-8"))
     root = _object(document, "configuration")
+    schema_version = _text(root.get("schema_version"), "schema_version")
+    if schema_version != CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported schema_version {schema_version!r}; "
+            f"expected {CONFIG_SCHEMA_VERSION!r}"
+        )
     _require(root, _REQUIRED_TOP_LEVEL, "")
 
     strategy_id = _text(root["strategy_id"], "strategy_id")
     if strategy_id != STRATEGY_ID:
         raise ValueError(f"strategy_id must be {STRATEGY_ID!r}")
     rule_version = _text(root["rule_version"], "rule_version")
+    if rule_version != "V1.0":
+        raise ValueError("rule_version must be 'V1.0' for the RSI ruleset")
     implementation_version = _text(
         root["implementation_version"], "implementation_version"
     )
     rule_source = _text(root["rule_source"], "rule_source")
+    if rule_source != RULE_SOURCE:
+        raise ValueError(f"rule_source must be {RULE_SOURCE!r}")
     rule_source_sha256 = _text(root["rule_source_sha256"], "rule_source_sha256")
     if len(rule_source_sha256) != 64 or any(
         char not in "0123456789abcdefABCDEF" for char in rule_source_sha256
     ):
         raise ValueError("rule_source_sha256 must be a 64-character SHA-256 digest")
+    if rule_source_sha256.lower() != RULE_SOURCE_SHA256:
+        raise ValueError(
+            "rule_source_sha256 does not match the tracked RSI strategy source"
+        )
     parameters = _object(root["parameters"], "parameters")
     _require(parameters, _REQUIRED_PARAMETER_SECTIONS, "parameters")
     for section in _REQUIRED_PARAMETER_SECTIONS:

@@ -1,10 +1,14 @@
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from _pytest.capture import CaptureFixture
 
 from a500_t_trader.backtest.intraday_signals import replay_fixed_quantity_signals
+from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import MinuteBar
 
 
@@ -31,3 +35,36 @@ def test_fixed_quantity_replay_emits_no_candidate_before_warmup() -> None:
     )
 
     assert replay_fixed_quantity_signals("563360", bars) == ()
+
+
+def test_fixed_quantity_replay_is_explicitly_excluded_from_rsi_evidence(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    bars = tmp_path / "bars.json"
+    bars.write_text(
+        json.dumps(
+            {
+                "bars": [
+                    {
+                        "symbol": "563360",
+                        "timestamp": "2026-10-30T09:30:00+08:00",
+                        "interval_minutes": 5,
+                        "open": "1.000",
+                        "high": "1.001",
+                        "low": "0.999",
+                        "close": "1.000",
+                        "volume": 10000,
+                        "amount": "10000",
+                        "is_completed": True,
+                    }
+                ]
+            },
+        ),
+    )
+
+    assert main(["intraday-signals", "--bars", str(bars)]) == 0
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["research_status"] == "historical_research_only"
+    assert result["rsi_comparison_eligible"] is False
+    assert result["rsi_certification_eligible"] is False
