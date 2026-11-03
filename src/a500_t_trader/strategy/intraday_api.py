@@ -50,6 +50,9 @@ def evaluate_intraday_strategy(
     per-symbol mapping with optional ``take_profit`` and ``buyback`` records;
     each record supplies a cost-adjusted ``target_price`` and outstanding
     pair ``quantity``. Missing or malformed pair data never creates an intent.
+    ``risk_exit_required`` carries an explicit per-symbol upstream risk decision;
+    routing it bypasses only the RSI momentum gate, not execution safety checks.
+    The risk trigger itself must be supplied by the caller.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
@@ -135,7 +138,14 @@ def evaluate_intraday_strategy(
         elif analysis is None:
             reasons.append(f"technical candidate unavailable for {symbol}")
         else:
-            reasons.extend(analysis.reasons)
+            reasons.extend(
+                reason
+                for reason in analysis.reasons
+                if not (
+                    analysis.candidate == "FORCED_RISK_EXIT"
+                    and reason == "RSI_NOT_READY"
+                )
+            )
 
         certification_reasons = _certification_reasons(
             certification,
@@ -401,12 +411,16 @@ def _route_forced_risk_exit(
     """Route an explicit upstream risk decision without applying RSI momentum."""
     if required is not True or analysis.risk_status != "READY":
         return analysis
+    reasons = [reason for reason in analysis.reasons if not reason.startswith("RSI_")]
+    if (
+        _rsi_value(analysis.indicators.get("rsi_14")) is None
+        or _rsi_value(analysis.indicators.get("rsi_14_previous")) is None
+    ):
+        reasons.append("RSI_NOT_READY")
     return replace(
         analysis,
         candidate="FORCED_RISK_EXIT",
-        reasons=tuple(
-            reason for reason in analysis.reasons if not reason.startswith("RSI_")
-        ),
+        reasons=tuple(reasons),
     )
 
 def _filter_rsi_momentum(

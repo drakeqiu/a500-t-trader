@@ -342,7 +342,7 @@ def test_public_evaluation_does_not_rsi_block_take_profit(
 def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    analysis = _candidate_analysis("SELL", Decimal("70"), Decimal("71"))
+    analysis = _candidate_analysis("SELL", None, None)
     monkeypatch.setattr(
         intraday_api,
         "analyze_intraday_technical",
@@ -354,7 +354,8 @@ def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
     signal = result["signal"]
     assert isinstance(signal, dict)
     assert signal["candidate"] == "FORCED_RISK_EXIT"
-    assert not any(reason.startswith("RSI_") for reason in result["reasons"])
+    assert "RSI_NOT_READY" in signal["reasons"]
+    assert "RSI_NOT_READY" not in result["reasons"]
     assert result["execution"]["quantity"] == 0
     assert result["execution"]["allowed"] is False
 
