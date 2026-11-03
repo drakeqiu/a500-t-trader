@@ -144,7 +144,7 @@ def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
     assert result.final_holdings == 0
     
     
-def test_v1_dynamic_sizing_respects_protected_inventory_and_capacity() -> None:
+def test_v1_dynamic_sizing_fails_closed_without_risk_history() -> None:
     bars = (bar(30, 0, "10"), bar(30, 1, "10"))
     starting = AccountSnapshot(
         account().as_of,
@@ -167,11 +167,114 @@ def test_v1_dynamic_sizing_respects_protected_inventory_and_capacity() -> None:
         implementation_version="test-v1",
     )
 
-    assert result.fills[0].quantity == 1_600
-    assert result.final_holdings == 11_600
+    assert result.fills == ()
+    assert result.final_holdings == 10_000
+
+
+def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + index, tzinfo=TZ),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(15)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("100_000"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(
+            BarSignal(bars[13].timestamp, "buy", 100),
+            BarSignal(bars[13].timestamp, "buy", 100),
+        ),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=7_000,
+            fee_bps=Decimal("0.5"),
+            minimum_commission=Decimal("0.1"),
+        ),
+        strategy_parameters={"sizing": "v1"},
+        implementation_version="test-v1",
+    )
+
+    assert [(fill.side, fill.quantity) for fill in result.fills] == [
+        ("buy", 1_600),
+        ("buy", 400),
+    ]
+    assert len(result.account_states) == len(bars)
+    submitted = result.account_states[13]
+    assert [item["quantity"] for item in submitted["pending_orders"]] == [1_600, 400]
+    assert submitted["nav_at_close"] == "200000"
+    assert result.account_states[-1]["holdings"] == 12_000
+    assert result.account_states[-1]["protected_floor"] == 7_000
+
+
+def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + index, tzinfo=TZ),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(16)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("200_000"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(
+            BarSignal(bars[13].timestamp, "sell", 3_000),
+            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback"),
+            BarSignal(bars[14].timestamp, "buy", 3_000, "buyback"),
+        ),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=7_000,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert [(fill.side, fill.quantity) for fill in result.fills] == [
+        ("sell", 3_000),
+        ("buy", 2_400),
+        ("buy", 600),
+    ]
+    assert result.pair_ledger[0]["status"] == "closed"
+    assert result.pair_ledger[0]["remaining_quantity"] == 0
+    assert result.pair_ledger[0]["buyback_quantity"] == 3_000
 
 def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
-    bars = (bar(30, 0, "10"), bar(30, 1, "10"))
+    bars = (bar(30, 0, "10", 100_000), bar(30, 1, "10", 100_000))
     starting = AccountSnapshot(
         account().as_of,
         {"510300": 10_000},
@@ -193,8 +296,8 @@ def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
         implementation_version="test-v1",
     )
 
-    assert result.fills[0].quantity == 3_000
-    assert result.final_holdings == 7_000
+    assert result.fills[0].quantity == 2_000
+    assert result.final_holdings == 8_000
 
 
 def test_public_simulation_accepts_strategy_signal_provider() -> None:
