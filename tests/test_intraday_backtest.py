@@ -253,13 +253,13 @@ def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> No
 
     assert [(fill.side, fill.quantity) for fill in result.fills] == [
         ("buy", 1_600),
-        ("buy", 400),
+        ("buy", 300),
     ]
     assert len(result.account_states) == len(bars)
     submitted = result.account_states[13]
     assert [item["quantity"] for item in submitted["pending_orders"]] == [1_600, 400]
     assert submitted["nav_at_close"] == "200000"
-    assert result.account_states[-1]["holdings"] == 12_000
+    assert result.account_states[-1]["holdings"] == 11_900
     assert result.account_states[-1]["protected_floor"] == 7_000
 def test_v1_dynamic_buy_rechecks_position_capacity_at_fill_price() -> None:
     bars = tuple(
