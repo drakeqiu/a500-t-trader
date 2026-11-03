@@ -22,12 +22,14 @@ _REQUIRED_CONFIG = (
     "neighbor_parameter_perturbation",
 )
 _REQUIRED_BINDING = (
+    "strategy_id",
     "rule_source_sha256",
     "rule_version",
     "parameters",
     "implementation_version",
     "data_snapshot_sha256",
     "cost_model",
+    "execution_assumptions",
 )
 
 
@@ -89,6 +91,13 @@ def certify_intraday_backtest(
             blockers.append("binding.parameters must be an object")
         if not isinstance(binding.get("cost_model"), Mapping):
             blockers.append("binding.cost_model must be an object")
+        for name in ("strategy_id", "rule_version", "implementation_version"):
+            value = binding.get(name)
+            if not isinstance(value, str) or not value.strip():
+                blockers.append(f"binding.{name} must be non-empty text")
+        assumptions = binding.get("execution_assumptions")
+        if not isinstance(assumptions, Mapping) or not assumptions:
+            blockers.append("binding.execution_assumptions must be a non-empty object")
     if thresholds is not None:
         _evaluate(evidence, thresholds, blockers)
     blockers = list(dict.fromkeys(blockers))

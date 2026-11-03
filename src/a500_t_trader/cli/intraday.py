@@ -105,6 +105,14 @@ def handle(args: argparse.Namespace) -> int:
             )
             result = {
                 "strategy": "intraday-etf-t-v1-technical-candidate-replay",
+                "research_status": "historical_research_only",
+                "rsi_comparison_eligible": False,
+                "rsi_certification_eligible": False,
+                "evidence_scope": (
+                    "Fixed-share technical replay is a historical research artifact only; "
+                    "it is not a complete account backtest and is excluded from all RSI "
+                    "comparison and certification evidence."
+                ),
                 "symbol": symbol,
                 "signal_quantity": args.quantity,
                 "first_bar": minute_bars[0].timestamp,
@@ -127,6 +135,8 @@ def handle(args: argparse.Namespace) -> int:
                     "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
                     "missing history is not synthesized",
                     "grid-level cooldown is absent; repeated candidates may occur",
+                    "fixed-share technical replay is historical research only and excluded from "
+                    "RSI comparison and certification evidence",
                     "daily bar completeness has not been independently audited",
                 ],
             }

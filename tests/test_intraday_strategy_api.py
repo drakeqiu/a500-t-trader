@@ -272,12 +272,17 @@ def _paired_api_result(
 
 def _current_binding(config: IntradayV1Config) -> dict[str, object]:
     return {
+        "strategy_id": config.strategy_id,
         "rule_source_sha256": config.rule_source_sha256,
         "rule_version": config.rule_version,
         "parameters": config.parameters,
         "implementation_version": config.implementation_version,
         "data_snapshot_sha256": "b" * 64,
         "cost_model": config.fees,
+        "execution_assumptions": {
+            "fill_model": "next-bar-open",
+            "initial_account": "full-ledger",
+        },
     }
 
 
@@ -295,6 +300,27 @@ def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context(
         in signal["reasons"]
     )
     assert result["risk"]["status"] == "BLOCKED"  # type: ignore[index]
+
+
+def test_uncertified_technical_intent_is_visible_without_actionable_quantity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda *args, **kwargs: {"510300": _candidate_analysis("BUY")},
+    )
+
+    result = _evaluate()["510300"]
+
+    signal = result["signal"]
+    execution = result["execution"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "BUY"
+    assert isinstance(execution, dict)
+    assert execution["allowed"] is False
+    assert execution["quantity"] == 0
+    assert "certification evidence unavailable" in result["reasons"]
 
 
 def test_certification_gate_reports_missing_failed_and_mismatched_binding() -> None:

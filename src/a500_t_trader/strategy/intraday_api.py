@@ -463,6 +463,7 @@ def _certification_reasons(
     if config is None or binding is None:
         return ["certification binding unavailable"]
     expected = {
+        "strategy_id": config.strategy_id,
         "rule_source_sha256": config.rule_source_sha256,
         "rule_version": config.rule_version,
         "parameters": config.parameters,
@@ -475,12 +476,14 @@ def _certification_reasons(
     ):
         return ["certification rule source does not match current technical rules"]
     missing = (
+        "strategy_id",
         "rule_source_sha256",
         "rule_version",
         "parameters",
         "implementation_version",
         "data_snapshot_sha256",
         "cost_model",
+        "execution_assumptions",
     )
     absent = [
         field

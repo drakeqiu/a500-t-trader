@@ -10,15 +10,15 @@ from a500_t_trader.backtest import (
 
 def binding() -> dict[str, object]:
     return {
+        "strategy_id": "intraday-etf-t-v1",
         "rule_source_sha256": "a" * 64,
         "rule_version": "V1.0",
         "parameters": {"grid": {"width": "0.3%"}},
         "implementation_version": "commit:abc123",
         "data_snapshot_sha256": "b" * 64,
         "cost_model": {"commission": "0.0003", "slippage_bps": "2"},
+        "execution_assumptions": {"fill_model": "next-bar-open", "account": "full-ledger"},
     }
-
-
 def config() -> dict[str, object]:
     return {
         "net_return_minimum": "0.01",
@@ -98,6 +98,25 @@ def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> 
         )
         is False
     )
+    assert certification_is_current(
+        result, binding() | {"strategy_id": "intraday-etf-t-rsi-v1"}, config()
+    ) is False
+    assert certification_is_current(
+        result,
+        binding() | {"execution_assumptions": {"fill_model": "close"}},
+        config(),
+    ) is False
+
+
+def test_certificate_requires_ruleset_identity_and_execution_assumptions() -> None:
+    for incomplete in (
+        binding() | {"strategy_id": ""},
+        binding() | {"execution_assumptions": {}},
+        {key: value for key, value in binding().items() if key != "strategy_id"},
+    ):
+        result = certify_intraday_backtest(passing_evidence(), incomplete, config())
+        assert result.certified is False
+        assert result.fingerprint is None
 
 
 def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() -> None:
