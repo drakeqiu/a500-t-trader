@@ -12,7 +12,8 @@ from a500_t_trader.strategy.intraday_v1_config import (
 
 def _complete_config() -> dict[str, object]:
     return {
-        "strategy_id": "intraday-etf-t-v1",
+        "schema_version": "2.0",
+        "strategy_id": "intraday-etf-t-v1-rsi",
         "rule_version": "V1.0",
         "implementation_version": "commit:abc123",
         "rule_source": (
@@ -20,7 +21,7 @@ def _complete_config() -> dict[str, object]:
             "intraday_etf_t_quantitative_strategy_v1.0.md"
         ),
         "rule_source_sha256": (
-            "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+            "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
         ),
         "parameters": {
             "indicators": {"ema": [20, 60], "bollinger": [20, 2]},
@@ -97,14 +98,15 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     )
 
     assert isinstance(config, IntradayV1Config)
-    assert config.strategy_id == "intraday-etf-t-v1"
+    assert config.schema_version == "2.0"
+    assert config.strategy_id == "intraday-etf-t-v1-rsi"
     assert config.rule_version == "V1.0"
     assert config.rule_source == (
         "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         config.rule_source_sha256
-        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
     )
     assert len(config.fingerprint) == 64
     assert config.securities["510300"]["t_plus"] == "T+1"
@@ -164,6 +166,40 @@ def test_rule_source_must_have_verifiable_sha256(tmp_path: Path) -> None:
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
 
 
+def test_legacy_schema_is_rejected_without_migration(tmp_path: Path) -> None:
+    document = _complete_config()
+    del document["schema_version"]
+
+    with pytest.raises(ValueError, match="schema_version"):
+        load_intraday_v1_config(_write_config(tmp_path / "legacy.json", document))
+
+
+def test_unsupported_major_schema_is_rejected(tmp_path: Path) -> None:
+    document = _complete_config()
+    document["schema_version"] = "1.0"
+
+    with pytest.raises(ValueError, match="unsupported schema_version"):
+        load_intraday_v1_config(_write_config(tmp_path / "old-major.json", document))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    (
+        ("strategy_id", "intraday-etf-t-v1", "strategy_id"),
+        ("rule_source", "different-source.md", "rule_source"),
+        ("rule_source_sha256", "0" * 64, "does not match"),
+    ),
+)
+def test_ruleset_identity_mismatches_fail_closed(
+    tmp_path: Path, field: str, value: str, reason: str
+) -> None:
+    document = _complete_config()
+    document[field] = value
+
+    with pytest.raises(ValueError, match=reason):
+        load_intraday_v1_config(_write_config(tmp_path / "mismatch.json", document))
+
+
 def test_fingerprint_changes_when_any_strategy_input_changes(tmp_path: Path) -> None:
     first = load_intraday_v1_config(
         _write_config(tmp_path / "first.json", _complete_config())
@@ -184,14 +220,16 @@ def test_cli_validates_and_reports_auditable_configuration(
     assert main(["intraday-config", "--config", str(path)]) == 0
     output = json.loads(capsys.readouterr().out)
 
-    assert output["strategy_id"] == "intraday-etf-t-v1"
+    assert output["schema_version"] == "2.0"
+    assert output["strategy_id"] == "intraday-etf-t-v1-rsi"
     assert output["rule_version"] == "V1.0"
+    assert output["implementation_version"] == "commit:abc123"
     assert output["rule_source"] == (
         "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         output["rule_source_sha256"]
-        == "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
     )
     assert len(output["configuration_fingerprint"]) == 64
 
