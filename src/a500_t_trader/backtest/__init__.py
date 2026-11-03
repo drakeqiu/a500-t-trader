@@ -41,6 +41,9 @@ from .intraday import (
     IntradayFill as IntradayFill,
 )
 from .intraday import (
+    SignalIntent as SignalIntent,
+)
+from .intraday import (
     StrategyRulesUnavailableError as StrategyRulesUnavailableError,
 )
 from .intraday import (

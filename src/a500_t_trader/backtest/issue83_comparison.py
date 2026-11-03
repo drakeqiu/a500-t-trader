@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -21,6 +21,7 @@ from .intraday import (
     TechnicalGridContextProvider,
     run_intraday_backtest,
 )
+from .session_amount import complete_session_amount
 
 SYMBOL = "563360"
 START = datetime(2024, 10, 18, 14, 0, tzinfo=SHANGHAI)
@@ -28,6 +29,23 @@ END = datetime(2026, 10, 28, 15, 0, tzinfo=SHANGHAI)
 WARMUP_START = datetime(2024, 10, 15, 0, 0, tzinfo=SHANGHAI)
 INITIAL_ACCOUNT_TIME = datetime(2024, 10, 18, 13, 55, tzinfo=SHANGHAI)
 IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
+
+
+def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
+    """Return the trailing 20 complete 48-bar session amounts, if all are valid."""
+    daily: dict[date, list[MinuteBar]] = {}
+    for bar in bars:
+        day = bar.timestamp.astimezone(SHANGHAI).date()
+        daily.setdefault(day, []).append(bar)
+    sessions: list[tuple[date, Decimal]] = []
+    for day, session in daily.items():
+        amount = complete_session_amount(session)
+        if amount is not None:
+            sessions.append((day, amount))
+    sessions.sort(key=lambda item: item[0])
+    if len(sessions) < 20:
+        return None
+    return sum((amount for _, amount in sessions[-20:]), Decimal(0)) / 20
 
 
 class _OneBoardLot:

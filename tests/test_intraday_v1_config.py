@@ -21,7 +21,7 @@ def _complete_config() -> dict[str, object]:
             "intraday_etf_t_quantitative_strategy_v1.0.md"
         ),
         "rule_source_sha256": (
-            "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
+            "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
         ),
         "parameters": {
             "indicators": {"ema": [20, 60], "bollinger": [20, 2]},
@@ -106,7 +106,7 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     )
     assert (
         config.rule_source_sha256
-        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
+        == "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
     )
     assert len(config.fingerprint) == 64
     assert config.securities["510300"]["t_plus"] == "T+1"
@@ -154,7 +154,7 @@ def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
 
     assert (
         hashlib.sha256(source.read_bytes()).hexdigest()
-        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
+        == "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
     )
 
 
@@ -229,7 +229,7 @@ def test_cli_validates_and_reports_auditable_configuration(
     )
     assert (
         output["rule_source_sha256"]
-        == "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
+        == "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
     )
     assert len(output["configuration_fingerprint"]) == 64
 

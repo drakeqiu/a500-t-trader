@@ -14,7 +14,7 @@ STRATEGY_ID = "intraday-etf-t-v1-rsi"
 RULE_SOURCE = (
     "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
 )
-RULE_SOURCE_SHA256 = "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
+RULE_SOURCE_SHA256 = "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
 _REQUIRED_TOP_LEVEL = (
     "schema_version",
     "strategy_id",
