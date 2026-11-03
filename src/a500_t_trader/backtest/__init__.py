@@ -29,6 +29,9 @@ from .intraday import (
     BarSignal as BarSignal,
 )
 from .intraday import (
+    SignalIntent as SignalIntent,
+)
+from .intraday import (
     CandidateQuantityResolver as CandidateQuantityResolver,
 )
 from .intraday import (

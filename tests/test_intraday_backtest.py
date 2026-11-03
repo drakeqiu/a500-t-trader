@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,7 @@ import pytest
 from a500_t_trader.backtest import (
     BarSignal,
     IntradayBacktestParams,
+    SignalIntent,
     StrategyRulesUnavailableError,
     TechnicalAnalysisSignalProvider,
     run_intraday_backtest,
@@ -42,7 +43,37 @@ def account() -> AccountSnapshot:
     )
 
 
+def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
+    class Provider:
+        observed: list[tuple[datetime, object, tuple[MinuteBar, ...]]] = []
+
+        def signals_at(self, symbol, history, state):
+            self.observed.append((history[-1].timestamp, state["holdings"], history))
+            if len(history) == 1:
+                return (BarSignal(history[-1].timestamp, "buy", 100),)
+            return ()
+
+    bars = (bar(30, 0, "10"), bar(30, 1, "10"), bar(30, 2, "10"))
+    provider = Provider()
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=AccountSnapshot(account().as_of, {}, {}, {}, Decimal("10000")),
+        bars=bars,
+        signals=provider,
+        implementation_version="event-provider-test",
+        strategy_parameters={},
+        params=IntradayBacktestParams(participation_rate=Decimal(1)),
+    )
+
+    assert [item[0] for item in provider.observed] == [item.timestamp for item in bars]
+    assert [item[1] for item in provider.observed] == [0, 100, 100]
+    assert all(item[2][-1].timestamp == item[0] for item in provider.observed)
+    assert len(result.fills) == 1
+    assert result.assumptions["submitted_signals"][0]["timestamp"] == bars[0].timestamp.isoformat()
+
 def test_partial_fills_costs_t1_and_hold_baseline() -> None:
+
+
     bars = (
         bar(30, 0, "10"),
         bar(30, 1, "10", 250),
@@ -272,6 +303,136 @@ def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
     assert result.pair_ledger[0]["status"] == "closed"
     assert result.pair_ledger[0]["remaining_quantity"] == 0
     assert result.pair_ledger[0]["buyback_quantity"] == 3_000
+
+def test_v1_pending_ordinary_sells_reserve_daily_sell_capacity() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + index, tzinfo=TZ),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(15)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("0"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(
+            BarSignal(bars[13].timestamp, "sell", 1_000),
+            BarSignal(bars[13].timestamp, "sell", 1_000),
+        ),
+        params=IntradayBacktestParams(
+            dynamic_sizing=True,
+            protected_floor=7_000,
+            order_lifetime_bars=10,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert sum(order["quantity"] for order in result.account_states[13]["pending_orders"]) == 1_000
+
+
+def test_v1_partial_fills_stop_at_daily_fill_limit() -> None:
+    start = datetime(2026, 10, 30, 9, 30, tzinfo=TZ)
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            start + timedelta(minutes=index),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            5_000,
+            Decimal("50000"),
+        )
+        for index in range(25)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("0"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[13].timestamp, "sell", 1_000),),
+        params=IntradayBacktestParams(
+            dynamic_sizing=True,
+            protected_floor=7_000,
+            order_lifetime_bars=20,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert len(result.fills) == 8
+    assert sum(fill.quantity for fill in result.fills) == 800
+    assert result.account_states[21]["daily_fill_count"] == 8
+
+
+def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
+    start = datetime(2026, 10, 30, 9, 30, tzinfo=TZ)
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            start + timedelta(minutes=index),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(25)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("0"),
+    )
+    signals = (
+        BarSignal(bars[13].timestamp, "sell", 10_000, SignalIntent.RISK_EXIT),
+        *(
+            BarSignal(bars[index].timestamp, "buy", 2_000)
+            for index in range(14, 24)
+        ),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=signals,
+        params=IntradayBacktestParams(
+            dynamic_sizing=True,
+            protected_floor=7_000,
+            order_lifetime_bars=20,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert Decimal(result.account_states[24]["daily_turnover"]) <= Decimal("150000")
 
 def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
     bars = (bar(30, 0, "10", 100_000), bar(30, 1, "10", 100_000))

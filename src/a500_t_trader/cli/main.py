@@ -23,6 +23,7 @@ def main(
         "intraday-strategy",
         "intraday-signals",
         "intraday-compare-563360",
+        "intraday-replay-563360-v1",
     }:
         return intraday.handle(args)
     if args.command in {

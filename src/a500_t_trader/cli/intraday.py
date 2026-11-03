@@ -10,7 +10,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from ..backtest.intraday_signals import replay_fixed_quantity_signals
-from ..backtest.issue83_comparison import run_issue83_comparison
+from ..backtest.issue83_comparison import (
+    run_issue83_comparison,
+    run_issue85_sequential_replay,
+)
 from ..market_data import MinuteBar
 from ..strategy.intraday_api import evaluate_intraday_strategy
 from ..strategy.intraday_v1_config import load_intraday_v1_config
@@ -79,6 +82,16 @@ def register_commands(
         help="saved five-minute history JSON",
     )
     comparison.add_argument("--output", help="optional JSON output file")
+    dynamic_replay = commands.add_parser(
+        "intraday-replay-563360-v1",
+        help="run sequential dynamic-account Issue 85 V1 research replay",
+    )
+    dynamic_replay.add_argument(
+        "--bars",
+        default="data/market-history/563360_5m_20240601_20261028.json",
+        help="saved five-minute history JSON",
+    )
+    dynamic_replay.add_argument("--output", help="optional JSON output file")
 
 
 def handle(args: argparse.Namespace) -> int:
@@ -110,6 +123,14 @@ def handle(args: argparse.Namespace) -> int:
             return _print_result(run_issue83_comparison(minute_bars), args.output)
         except Exception as error:
             print(f"Unable to run Issue 83 comparison: {error}", file=sys.stderr)
+            return 2
+    if args.command == "intraday-replay-563360-v1":
+        try:
+            minute_bars = _load_completed_bars(args.bars)
+            result = run_issue85_sequential_replay(minute_bars)
+            return _print_result(result, args.output)
+        except Exception as error:
+            print(f"Unable to run Issue 85 V1 replay: {error}", file=sys.stderr)
             return 2
     if args.command == "intraday-signals":
         try:

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
+from enum import StrEnum
 from typing import Protocol
 
 from ..market_data import MinuteBar
@@ -26,29 +27,54 @@ class StrategyRulesUnavailableError(ValueError):
     """Raised when no source-defined strategy signal API is available."""
 
 
+class SignalIntent(StrEnum):
+    ORDINARY = "ordinary"
+    BUYBACK = "buyback"
+    TAKE_PROFIT = "take_profit"
+    RISK_EXIT = "risk_exit"
+
+
 @dataclass(frozen=True, slots=True)
 class BarSignal:
     timestamp: datetime
     direction: str
     quantity: int
-    intent: str = "ordinary"
+    intent: SignalIntent | str = SignalIntent.ORDINARY
     pair_id: str | None = None
+    atr: Decimal | None = None
+    grid_step: Decimal | None = None
+    grid_level: str | None = None
 
     def __post_init__(self) -> None:
         if self.direction not in ("buy", "sell"):
             raise ValueError("signal direction must be buy or sell")
         if self.quantity <= 0 or self.quantity % BOARD_LOT:
             raise ValueError("signal quantity must be a positive board lot")
-        if self.intent not in {"ordinary", "buyback", "take_profit", "risk_exit"}:
-            raise ValueError("unsupported signal intent")
-        if self.intent == "buyback" and self.direction != "buy":
+        try:
+            intent = SignalIntent(self.intent)
+        except ValueError as error:
+            raise ValueError("unsupported signal intent") from error
+        object.__setattr__(self, "intent", intent)
+        if intent is SignalIntent.BUYBACK and self.direction != "buy":
             raise ValueError("buyback intent must be a buy")
-
+        if self.atr is not None and self.atr <= 0:
+            raise ValueError("signal ATR must be positive")
+        if self.grid_step is not None and self.grid_step <= 0:
+            raise ValueError("signal grid step must be positive")
 
 class StrategySignalProvider(Protocol):
     def signals(
         self, symbol: str, bars: tuple[MinuteBar, ...]
     ) -> tuple[BarSignal, ...]: ...
+
+class EventDrivenSignalProvider(Protocol):
+    def signals_at(
+        self,
+        symbol: str,
+        bars: tuple[MinuteBar, ...],
+        account_state: Mapping[str, object],
+    ) -> tuple[BarSignal, ...]: ...
+
 
 
 class CandidateQuantityResolver(Protocol):
@@ -193,7 +219,10 @@ class IntradayFill:
     fill_price: Decimal
     fees: Decimal
     slippage: Decimal
-
+    intent: SignalIntent = SignalIntent.ORDINARY
+    pair_id: str | None = None
+    atr: Decimal | None = None
+    grid_step: Decimal | None = None
 
 @dataclass(frozen=True, slots=True)
 class IntradayBacktestResult:
@@ -232,12 +261,12 @@ def run_intraday_backtest(
     symbol: str,
     account: AccountSnapshot,
     bars: tuple[MinuteBar, ...],
-    signals: tuple[BarSignal, ...] | StrategySignalProvider | None,
+    signals: tuple[BarSignal, ...] | StrategySignalProvider | EventDrivenSignalProvider | None,
     params: IntradayBacktestParams,
     strategy_parameters: dict[str, object],
     implementation_version: str,
 ) -> IntradayBacktestResult:
-    """Simulate supplied strategy signals; no strategy scoring is inferred here."""
+    """Simulate source signals with prior-event state and next-bar fills."""
     if signals is None:
         raise StrategyRulesUnavailableError(
             "V1 strategy signal provider is unavailable; "
@@ -258,7 +287,12 @@ def run_intraday_backtest(
         raise ValueError("bar timestamps must include time zones")
     if account.as_of > selected[0].timestamp:
         raise ValueError("account snapshot must not follow first bar")
-    if not isinstance(signals, tuple):
+    event_provider = (
+        signals if hasattr(signals, "signals_at") else None
+    )
+    if event_provider is not None:
+        signals = ()
+    elif not isinstance(signals, tuple):
         signals = signals.signals(symbol, selected)
     times = {bar.timestamp for bar in selected}
     if any(signal.timestamp not in times for signal in signals):
@@ -269,6 +303,7 @@ def run_intraday_backtest(
     signal_at: dict[datetime, list[BarSignal]] = {}
     for signal in signals:
         signal_at.setdefault(signal.timestamp, []).append(signal)
+    submitted_signals = list(signals)
     initial_cash = account.available_cash
     initial_holdings = account.holdings.get(symbol, 0)
     protected_floor = (
@@ -328,7 +363,7 @@ def run_intraday_backtest(
                 // BOARD_LOT
                 * BOARD_LOT
             )
-            for order in tuple(orders):
+            for order_position, order in enumerate(tuple(orders)):
                 if index <= order.submitted_index:
                     continue
                 quantity = min(order.remaining, max_fill)
@@ -391,6 +426,67 @@ def run_intraday_backtest(
                                 * BOARD_LOT,
                             )
                         )
+                if params.dynamic_sizing and quantity:
+                    if daily_fill_count >= 8:
+                        quantity = 0
+                    else:
+                        nav_at_fill = cash + holdings * bar.open
+                        fill_price = bar.open * (
+                            Decimal(1)
+                            + (
+                                params.slippage_bps / BASIS_POINTS
+                                if order.signal.direction == "buy"
+                                else -params.slippage_bps / BASIS_POINTS
+                            )
+                        )
+                        turnover_room = max(
+                            Decimal(0), Decimal("1.50") * nav_at_fill - daily_turnover
+                        )
+                        quantity = min(
+                            quantity,
+                            int(
+                                (turnover_room / fill_price).to_integral_value(
+                                    rounding=ROUND_DOWN
+                                )
+                            )
+                            // BOARD_LOT
+                            * BOARD_LOT,
+                        )
+                        if (
+                            order.signal.direction == "sell"
+                            and order.signal.intent is not SignalIntent.RISK_EXIT
+                        ):
+                            reserved_sell_notional = sum(
+                                (
+                                    candidate.remaining
+                                    * bar.open
+                                    * (
+                                        Decimal(1)
+                                        - params.slippage_bps / BASIS_POINTS
+                                    )
+                                    for candidate in tuple(orders)[:order_position]
+                                    if candidate.signal.direction == "sell"
+                                    and candidate.signal.intent
+                                    is not SignalIntent.RISK_EXIT
+                                ),
+                                Decimal(0),
+                            )
+                            sell_room = max(
+                                Decimal(0),
+                                Decimal("0.10") * nav_at_fill
+                                - daily_sell_notional
+                                - reserved_sell_notional,
+                            )
+                            quantity = min(
+                                quantity,
+                                int(
+                                    (sell_room / fill_price).to_integral_value(
+                                        rounding=ROUND_DOWN
+                                    )
+                                )
+                                // BOARD_LOT
+                                * BOARD_LOT,
+                            )
                 if quantity:
                     if order.signal.direction == "buy":
                         fill_price = bar.open * (
@@ -426,6 +522,10 @@ def run_intraday_backtest(
                             fill_price,
                             fees,
                             slippage,
+                            order.signal.intent,
+                            order.signal.pair_id,
+                            order.signal.atr,
+                            order.signal.grid_step,
                         )
                     )
                     if order.signal.direction == "sell":
@@ -438,6 +538,12 @@ def run_intraday_backtest(
                                     "sell_price": str(fill_price),
                                     "sell_quantity": quantity,
                                     "sell_gross": str(notional),
+                                    "sell_grid_step": (
+                                        str(order.signal.grid_step)
+                                        if order.signal.grid_step is not None
+                                        else None
+                                    ),
+                                    "sell_intent": str(order.signal.intent),
                                     "sell_fees": str(fees),
                                     "buyback_gross": "0",
                                     "buyback_fees": "0",
@@ -465,6 +571,7 @@ def run_intraday_backtest(
                             )
                             if pair["remaining_quantity"] == 0:
                                 pair["status"] = "closed"
+                                pair["buyback_timestamp"] = bar.timestamp.isoformat()
                                 pair["realized_net_pnl"] = str(
                                     Decimal(str(pair["sell_gross"]))
                                     - Decimal(str(pair["buyback_gross"]))
@@ -491,7 +598,62 @@ def run_intraday_backtest(
                         }
                     )
                     orders.remove(order)
-        for signal in signal_at.get(bar.timestamp, ()):
+        bar_signals = signal_at.get(bar.timestamp, ())
+        if event_provider is not None:
+            decision_state: dict[str, object] = {
+                "timestamp": bar.timestamp.isoformat(),
+                "bar_index": index,
+                "available_cash": str(cash),
+                "holdings": holdings,
+                "sellable": sellable,
+                "nav": str(cash + holdings * bar.close),
+                "reserved_cash": str(
+                    sum(
+                        (order.reserved_cash for order in orders),
+                        Decimal(0),
+                    )
+                ),
+                "pending_orders": tuple(
+                    {
+                        "direction": order.signal.direction,
+                        "intent": order.signal.intent,
+                        "quantity": order.remaining,
+                        "pair_id": order.signal.pair_id,
+                    }
+                    for order in orders
+                ),
+                "fills": tuple(
+                    {
+                        "side": fill.side,
+                        "quantity": fill.quantity,
+                        "signal_timestamp": fill.signal_timestamp.isoformat(),
+                        "fill_timestamp": fill.fill_timestamp.isoformat(),
+                        "fill_price": str(fill.fill_price),
+                        "fees": str(fill.fees),
+                        "intent": fill.intent.value,
+                        "pair_id": fill.pair_id,
+                        "atr": str(fill.atr) if fill.atr is not None else None,
+                        "grid_step": (
+                            str(fill.grid_step)
+                            if fill.grid_step is not None
+                            else None
+                        ),
+                    }
+                    for fill in fills
+                ),
+                "daily_turnover": str(daily_turnover),
+                "daily_fill_count": daily_fill_count,
+                "daily_addition_count": daily_addition_count,
+                "pair_ledger": tuple(dict(pair) for pair in pair_ledger),
+            }
+            generated = event_provider.signals_at(
+                symbol, selected[: index + 1], decision_state
+            )
+            if any(signal.timestamp != bar.timestamp for signal in generated):
+                raise ValueError("event-driven signals must use the current completed bar")
+            submitted_signals.extend(generated)
+            bar_signals = (*bar_signals, *generated)
+        for signal in bar_signals:
             if signal.intent == "buyback":
                 eligible_pair = next(
                     (
@@ -526,7 +688,7 @@ def run_intraday_backtest(
                     for order in orders
                     if order.signal.direction == "buy"
                 )
-                if signal.intent == "buyback":
+                if signal.intent is SignalIntent.BUYBACK:
                     pair = next(
                         (
                             item
@@ -538,135 +700,85 @@ def run_intraday_backtest(
                     pending_pair_quantity = sum(
                         order.remaining
                         for order in orders
-                        if order.signal.intent == "buyback"
+                        if order.signal.intent is SignalIntent.BUYBACK
                         and order.signal.pair_id == signal.pair_id
                     )
                     requested = min(
                         signal.quantity,
-                        max(
-                            0,
-                            int(pair["remaining_quantity"]) - pending_pair_quantity,
-                        )
+                        max(0, int(pair["remaining_quantity"]) - pending_pair_quantity)
                         if pair is not None
                         else 0,
                     )
-                    risk_quantity = _risk_quantity(selected, index, estimated_price, nav, params)
-                    cash_room = max(
-                        Decimal(0), cash - Decimal("0.35") * nav - reserved_cash
+                    requested = _dynamic_buy_quantity(
+                        requested=requested,
+                        selected=selected,
+                        index=index,
+                        price=estimated_price,
+                        nav=nav,
+                        cash=cash,
+                        holdings=holdings,
+                        protected_floor=protected_floor,
+                        reserved_cash=reserved_cash,
+                        pending_buy_quantity=pending_buy_quantity,
+                        params=params,
                     )
-                    position_room = max(
-                        Decimal(0),
-                        Decimal("0.65") * nav
-                        - holdings * bar.close
-                        - Decimal(pending_buy_quantity) * bar.close,
-                    )
-                    trading_position = max(
-                        0, holdings - min(protected_floor, holdings)
-                    ) * bar.close
-                    trading_room = max(
-                        Decimal(0),
-                        Decimal("0.25") * nav
-                        - trading_position
-                        - Decimal(pending_buy_quantity) * bar.close,
-                    )
-                    q_capacity = min(
-                        cash_room, position_room, trading_room
-                    ) / estimated_price
-                    q_order = Decimal("0.08") * nav / estimated_price
-                    q_liquidity = max(
-                        Decimal(0),
-                        Decimal(max(0, bar.volume)) * Decimal("0.02")
-                        - Decimal(pending_buy_quantity),
-                    )
-                    if risk_quantity is None:
-                        requested = 0
-                    else:
-                        requested = min(
-                            requested,
-                            int(
-                                min(
-                                    Decimal(risk_quantity),
-                                    q_capacity,
-                                    q_order,
-                                    q_liquidity,
-                                ).to_integral_value(rounding=ROUND_DOWN)
-                            )
-                            // BOARD_LOT
-                            * BOARD_LOT,
-                        )
                 elif signal.direction == "buy":
-                    risk_quantity = _risk_quantity(selected, index, estimated_price, nav, params)
                     pending_additions = sum(
                         1
                         for order in orders
                         if order.signal.direction == "buy"
-                        and order.signal.intent != "buyback"
+                        and order.signal.intent is not SignalIntent.BUYBACK
                     )
-                    if (
-                        risk_quantity is None
-                        or daily_addition_count + pending_additions >= 3
-                    ):
+                    if daily_addition_count + pending_additions >= 3:
                         requested = 0
                     else:
-                        cash_room = max(
-                            Decimal(0), cash - Decimal("0.35") * nav - reserved_cash
-                        )
-                        position_room = max(
-                            Decimal(0),
-                            Decimal("0.65") * nav
-                            - holdings * bar.close
-                            - Decimal(pending_buy_quantity) * bar.close,
-                        )
-                        trading_position = max(
-                            0, holdings - min(protected_floor, holdings)
-                        ) * bar.close
-                        trading_room = max(
-                            Decimal(0),
-                            Decimal("0.25") * nav
-                            - trading_position
-                            - Decimal(pending_buy_quantity) * bar.close,
-                        )
-                        order_room = Decimal("0.08") * nav
-                        liquidity_room = max(
-                            Decimal(0),
-                            Decimal(max(0, bar.volume)) * Decimal("0.02")
-                            - Decimal(pending_buy_quantity),
-                        )
-                        q_capacity = min(
-                            cash_room,
-                            position_room,
-                            trading_room,
-                        ) / estimated_price
-                        q_order = order_room / estimated_price
-                        q_liquidity = liquidity_room
-                        capacity = min(
-                            Decimal(risk_quantity),
-                            q_capacity,
-                            q_order,
-                            q_liquidity,
-                        )
-                        requested = (
-                            int(capacity.to_integral_value(rounding=ROUND_DOWN))
-                            // BOARD_LOT
-                            * BOARD_LOT
+                        requested = _dynamic_buy_quantity(
+                            requested=None,
+                            selected=selected,
+                            index=index,
+                            price=estimated_price,
+                            nav=nav,
+                            cash=cash,
+                            holdings=holdings,
+                            protected_floor=protected_floor,
+                            reserved_cash=reserved_cash,
+                            pending_buy_quantity=pending_buy_quantity,
+                            params=params,
                         )
                 else:
                     protected = (
-                        0 if signal.intent == "risk_exit" else min(protected_floor, holdings)
+                        0 if signal.intent is SignalIntent.RISK_EXIT else min(protected_floor, holdings)
                     )
                     sellable_above_floor = max(0, min(sellable, holdings - protected))
-                    daily_room = (
-                        Decimal("Infinity")
-                        if signal.intent == "risk_exit"
-                        else max(Decimal(0), Decimal("0.10") * nav - daily_sell_notional)
+                    pending_ordinary_sells = sum(
+                        (
+                            order.remaining * estimated_price
+                            for order in orders
+                            if order.signal.direction == "sell"
+                            and order.signal.intent is not SignalIntent.RISK_EXIT
+                        ),
+                        Decimal(0),
                     )
-                    requested = min(
-                        signal.quantity,
-                        sellable_above_floor,
-                        int((daily_room / estimated_price).to_integral_value(rounding=ROUND_DOWN))
-                        // BOARD_LOT
-                        * BOARD_LOT,
-                    )
+                    if signal.intent is SignalIntent.RISK_EXIT:
+                        requested = min(signal.quantity, sellable_above_floor)
+                    else:
+                        daily_room = max(
+                            Decimal(0),
+                            Decimal("0.10") * nav
+                            - daily_sell_notional
+                            - pending_ordinary_sells,
+                        )
+                        requested = min(
+                            signal.quantity,
+                            sellable_above_floor,
+                            int(
+                                (daily_room / estimated_price).to_integral_value(
+                                    rounding=ROUND_DOWN
+                                )
+                            )
+                            // BOARD_LOT
+                            * BOARD_LOT,
+                        )
                 if daily_fill_count >= 8 or daily_turnover >= Decimal("1.50") * nav:
                     requested = 0
                 if daily_turnover + estimated_price * requested > Decimal("1.50") * nav:
@@ -813,7 +925,7 @@ def run_intraday_backtest(
                 "intent": signal.intent,
                 "pair_id": signal.pair_id,
             }
-            for signal in signals
+            for signal in submitted_signals
         ],
         "partial_fill": (
             "board-lot quantity limited by bar volume and the lower of configured "
@@ -920,3 +1032,57 @@ def _risk_quantity(
         Decimal("0.0015") * nav / stop_distance
     ).to_integral_value(rounding=ROUND_DOWN)
     return max(0, int(quantity))
+
+
+def _dynamic_buy_quantity(
+    *,
+    requested: int | None,
+    selected: tuple[MinuteBar, ...],
+    index: int,
+    price: Decimal,
+    nav: Decimal,
+    cash: Decimal,
+    holdings: int,
+    protected_floor: int,
+    reserved_cash: Decimal,
+    pending_buy_quantity: int,
+    params: IntradayBacktestParams,
+) -> int:
+    risk_quantity = _risk_quantity(selected, index, price, nav, params)
+    if risk_quantity is None:
+        return 0
+    cash_room = max(Decimal(0), cash - Decimal("0.35") * nav - reserved_cash)
+    position_room = max(
+        Decimal(0),
+        Decimal("0.65") * nav
+        - holdings * price
+        - Decimal(pending_buy_quantity) * price,
+    )
+    trading_position = max(0, holdings - min(protected_floor, holdings)) * price
+    trading_room = max(
+        Decimal(0),
+        Decimal("0.25") * nav
+        - trading_position
+        - Decimal(pending_buy_quantity) * price,
+    )
+    liquidity_room = max(
+        Decimal(0),
+        Decimal(max(0, selected[index].volume)) * Decimal("0.02")
+        - Decimal(pending_buy_quantity),
+    )
+    limits = [
+        Decimal(risk_quantity),
+        cash_room / price,
+        position_room / price,
+        trading_room / price,
+        Decimal("0.08") * nav / price,
+        liquidity_room,
+    ]
+    if requested is not None:
+        limits.append(Decimal(requested))
+    capacity = min(limits)
+    return (
+        int(capacity.to_integral_value(rounding=ROUND_DOWN))
+        // BOARD_LOT
+        * BOARD_LOT
+    )
