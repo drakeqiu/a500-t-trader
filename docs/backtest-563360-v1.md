@@ -144,6 +144,21 @@ uv run python -m a500_t_trader intraday-compare-563360 \
 2. The reproducible run completed 23,580 decision bars using 180 warm-up bars, user-specified ¥500,000 cash-only initial account, next-bar open fills, 0 slippage, 0.5 bps commission, ¥0.1 minimum commission, 2% OHLCV participation, and one-bar order lifetime. Data SHA-256: `2c37f69cb258699b62b5613b9513915ac4b104c116c987db6d9a48f58c5d6a25`; rule SHA-256: `ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4`; replay SHA-256 (`issue83_comparison.py`): `6014a2c77558a48eb91dfa7cd88f2d95f915b7b5e287cd268bb89249d0615fde`; analyzer SHA-256: `bee304f39284b153b73007a6cb4f534542c918b4f7ddb952dff594b36a41f8ee`.
 3. Observed output: 49 submitted signals and 49 fills; final cash/NAV ¥497,937.846645, 0 holdings, net P&L -¥2,062.153355 (-0.4124%), maximum bar-close drawdown 0.5619%. Net-return gate fails; drawdown gate passes. No closed paired sells were recorded, so paired-average P&L and PF are undefined and those gates fail; the ≥100 effective-pair requirement fails. No positive stability inference is available.
 4. The 70/30 day split has zero closed pairs in each partition; sample-in/out PF cannot be estimated and both gates fail. The five date partitions also contain zero closed pairs and are descriptive calendar buckets, not an expanding-window walk-forward; the result records `walk_forward.assessed=false`, zero eligible pairs and a failed gate because test PF cannot be estimated. Full-data stresses rerun the same 23,580 bars, 180-bar warmup and ¥500,000 start under 1.5× fees and slippage (baseline slippage is 0 bps, so scaling remains 0) and perturb each of the five score thresholds individually by ±10%; exact outcomes are in the replay JSON. No walk-forward performance is inferred from raw NAV.
+| Full-data stress | Threshold | Net P&L (¥) | Closed pairs | Gate result |
+| --- | ---: | ---: | ---: | --- |
+| 1.5× fees / slippage | — | -2,278.392240 | 0 | Fail; PF undefined |
+| Buy −10% | 65 | -5,429.789560 | 0 | Fail; PF undefined |
+| Buy +10% | 79 | -804.079690 | 0 | Fail; PF undefined |
+| Sell −10% | 61 | -2,062.153355 | 0 | Fail; PF undefined |
+| Sell +10% | 75 | -2,062.153355 | 0 | Fail; PF undefined |
+| Take-profit −10% | 54 | -1,914.573925 | 0 | Fail; PF undefined |
+| Take-profit +10% | 66 | -1,221.259665 | 0 | Fail; PF undefined |
+| Buyback −10% | 61 | -2,062.153355 | 0 | Fail; PF undefined |
+| Buyback +10% | 75 | -2,062.153355 | 0 | Fail; PF undefined |
+| Direction delta −10% | 11 | -2,062.153355 | 0 | Fail; PF undefined |
+| Direction delta +10% | 13 | -2,062.153355 | 0 | Fail; PF undefined |
+
+The 1.5× cost run is fee-inclusive; modeled slippage remains 0 bps because the baseline is 0. Every perturbed run is net-negative and has no eligible pair sample, so all pre-registered stress gates fail.
 5. **Not certified and not complete acceptance.** The independent market-data/company-action/real execution evidence limitations remain; no independent spread/depth evidence exists, the 2026-04-20 daily limit fields remain invalid, and there are no real fill/impact records. The candidate replay result above is not a full V1 certification result; the issue must remain open until all source-exact state/limit behaviors and stress results are evidenced.
 6. Replay command used:
 
