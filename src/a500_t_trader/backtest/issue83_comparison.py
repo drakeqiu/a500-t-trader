@@ -79,10 +79,14 @@ class _SequentialV1Signals:
         warmup: tuple[MinuteBar, ...],
         pre_start: tuple[MinuteBar, ...],
         threshold_overrides: dict[str, int] | None = None,
-        fee_multiplier: Decimal = Decimal(1),
+        fee_rate: Decimal = Decimal("0.00005"),
+        minimum_commission: Decimal = Decimal("0.1"),
+        impact_rate: Decimal = Decimal("0.0002"),
     ) -> None:
         self._threshold_overrides = threshold_overrides
-        self._fee_multiplier = fee_multiplier
+        self._fee_rate = fee_rate
+        self._minimum_commission = minimum_commission
+        self._impact_rate = impact_rate
         self._history = list(warmup[-180:])
         self._grid_date = None
         self._used_levels: set[str] = set()
@@ -218,56 +222,139 @@ class _SequentialV1Signals:
         history = tuple((*self._history, bar)[-181:])
         current_index = int(account_state["bar_index"])
         tick = Decimal("0.001")
-        cost_quantity = self._ordinary_quantity(
-            nav, price, Decimal(0), self._current_step or Decimal(0)
-        )
-        cost_quantity = max(100, cost_quantity)
-        cost_rate = (
-            _round_trip_cost_rate(price, cost_quantity) * self._fee_multiplier
+        cost_quantity = 100
+        cost_rate = _round_trip_cost_rate(
+            price,
+            cost_quantity,
+            fee_rate=self._fee_rate,
+            minimum_commission=self._minimum_commission,
+            single_side_impact=self._impact_rate,
         )
         pending = bool(account_state["pending_orders"])
-        paired_state: dict[str, object] = {}
         open_pairs = [
             pair
             for pair in account_state["pair_ledger"]
             if pair["status"] == "open" and int(pair["remaining_quantity"]) > 0
         ]
-        if open_pairs:
-            pair = open_pairs[0]
-            sell_price = Decimal(str(pair["sell_price"]))
-            frozen_step = Decimal(str(pair["sell_grid_step"] or "0"))
-            paired_state["buyback"] = {
-                "target_price": sell_price - max(
-                    frozen_step, Decimal(3) * cost_rate * sell_price
-                ),
-                "quantity": int(pair["remaining_quantity"]),
-                "trade_pair_id": pair["pair_id"],
-            }
         active_lots = [lot for lot in self._lots if int(lot["quantity"]) > 0]
-        if active_lots:
-            lot = active_lots[0]
-            entry = Decimal(str(lot["entry_price"]))
-            grid = Decimal(str(lot["grid_step"]))
-            paired_state["take_profit"] = {
-                "target_price": entry + max(grid, Decimal(3) * cost_rate * entry),
-                "quantity": int(lot["quantity"]),
+
+        def analyze_at_cost(rate: Decimal):
+            paired_state: dict[str, object] = {}
+            if open_pairs:
+                pair = open_pairs[0]
+                sell_price = Decimal(str(pair["sell_price"]))
+                frozen_step = Decimal(str(pair["sell_grid_step"] or "0"))
+                paired_state["buyback"] = {
+                    "target_price": sell_price
+                    - max(frozen_step, Decimal(3) * rate * sell_price),
+                    "quantity": int(pair["remaining_quantity"]),
+                    "trade_pair_id": pair["pair_id"],
+                }
+            if active_lots:
+                lot = active_lots[0]
+                entry = Decimal(str(lot["entry_price"]))
+                lot_grid = Decimal(str(lot["grid_step"]))
+                paired_state["take_profit"] = {
+                    "target_price": entry + max(lot_grid, Decimal(3) * rate * entry),
+                    "quantity": int(lot["quantity"]),
+                }
+            grid_context = {
+                "tick_size": tick,
+                "round_trip_cost_rate": rate,
+                "grid_date": self._grid_date,
+                "current_step": self._current_step,
+                "used_levels": tuple(self._used_levels),
+                "pending_grid_orders": pending,
             }
-        grid_context = {
-            "tick_size": tick,
-            "round_trip_cost_rate": cost_rate,
-            "grid_date": self._grid_date,
-            "current_step": self._current_step,
-            "used_levels": tuple(self._used_levels),
-            "pending_grid_orders": pending,
-        }
-        analysis = analyze_intraday_technical(
-            {symbol: history},
-            grid_context={symbol: grid_context},
-            paired_state={symbol: paired_state} if paired_state else {},
-            as_of=bar.timestamp,
-            score_thresholds=self._threshold_overrides,
-        )[symbol]
-        analysis = _filter_rsi_momentum(analysis)
+            result = analyze_intraday_technical(
+                {symbol: history},
+                grid_context={symbol: grid_context},
+                paired_state={symbol: paired_state} if paired_state else {},
+                as_of=bar.timestamp,
+                score_thresholds=self._threshold_overrides,
+            )[symbol]
+            return _filter_rsi_momentum(result)
+
+        analysis = analyze_at_cost(cost_rate)
+        conservative_rate = cost_rate
+        converged = False
+        previous_candidate: str | None = None
+        previous_quantity = -1
+        for _ in range(8):
+            candidate = analysis.candidate
+            grid_step = analysis.grid_step or Decimal(0)
+            atr_value = analysis.indicators.get("atr_14")
+            atr_value = atr_value if isinstance(atr_value, Decimal) else Decimal(0)
+            quantity = 100
+            if candidate in {"BUY", "BUYBACK"}:
+                quantity = self._ordinary_quantity(nav, price, atr_value, grid_step)
+                if candidate == "BUYBACK" and open_pairs:
+                    pair = open_pairs[0]
+                    pending_pair = sum(
+                        int(order["quantity"])
+                        for order in account_state["pending_orders"]
+                        if order["intent"] == "buyback"
+                        and order["pair_id"] == pair["pair_id"]
+                    )
+                    pair_limit = max(
+                        0, int(pair["remaining_quantity"]) - pending_pair
+                    )
+                    if analysis.trend == "BEAR":
+                        pair_limit = min(pair_limit, int(pair["sell_quantity"]) // 4)
+                    quantity = min(quantity, pair_limit)
+                elif candidate == "BUY":
+                    free_cash = Decimal(str(account_state["free_cash"]))
+                    cash_per_share = price * (
+                        Decimal(1) + self._fee_rate + self._impact_rate
+                    ) + self._minimum_commission / Decimal(100)
+                    cash_limit = int((free_cash / cash_per_share) // 100) * 100
+                    quantity = min(quantity, cash_limit)
+                quantity = min(
+                    quantity,
+                    int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                    // 100
+                    * 100,
+                )
+                if int(account_state["remaining_daily_fills"]) <= 0:
+                    quantity = 0
+            elif candidate in {"SELL", "TAKE_PROFIT"}:
+                holdings = int(account_state["holdings"])
+                sellable = int(account_state["sellable"])
+                floor = int((nav * Decimal("0.30") / price) // 100) * 100
+                permitted = max(0, min(sellable, holdings - floor))
+                if candidate == "TAKE_PROFIT" and active_lots:
+                    permitted = min(permitted, int(active_lots[0]["quantity"]))
+                quantity = min(
+                    self._ordinary_quantity(nav, price, atr_value, grid_step),
+                    permitted,
+                    int(
+                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        / price
+                    )
+                    // 100
+                    * 100,
+                )
+            quantity = quantity // 100 * 100
+            if quantity < 100:
+                quantity = 100
+            next_rate = _round_trip_cost_rate(
+                price,
+                quantity,
+                fee_rate=self._fee_rate,
+                minimum_commission=self._minimum_commission,
+                single_side_impact=self._impact_rate,
+            )
+            conservative_rate = max(conservative_rate, next_rate)
+            if candidate == previous_candidate and quantity == previous_quantity:
+                cost_rate = next_rate
+                converged = True
+                break
+            previous_candidate, previous_quantity = candidate, quantity
+            cost_rate = next_rate
+            analysis = analyze_at_cost(cost_rate)
+        if not converged:
+            cost_rate = conservative_rate
+            analysis = analyze_at_cost(cost_rate)
         self._history.append(bar)
         indicators = analysis.indicators
         atr = indicators.get("atr_14")
@@ -347,11 +434,28 @@ class _SequentialV1Signals:
                 return ()
         if candidate == "BUYBACK" and open_pairs:
             pair = open_pairs[0]
+            pair_limit = int(pair["remaining_quantity"])
+            if analysis.trend == "BEAR":
+                pair_limit = min(pair_limit, int(pair["sell_quantity"]) // 4)
+            cash_per_share = price * (
+                Decimal(1) + self._fee_rate + self._impact_rate
+            ) + self._minimum_commission / Decimal(100)
             quantity = min(
-                int(pair["remaining_quantity"]),
+                pair_limit,
                 self._ordinary_quantity(nav, price, atr or Decimal(0), grid or Decimal(0)),
+                int(Decimal(str(account_state["free_cash"])) / cash_per_share)
+                // 100
+                * 100,
+                int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                // 100
+                * 100,
             )
-            if quantity >= 100 and daily_return > Decimal("-0.008"):
+            quantity = quantity // 100 * 100
+            if (
+                quantity >= 100
+                and int(account_state["remaining_daily_fills"]) > 0
+                and daily_return > Decimal("-0.008")
+            ):
                 return (
                     BarSignal(
                         bar.timestamp,
@@ -366,7 +470,14 @@ class _SequentialV1Signals:
             return ()
         if candidate == "TAKE_PROFIT" and active_lots and sellable:
             lot = active_lots[0]
-            quantity = min(int(lot["quantity"]), sellable) // 100 * 100
+            quantity = min(
+                int(lot["quantity"]),
+                sellable,
+                int(
+                    Decimal(str(account_state["remaining_daily_sell_notional"]))
+                    / price
+                ),
+            ) // 100 * 100
             if quantity:
                 return (
                     BarSignal(
@@ -382,9 +493,26 @@ class _SequentialV1Signals:
         if not self._liquid(bar) or grid is None or atr is None:
             return ()
         if candidate == "BUY":
-            if int(account_state["daily_addition_count"]) >= 3:
+            if (
+                int(account_state["daily_addition_count"]) >= 3
+                or int(account_state["remaining_daily_additions"]) <= 0
+                or int(account_state["remaining_daily_fills"]) <= 0
+            ):
                 return ()
-            quantity = self._ordinary_quantity(nav, price, atr, grid)
+            cash_per_share = price * (
+                Decimal(1) + self._fee_rate + self._impact_rate
+            ) + self._minimum_commission / Decimal(100)
+            quantity = min(
+                self._ordinary_quantity(nav, price, atr, grid),
+                int(
+                    Decimal(str(account_state["free_cash"])) / cash_per_share
+                )
+                // 100
+                * 100,
+                int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                // 100
+                * 100,
+            )
             if quantity < 100:
                 return ()
             level = indicators.get("grid_buy_level")
@@ -399,9 +527,19 @@ class _SequentialV1Signals:
                 ),
             )
         if candidate == "SELL" and sellable > 0:
+            if int(account_state["remaining_daily_fills"]) <= 0:
+                return ()
             base_floor = int((nav * Decimal("0.30") / price) // 100) * 100
             reducible = max(0, holdings - base_floor)
-            quantity = min(reducible, sellable, self._ordinary_quantity(nav, price, atr, grid))
+            quantity = min(
+                reducible,
+                sellable,
+                self._ordinary_quantity(nav, price, atr, grid),
+                int(
+                    Decimal(str(account_state["remaining_daily_sell_notional"]))
+                    / price
+                ),
+            )
             quantity = quantity // 100 * 100
             if quantity >= 100:
                 level = indicators.get("grid_sell_level")
@@ -712,6 +850,14 @@ def _run_issue85_sequential_replay(
         sellable={},
         available_cash=Decimal("500000"),
     )
+    execution_params = IntradayBacktestParams(
+        participation_rate=Decimal("0.02"),
+        fee_bps=Decimal("0.5") * cost_multiplier,
+        slippage_bps=Decimal(0) * cost_multiplier,
+        order_lifetime_bars=1,
+        minimum_commission=Decimal("0.1") * cost_multiplier,
+        dynamic_sizing=True,
+    )
     result = run_intraday_backtest(
         symbol=SYMBOL,
         account=account,
@@ -720,16 +866,11 @@ def _run_issue85_sequential_replay(
             warmup,
             pre_start,
             threshold_overrides=score_thresholds,
-            fee_multiplier=cost_multiplier,
+            fee_rate=execution_params.fee_bps / Decimal(10000),
+            minimum_commission=execution_params.minimum_commission,
+            impact_rate=Decimal("0.0002") * cost_multiplier,
         ),
-        params=IntradayBacktestParams(
-            participation_rate=Decimal("0.02"),
-            fee_bps=Decimal("0.5") * cost_multiplier,
-            slippage_bps=Decimal(0) * cost_multiplier,
-            order_lifetime_bars=1,
-            minimum_commission=Decimal("0.1") * cost_multiplier,
-            dynamic_sizing=True,
-        ),
+        params=execution_params,
         strategy_parameters={
             "source_strategy": STRATEGY_ID,
             "source_parameter_hash": TECHNICAL_PARAMETER_HASH,

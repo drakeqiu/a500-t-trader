@@ -684,13 +684,71 @@ def run_intraday_backtest(
                 "daily_turnover": str(daily_turnover),
                 "daily_fill_count": daily_fill_count,
                 "daily_addition_count": daily_addition_count,
+                "remaining_daily_sell_notional": str(
+                    max(
+                        Decimal(0),
+                        Decimal("0.10") * (cash + holdings * bar.close)
+                        - daily_sell_notional
+                        - sum(
+                            (
+                                order.remaining * bar.close
+                                for order in orders
+                                if order.signal.direction == "sell"
+                                and order.signal.intent is not SignalIntent.RISK_EXIT
+                            ),
+                            Decimal(0),
+                        ),
+                    )
+                ),
+                "remaining_daily_turnover": str(
+                    max(
+                        Decimal(0),
+                        Decimal("1.50") * (cash + holdings * bar.close)
+                        - daily_turnover
+                        - sum(
+                            (order.remaining * bar.close for order in orders),
+                            Decimal(0),
+                        ),
+                    )
+                ),
+                "remaining_daily_fills": max(
+                    0, 8 - daily_fill_count - len(orders)
+                ),
+                "remaining_daily_additions": max(
+                    0,
+                    3
+                    - daily_addition_count
+                    - sum(
+                        1
+                        for order in orders
+                        if order.signal.direction == "buy"
+                        and order.signal.intent is not SignalIntent.BUYBACK
+                    ),
+                ),
+                "free_cash": str(
+                    max(
+                        Decimal(0),
+                        cash
+                        - sum(
+                            (
+                                order.reserved_cash
+                                for order in orders
+                                if order.signal.direction == "buy"
+                            ),
+                            Decimal(0),
+                        ),
+                    )
+                ),
+                "pending_buy_quantity": sum(
+                    order.remaining
+                    for order in orders
+                    if order.signal.direction == "buy"
+                ),
                 "pair_ledger": tuple(dict(pair) for pair in pair_ledger),
             }
             generated = event_provider.signals_at(
                 symbol, selected[: index + 1], decision_state
             )
-            if any(signal.timestamp != bar.timestamp for signal in generated):
-                raise ValueError("event-driven signals must use the current completed bar")
             submitted_signals.extend(generated)
             bar_signals = (*bar_signals, *generated)
         for signal in bar_signals:

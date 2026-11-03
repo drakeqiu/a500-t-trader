@@ -45,10 +45,12 @@ def account() -> AccountSnapshot:
 
 def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     class Provider:
-        observed: list[tuple[datetime, object, tuple[MinuteBar, ...]]] = []
+        observed: list[tuple[datetime, object, tuple[MinuteBar, ...], object]] = []
 
         def signals_at(self, symbol, history, state):
-            self.observed.append((history[-1].timestamp, state["holdings"], history))
+            self.observed.append(
+                (history[-1].timestamp, state["holdings"], history, dict(state))
+            )
             if len(history) == 1:
                 return (BarSignal(history[-1].timestamp, "buy", 100),)
             return ()
@@ -68,6 +70,12 @@ def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     assert [item[0] for item in provider.observed] == [item.timestamp for item in bars]
     assert [item[1] for item in provider.observed] == [0, 100, 100]
     assert all(item[2][-1].timestamp == item[0] for item in provider.observed)
+    first_state = provider.observed[0][3]
+    assert first_state["remaining_daily_sell_notional"] == "1000.00"
+    assert first_state["remaining_daily_turnover"] == "15000.00"
+    assert first_state["remaining_daily_fills"] == 8
+    assert first_state["remaining_daily_additions"] == 3
+    assert first_state["free_cash"] == "10000"
     assert len(result.fills) == 1
     assert result.assumptions["submitted_signals"][0]["timestamp"] == bars[0].timestamp.isoformat()
 
