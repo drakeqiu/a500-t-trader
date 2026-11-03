@@ -859,6 +859,7 @@ def _run_issue85_sequential_replay(
     *,
     score_thresholds: dict[str, int] | None = None,
     cost_multiplier: Decimal = Decimal(1),
+    initial_cash: Decimal = Decimal("500000"),
 ) -> dict[str, object]:
     """Run full V1 replay with optional pre-registered stress parameters."""
     from .intraday import run_intraday_backtest
@@ -882,7 +883,7 @@ def _run_issue85_sequential_replay(
         holdings={},
         cost_basis={},
         sellable={},
-        available_cash=Decimal("500000"),
+        available_cash=initial_cash,
     )
     execution_params = IntradayBacktestParams(
         participation_rate=Decimal("0.02"),
@@ -988,7 +989,7 @@ def _run_issue85_sequential_replay(
         "final_nav": str(result.strategy_final_value),
         "net_pnl": str(result.strategy_final_value - result.initial_cash),
         "return": str(result.strategy_return),
-        "max_drawdown": str(_max_drawdown(result.account_states)),
+        "max_drawdown": str(_max_drawdown(result.account_states, initial_cash)),
         "signal_count": len(result.assumptions["submitted_signals"]),
         "fill_count": len(result.fills),
         "pair_count": len(pairs),
@@ -1017,12 +1018,15 @@ def run_issue85_sequential_replay(
     bars: tuple[MinuteBar, ...],
     *,
     run_stress_tests: bool = True,
+    initial_cash: Decimal = Decimal("500000"),
 ) -> dict[str, object]:
     """Run baseline and, by default, full-data cost and threshold stresses."""
-    baseline = _run_issue85_sequential_replay(bars)
+    baseline = _run_issue85_sequential_replay(bars, initial_cash=initial_cash)
     if not run_stress_tests:
         return baseline
-    cost = _run_issue85_sequential_replay(bars, cost_multiplier=Decimal("1.5"))
+    cost = _run_issue85_sequential_replay(
+        bars, cost_multiplier=Decimal("1.5"), initial_cash=initial_cash
+    )
     score_parameters = TECHNICAL_PARAMETERS["scores"]
     assert isinstance(score_parameters, dict)
     threshold_stresses: dict[str, object] = {}
@@ -1031,7 +1035,7 @@ def run_issue85_sequential_replay(
         for direction, factor in (("minus_10_percent", 0.9), ("plus_10_percent", 1.1)):
             value = int(original * factor + 0.5)
             stress = _run_issue85_sequential_replay(
-                bars, score_thresholds={name: value}
+                bars, score_thresholds={name: value}, initial_cash=initial_cash
             )
             threshold_stresses[f"{name}_{direction}"] = {
                 "threshold": value,
@@ -1059,9 +1063,10 @@ def run_issue85_sequential_replay(
     return baseline
 
 
-def _max_drawdown(states: tuple[dict[str, object], ...]) -> Decimal:
-    peak = Decimal("500000")
-    maximum = Decimal(0)
+def _max_drawdown(
+    states: tuple[dict[str, object], ...], initial_cash: Decimal = Decimal("500000")
+) -> Decimal:
+    peak = initial_cash
     for state in states:
         nav = Decimal(str(state["nav_at_close"]))
         peak = max(peak, nav)

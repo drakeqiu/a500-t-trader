@@ -150,7 +150,7 @@ def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
     assert _average_daily_amount(completed[:-1]) is None
 
 
-def test_issue85_public_replay_audits_quantity_sensitive_cost_and_grid() -> None:
+def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     fixture = (
         Path(__file__).resolve().parents[1]
         / "data/market-history/563360_5m_20240601_20261028.json"
@@ -160,30 +160,57 @@ def test_issue85_public_replay_audits_quantity_sensitive_cost_and_grid() -> None
     )
     bars = _load_completed_bars(str(fixture))
     result = run_issue85_sequential_replay(bars, run_stress_tests=False)
+    small_cash_result = run_issue85_sequential_replay(
+        bars, run_stress_tests=False, initial_cash=Decimal("1000")
+    )
 
     assert result["decision_bar_count"] == 23_580
-    examples = result["cost_grid_examples"]
-    assert isinstance(examples, list)
-    assert len(examples) >= 2
-    assert len({example["quantity"] for example in examples}) >= 2
-    assert len({example["quantity_cost_rate"] for example in examples}) >= 2
-    assert len({example["grid_step"] for example in examples}) >= 1
+    assert small_cash_result["decision_bar_count"] == 23_580
+    crossover_notional = Decimal("0.1") / Decimal("0.00005")
 
-    for example in examples:
-        quantity = int(example["quantity"])
-        price = Decimal(str(example["price"]))
-        notional = price * quantity
-        # V1 costs both legs' greater of 0.5 bps commission / ¥0.10 minimum
-        # plus 2 bps impact per side. This independently checks the consumer
-        # audit, rather than asserting only that audit fields are present.
-        expected = (
-            Decimal("2")
-            * max(Decimal("0.1"), notional * Decimal("0.00005"))
-            / notional
-            + Decimal("0.0004")
-        )
-        assert example["candidate"] == "BUY"
-        assert example["eligible"] is True
-        assert quantity >= 100 and quantity % 100 == 0
-        assert Decimal(str(example["quantity_cost_rate"])) == expected
-        assert Decimal(str(example["grid_step"])) > 0
+    def eligible_buy_examples(replay: dict[str, object]) -> list[dict[str, object]]:
+        examples = replay["cost_grid_examples"]
+        assert isinstance(examples, list)
+        buys = [
+            example
+            for example in examples
+            if example["candidate"] == "BUY" and example["eligible"] is True
+        ]
+        assert buys
+        for example in buys:
+            quantity = int(example["quantity"])
+            price = Decimal(str(example["price"]))
+            notional = price * quantity
+            expected = (
+                Decimal("2")
+                * max(Decimal("0.1"), notional * Decimal("0.00005"))
+                / notional
+                + Decimal("0.0004")
+            )
+            assert quantity >= 100 and quantity % 100 == 0
+            assert Decimal(str(example["quantity_cost_rate"])) == expected
+            assert Decimal(str(example["grid_step"])) > 0
+        return buys
+
+    baseline_buys = eligible_buy_examples(result)
+    small_cash_buys = eligible_buy_examples(small_cash_result)
+    assert len({example["quantity"] for example in baseline_buys}) >= 2
+    proportional_examples = [
+        example
+        for example in baseline_buys
+        if Decimal(str(example["price"])) * int(example["quantity"])
+        >= crossover_notional
+    ]
+    assert proportional_examples
+    for example in proportional_examples:
+        assert Decimal(str(example["quantity_cost_rate"])) == Decimal("0.00050")
+
+    minimum_commission_examples = [
+        example
+        for example in small_cash_buys
+        if Decimal(str(example["price"])) * int(example["quantity"])
+        < crossover_notional
+    ]
+    assert minimum_commission_examples
+    for example in minimum_commission_examples:
+        assert Decimal(str(example["quantity_cost_rate"])) > Decimal("0.00050")
