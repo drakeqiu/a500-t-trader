@@ -142,6 +142,59 @@ def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
         ("sell", bars[3].timestamp),
     ]
     assert result.final_holdings == 0
+    
+    
+def test_v1_dynamic_sizing_respects_protected_inventory_and_capacity() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10"))
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("100_000"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[0].timestamp, "buy", 5_000),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=7_000,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills[0].quantity == 1_600
+    assert result.final_holdings == 11_600
+
+def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
+    bars = (bar(30, 0, "10"), bar(30, 1, "10"))
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("100_000"),
+    )
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[0].timestamp, "sell", 5_000),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=7_000,
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills[0].quantity == 3_000
+    assert result.final_holdings == 7_000
 
 
 def test_public_simulation_accepts_strategy_signal_provider() -> None:

@@ -151,6 +151,8 @@ class IntradayBacktestParams:
     slippage_bps: Decimal = Decimal(0)
     order_lifetime_bars: int = 1
     minimum_commission: Decimal = Decimal(0)
+    dynamic_sizing: bool = False
+    protected_floor: int = 0
 
     def __post_init__(self) -> None:
         if not Decimal(0) < self.participation_rate <= Decimal(1):
@@ -159,6 +161,9 @@ class IntradayBacktestParams:
             raise ValueError("fees and slippage cannot be negative")
         if self.order_lifetime_bars < 1:
             raise ValueError("order_lifetime_bars must be positive")
+        if self.protected_floor < 0 or self.protected_floor % BOARD_LOT:
+            raise ValueError("protected_floor must be a non-negative board lot")
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,19 +368,60 @@ def run_intraday_backtest(
                     )
                     orders.remove(order)
         for signal in signal_at.get(bar.timestamp, ()):
-            if signal.direction == "buy":
-                free_cash = max(
-                    Decimal(0),
-                    cash
-                    - sum(
-                        (
-                            order.reserved_cash
-                            for order in orders
-                            if order.signal.direction == "buy"
-                        ),
-                        Decimal(0),
+            estimated_price = bar.close * (
+                Decimal(1) + params.slippage_bps / BASIS_POINTS
+            )
+            requested = signal.quantity
+            if params.dynamic_sizing:
+                nav = cash + holdings * bar.close
+                reserved_cash = sum(
+                    (
+                        order.reserved_cash
+                        for order in orders
+                        if order.signal.direction == "buy"
                     ),
+                    Decimal(0),
                 )
+                if signal.direction == "buy":
+                    cash_room = max(
+                        Decimal(0), cash - Decimal("0.35") * nav - reserved_cash
+                    )
+                    position_room = max(
+                        Decimal(0), Decimal("0.65") * nav - holdings * bar.close
+                    )
+                    trading_position = max(0, holdings - params.protected_floor) * bar.close
+                    trading_room = max(
+                        Decimal(0), Decimal("0.25") * nav - trading_position
+                    )
+                    order_room = Decimal("0.08") * nav
+                    capacity = min(
+                        cash_room, position_room, trading_room, order_room
+                    )
+                    requested = min(
+                        requested,
+                        int(
+                            (capacity / estimated_price).to_integral_value(
+                                rounding=ROUND_DOWN
+                            )
+                        )
+                        // BOARD_LOT
+                        * BOARD_LOT,
+                    )
+                else:
+                    protected = min(params.protected_floor, holdings)
+                    sellable_above_floor = max(
+                        0, min(sellable, holdings - protected)
+                    )
+                    requested = min(requested, sellable_above_floor)
+            if signal.direction == "buy":
+                free_cash = max(Decimal(0), cash - sum(
+                    (
+                        order.reserved_cash
+                        for order in orders
+                        if order.signal.direction == "buy"
+                    ),
+                    Decimal(0),
+                ))
                 estimated_price = bar.close * (
                     Decimal(1) + params.slippage_bps / BASIS_POINTS
                 )
@@ -384,11 +430,11 @@ def run_intraday_backtest(
                 unit_cost = estimated_price * (
                     Decimal(1) + params.fee_bps / BASIS_POINTS
                 )
-                reserved = min(free_cash, unit_cost * signal.quantity + fee_reserve)
+                reserved = min(free_cash, unit_cost * requested + fee_reserve)
                 allowed = (
                     int(
                         (
-                            min(order_budget, unit_cost * signal.quantity)
+                            min(order_budget, unit_cost * requested)
                             / (unit_cost * BOARD_LOT)
                         ).to_integral_value(rounding=ROUND_DOWN)
                     )
@@ -397,7 +443,7 @@ def run_intraday_backtest(
                 if allowed:
                     orders.append(_Order(signal, index, allowed, reserved))
             else:
-                allowed = min(signal.quantity, sellable) // BOARD_LOT * BOARD_LOT
+                allowed = min(requested, sellable) // BOARD_LOT * BOARD_LOT
                 if allowed:
                     sellable -= allowed
                     orders.append(_Order(signal, index, allowed, Decimal(0)))
@@ -437,6 +483,18 @@ def run_intraday_backtest(
         "slippage_bps": params.slippage_bps,
         "order_lifetime_bars": params.order_lifetime_bars,
         "t_plus_one": "same-session buys are not sellable until a later session date",
+        "dynamic_sizing": (
+            {
+                "total_position_nav_limit": "0.65",
+                "cash_reserve_nav_limit": "0.35",
+                "trading_position_nav_limit": "0.25",
+                "single_order_nav_limit": "0.08",
+                "protected_floor": params.protected_floor,
+                "limits_apply_to": "buy/sell signal quantities at submission",
+            }
+            if params.dynamic_sizing
+            else None
+        ),
         "partial_fill": (
             "board-lot quantity limited by configured participation rate and bar volume"
         ),
