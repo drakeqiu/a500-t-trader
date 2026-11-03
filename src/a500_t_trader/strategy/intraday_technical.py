@@ -10,15 +10,14 @@ from datetime import datetime, time, timedelta
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 
 from ..market_data import SHANGHAI, MinuteBar
-from .intraday_v1_config import IntradayV1Config
-
-RULE_SOURCE_SHA256 = "6c71ca0892a76f4c479454107ace005bbdec2dd3f96d823727b44ae0e01c1689"
+from .intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID, IntradayV1Config
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
 BAR_INTERVAL = 5
 MINIMUM_HISTORY = 180
-TECHNICAL_PARAMETER_VERSION = "intraday-etf-t-v1"
+TECHNICAL_PARAMETER_VERSION = STRATEGY_ID
+
 TECHNICAL_PARAMETERS = {
     "indicators": {
         "ema": [20, 60],
@@ -108,7 +107,7 @@ def analyze_intraday_technical(
 ) -> dict[str, IntradayTechnicalAnalysis]:
     """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
-        config.strategy_id != TECHNICAL_PARAMETER_VERSION
+        config.strategy_id != STRATEGY_ID
         or config.rule_version != "V1.0"
         or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
     ):

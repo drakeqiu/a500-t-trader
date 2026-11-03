@@ -36,8 +36,9 @@ def evaluate_intraday_strategy(
     certification_binding: Mapping[str, object] | None = None,
     state_store: IntradayStrategyStateStore | None = None,
     pending_order_state: str | None = None,
-    grid_context: Mapping[str, Mapping[str, object]] | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
+    grid_context: Mapping[str, Mapping[str, object]] | None = None,
+    risk_exit_required: Mapping[str, bool] | None = None,
 ) -> dict[str, dict[str, object]]:
     """Evaluate source-exact candidates, then apply durable and sizing vetoes.
 
@@ -69,6 +70,12 @@ def evaluate_intraday_strategy(
                 as_of=as_of,
                 paired_state=paired_state,
             )
+            analyses = {
+                symbol: _route_forced_risk_exit(
+                    analysis, (risk_exit_required or {}).get(symbol, False)
+                )
+                for symbol, analysis in analyses.items()
+            }
             analyses = {
                 symbol: _filter_rsi_momentum(analysis)
                 for symbol, analysis in analyses.items()
@@ -138,7 +145,8 @@ def evaluate_intraday_strategy(
         reasons.extend(certification_reasons)
         side = (
             "sell"
-            if analysis is not None and analysis.candidate == "TAKE_PROFIT"
+            if analysis is not None
+            and analysis.candidate in {"TAKE_PROFIT", "FORCED_RISK_EXIT"}
             else "buy"
             if analysis is not None and analysis.candidate == "BUYBACK"
             else analysis.candidate.lower()
@@ -385,6 +393,21 @@ def evaluate_intraday_strategy(
 
     return results
 
+
+def _route_forced_risk_exit(
+    analysis: IntradayTechnicalAnalysis,
+    required: bool,
+) -> IntradayTechnicalAnalysis:
+    """Route an explicit upstream risk decision without applying RSI momentum."""
+    if required is not True or analysis.risk_status != "READY":
+        return analysis
+    return replace(
+        analysis,
+        candidate="FORCED_RISK_EXIT",
+        reasons=tuple(
+            reason for reason in analysis.reasons if not reason.startswith("RSI_")
+        ),
+    )
 
 def _filter_rsi_momentum(
     analysis: IntradayTechnicalAnalysis,

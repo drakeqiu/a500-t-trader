@@ -75,7 +75,7 @@ def calculate_intraday_execution(
             candidate = analysis.candidate.upper()
             side = (
                 "sell"
-                if candidate in {"SELL", "TAKE_PROFIT"}
+                if candidate in {"SELL", "TAKE_PROFIT", "FORCED_RISK_EXIT"}
                 else "buy"
                 if candidate in {"BUY", "BUYBACK"}
                 else candidate.lower()
@@ -104,6 +104,8 @@ def calculate_intraday_execution(
                 threshold = score_parameters.get("buyback", float("inf"))
                 if analysis.trend == "BEAR":
                     threshold = score_parameters.get("weak_bear_buyback", float("inf"))
+            elif candidate == "FORCED_RISK_EXIT":
+                threshold = 0
             else:
                 threshold = signal_parameters.get(
                     "buy_threshold" if side == "buy" else "sell_threshold",

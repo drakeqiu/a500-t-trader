@@ -123,7 +123,7 @@ def _config(
         "liquidity": {"minimum_amount": "0"},
     }
     return IntradayV1Config(
-        "intraday-etf-t-v1",
+        "intraday-etf-t-v1-rsi",
         "V1.0",
         "commit:test",
         "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
@@ -338,6 +338,25 @@ def test_public_evaluation_does_not_rsi_block_take_profit(
     assert indicators["rsi_14"] is None
     assert indicators["rsi_14_previous"] is None
     assert not any(reason.startswith("RSI_") for reason in result["reasons"])
+
+def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analysis = _candidate_analysis("SELL", Decimal("70"), Decimal("71"))
+    monkeypatch.setattr(
+        intraday_api,
+        "analyze_intraday_technical",
+        lambda bars_by_symbol, **kwargs: {"510300": analysis},
+    )
+
+    result = _evaluate(risk_exit_required={"510300": True})["510300"]
+
+    signal = result["signal"]
+    assert isinstance(signal, dict)
+    assert signal["candidate"] == "FORCED_RISK_EXIT"
+    assert not any(reason.startswith("RSI_") for reason in result["reasons"])
+    assert result["execution"]["quantity"] == 0
+    assert result["execution"]["allowed"] is False
 
 
 def _paired_api_result(
