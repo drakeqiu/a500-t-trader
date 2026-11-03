@@ -57,6 +57,20 @@ def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
     return sum((amount for _, amount in sessions[-20:]), Decimal(0)) / 20
 
 
+def _round_trip_cost_rate(
+    price: Decimal,
+    quantity: int,
+    *,
+    fee_rate: Decimal = Decimal("0.00005"),
+    minimum_commission: Decimal = Decimal("0.1"),
+    single_side_impact: Decimal = Decimal("0.0002"),
+) -> Decimal:
+    notional = price * quantity
+    if price <= 0 or quantity <= 0:
+        return Decimal("Infinity")
+    fees_each_side = max(minimum_commission, notional * fee_rate)
+    return fees_each_side * 2 / notional + single_side_impact * 2
+
 class _SequentialV1Signals:
     """Stateful V1 policy evaluated after each completed bar's prior fills."""
 
@@ -147,14 +161,6 @@ class _SequentialV1Signals:
             self._last_fill_by_side[side] = dict(fill)
         self._seen_fill_count = len(fills)
 
-    @staticmethod
-    def _round_trip_cost_rate(nav: Decimal, price: Decimal) -> Decimal:
-        estimated_notional = min(nav * Decimal("0.08"), Decimal("100000"))
-        fees_each_side = max(
-            Decimal("0.1"), estimated_notional * Decimal("0.00005")
-        )
-        return fees_each_side * 2 / max(estimated_notional, price * Decimal(100))
-
     def _ordinary_quantity(
         self, nav: Decimal, price: Decimal, atr: Decimal, grid: Decimal
     ) -> int:
@@ -212,7 +218,13 @@ class _SequentialV1Signals:
         history = tuple((*self._history, bar)[-181:])
         current_index = int(account_state["bar_index"])
         tick = Decimal("0.001")
-        cost_rate = self._round_trip_cost_rate(nav, price) * self._fee_multiplier
+        cost_quantity = self._ordinary_quantity(
+            nav, price, Decimal(0), self._current_step or Decimal(0)
+        )
+        cost_quantity = max(100, cost_quantity)
+        cost_rate = (
+            _round_trip_cost_rate(price, cost_quantity) * self._fee_multiplier
+        )
         pending = bool(account_state["pending_orders"])
         paired_state: dict[str, object] = {}
         open_pairs = [

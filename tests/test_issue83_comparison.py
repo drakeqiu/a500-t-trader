@@ -10,11 +10,19 @@ from a500_t_trader.backtest.intraday import (
 )
 from a500_t_trader.backtest.issue83_comparison import (
     _average_daily_amount,
+    _round_trip_cost_rate,
     run_issue83_comparison,
 )
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
 from a500_t_trader.strategy.premarket import AccountSnapshot
+
+def test_quantity_based_round_trip_cost_uses_order_notional() -> None:
+    # At ¥5, 100 shares incur two ¥0.10 minimum commissions; 10,000
+    # shares incur proportional ¥2.50 fees each side plus 0.04% impact.
+    assert _round_trip_cost_rate(Decimal("5"), 100) == Decimal("0.0008")
+    assert _round_trip_cost_rate(Decimal("5"), 10000) == Decimal("0.0005")
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
