@@ -453,6 +453,43 @@ def run_intraday_backtest(
                             // BOARD_LOT
                             * BOARD_LOT,
                         )
+                        if order.signal.direction == "buy":
+                            other_pending = sum(
+                                candidate.remaining
+                                for candidate in orders
+                                if candidate is not order
+                                and candidate.signal.direction == "buy"
+                            )
+                            position_room = max(
+                                Decimal(0),
+                                Decimal("0.65") * nav_at_fill
+                                - holdings * fill_price
+                                - other_pending * fill_price,
+                            )
+                            trading_room = max(
+                                Decimal(0),
+                                Decimal("0.25") * nav_at_fill
+                                - max(0, holdings - min(protected_floor, holdings))
+                                * fill_price
+                                - other_pending * fill_price,
+                            )
+                            quantity = min(
+                                quantity,
+                                int(
+                                    (position_room / fill_price).to_integral_value(
+                                        rounding=ROUND_DOWN
+                                    )
+                                )
+                                // BOARD_LOT
+                                * BOARD_LOT,
+                                int(
+                                    (trading_room / fill_price).to_integral_value(
+                                        rounding=ROUND_DOWN
+                                    )
+                                )
+                                // BOARD_LOT
+                                * BOARD_LOT,
+                            )
                         if (
                             order.signal.direction == "sell"
                             and order.signal.intent is not SignalIntent.RISK_EXIT
@@ -1004,36 +1041,50 @@ def _risk_quantity(
         atr = (atr * Decimal(13) + true_range) / Decimal(14)
     if atr <= 0:
         return None
-    one_lot_notional = price * BOARD_LOT
-    round_trip_cost_rate = (
-        Decimal(2)
-        * max(
-            params.minimum_commission,
-            one_lot_notional * params.fee_bps / BASIS_POINTS,
-        )
-        / one_lot_notional
-        + Decimal(2) * params.slippage_bps / BASIS_POINTS
-        + Decimal("0.0004")
-    )
-    grid_ratio = max(
-        Decimal("0.9") * atr / price,
-        Decimal("0.0025"),
-        Decimal(3) * round_trip_cost_rate,
-        Decimal("0.004") / price,
-    )
-    if grid_ratio > Decimal("0.009"):
-        return None
-    grid = (price * grid_ratio / Decimal("0.001")).to_integral_value(
-        rounding=ROUND_UP
-    ) * Decimal("0.001")
-    stop_distance = max(
-        Decimal("1.5") * atr,
-        Decimal("1.2") * grid,
-        Decimal("0.004") * price,
-    )
     quantity = (
-        Decimal("0.0015") * nav / stop_distance
+        Decimal("0.0015") * nav / max(Decimal("1.5") * atr, Decimal("0.004") * price)
     ).to_integral_value(rounding=ROUND_DOWN)
+    quantity = quantity // BOARD_LOT * BOARD_LOT
+    if quantity < BOARD_LOT:
+        return 0
+    round_trip_cost_rate = Decimal(0)
+    grid = Decimal(0)
+    for _ in range(8):
+        notional = price * quantity
+        round_trip_cost_rate = (
+            Decimal(2)
+            * max(
+                params.minimum_commission,
+                notional * params.fee_bps / BASIS_POINTS,
+            )
+            / notional
+            + Decimal("0.0004")
+        )
+        grid_ratio = max(
+            Decimal("0.9") * atr / price,
+            Decimal("0.0025"),
+            Decimal(3) * round_trip_cost_rate,
+            Decimal("0.004") / price,
+        )
+        if grid_ratio > Decimal("0.009"):
+            return None
+        grid = (price * grid_ratio / Decimal("0.001")).to_integral_value(
+            rounding=ROUND_UP
+        ) * Decimal("0.001")
+        stop_distance = max(
+            Decimal("1.5") * atr,
+            Decimal("1.2") * grid,
+            Decimal("0.004") * price,
+        )
+        next_quantity = (
+            Decimal("0.0015") * nav / stop_distance
+        ).to_integral_value(rounding=ROUND_DOWN)
+        next_quantity = max(
+            Decimal(BOARD_LOT), next_quantity // BOARD_LOT * BOARD_LOT
+        )
+        if next_quantity == quantity:
+            break
+        quantity = next_quantity
     return max(0, int(quantity))
 
 

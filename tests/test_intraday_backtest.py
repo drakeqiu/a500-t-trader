@@ -253,6 +253,88 @@ def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> No
     assert submitted["nav_at_close"] == "200000"
     assert result.account_states[-1]["holdings"] == 12_000
     assert result.account_states[-1]["protected_floor"] == 7_000
+def test_v1_dynamic_buy_rechecks_position_capacity_at_fill_price() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + index, tzinfo=TZ),
+            1,
+            Decimal("10") if index < 14 else Decimal("12"),
+            Decimal("10.04") if index < 14 else Decimal("12.04"),
+            Decimal("9.96") if index < 14 else Decimal("11.96"),
+            Decimal("10") if index < 14 else Decimal("12"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(15)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 6_000},
+        {"510300": Decimal("10")},
+        {"510300": 6_000},
+        Decimal("40_000"),
+    )
+
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[13].timestamp, "buy", 1_600),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=4_000,
+            fee_bps=Decimal("0.5"),
+            minimum_commission=Decimal("0.1"),
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.account_states[-1]["holdings"] == 6_000
+    assert result.fills == ()
+
+
+def test_v1_dynamic_cost_grid_uses_risk_sized_order_not_one_lot() -> None:
+    bars = tuple(
+        MinuteBar(
+            "510300",
+            datetime(2026, 10, 30, 9, 30 + index, tzinfo=TZ),
+            1,
+            Decimal("10"),
+            Decimal("10.04"),
+            Decimal("9.96"),
+            Decimal("10"),
+            1_000_000,
+            Decimal("10000000"),
+        )
+        for index in range(15)
+    )
+    starting = AccountSnapshot(
+        account().as_of,
+        {"510300": 10_000},
+        {"510300": Decimal("10")},
+        {"510300": 10_000},
+        Decimal("100_000"),
+    )
+
+    result = run_intraday_backtest(
+        symbol="510300",
+        account=starting,
+        bars=bars,
+        signals=(BarSignal(bars[13].timestamp, "buy", 100),),
+        params=IntradayBacktestParams(
+            participation_rate=Decimal(1),
+            dynamic_sizing=True,
+            protected_floor=7_000,
+            minimum_commission=Decimal("20"),
+        ),
+        strategy_parameters={},
+        implementation_version="test-v1",
+    )
+
+    assert result.fills
 
 
 def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
