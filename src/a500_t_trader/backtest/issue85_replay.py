@@ -43,8 +43,7 @@ def _ohlcv_spread_proxy_eligible(
 
 ZERO_SLIPPAGE_ASSUMPTION = {
     "bps_per_side": "0",
-    "source": "exploratory baseline assumption recorded in "
-    "docs/backtest-563360-v1.md",
+    "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
     "recorded_on": "2026-11-03",
     "context": (
         "idealized next-available-bar-open baseline; not observed fill or "

@@ -311,4 +311,3 @@ def _score_weight_hash(weights: dict[str, int]) -> str:
     return hashlib.sha256(
         f"{TECHNICAL_PARAMETER_HASH}:{canonical_weights}".encode()
     ).hexdigest()
-
