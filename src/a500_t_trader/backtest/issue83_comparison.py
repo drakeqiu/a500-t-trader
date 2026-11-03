@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -28,6 +28,26 @@ END = datetime(2026, 10, 28, 15, 0, tzinfo=SHANGHAI)
 WARMUP_START = datetime(2024, 10, 15, 0, 0, tzinfo=SHANGHAI)
 INITIAL_ACCOUNT_TIME = datetime(2024, 10, 18, 13, 55, tzinfo=SHANGHAI)
 IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
+
+
+def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
+    """Return the trailing 20 fully observed session amounts, or None if unavailable."""
+    daily: dict[object, Decimal] = {}
+    complete: set[object] = set()
+    invalid: set[object] = set()
+    for bar in bars:
+        day = bar.timestamp.astimezone(SHANGHAI).date()
+        if bar.amount is None:
+            invalid.add(day)
+            continue
+        daily[day] = daily.get(day, Decimal(0)) + bar.amount
+        if bar.timestamp.astimezone(SHANGHAI).time() >= time(14, 55):
+            complete.add(day)
+    sessions = sorted(complete - invalid)
+    if len(sessions) < 20:
+        return None
+    trailing = sessions[-20:]
+    return sum((daily[day] for day in trailing), Decimal(0)) / 20
 
 
 class _SequentialV1Signals:

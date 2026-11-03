@@ -8,7 +8,10 @@ from a500_t_trader.backtest.intraday import (
     IntradayBacktestParams,
     run_intraday_backtest,
 )
-from a500_t_trader.backtest.issue83_comparison import run_issue83_comparison
+from a500_t_trader.backtest.issue83_comparison import (
+    _average_daily_amount,
+    run_issue83_comparison,
+)
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
 from a500_t_trader.strategy.premarket import AccountSnapshot
@@ -111,3 +114,13 @@ def _bar(timestamp: datetime, price: int, volume: int) -> MinuteBar:
         volume,
         value * volume,
     )
+
+
+def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
+    bars = tuple(
+        _bar(datetime(2024, 10, 1 + index, 15, 0), 5, 1) for index in range(19)
+    )
+
+    assert _average_daily_amount(bars) is None
+    completed = (*bars, _bar(datetime(2024, 10, 20, 15, 0), 5, 1))
+    assert _average_daily_amount(completed) == Decimal("5")
