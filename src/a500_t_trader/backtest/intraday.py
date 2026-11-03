@@ -44,6 +44,7 @@ class BarSignal:
     atr: Decimal | None = None
     grid_step: Decimal | None = None
     grid_level: str | None = None
+    spread_eligible: bool | None = None
 
     def __post_init__(self) -> None:
         if self.direction not in ("buy", "sell"):
@@ -454,6 +455,46 @@ def run_intraday_backtest(
                             * BOARD_LOT,
                         )
                         if order.signal.direction == "buy":
+                            other_reserved_cash = sum(
+                                (
+                                    candidate.reserved_cash
+                                    for candidate in orders
+                                    if candidate is not order
+                                    and candidate.signal.direction == "buy"
+                                ),
+                                Decimal(0),
+                            )
+                            cash_room = max(
+                                Decimal(0),
+                                cash
+                                - Decimal("0.35") * nav_at_fill
+                                - other_reserved_cash,
+                            )
+                            unit_cost = fill_price * (
+                                Decimal(1) + params.fee_bps / BASIS_POINTS
+                            )
+                            quantity = min(
+                                quantity,
+                                int(
+                                    (
+                                        max(
+                                            Decimal(0),
+                                            cash_room - params.minimum_commission,
+                                        )
+                                        / (unit_cost * BOARD_LOT)
+                                    ).to_integral_value(rounding=ROUND_DOWN)
+                                )
+                                * BOARD_LOT,
+                                int(
+                                    (
+                                        Decimal("0.08")
+                                        * nav_at_fill
+                                        / fill_price
+                                    ).to_integral_value(rounding=ROUND_DOWN)
+                                )
+                                // BOARD_LOT
+                                * BOARD_LOT,
+                            )
                             other_pending = sum(
                                 candidate.remaining
                                 for candidate in orders
@@ -770,7 +811,19 @@ def run_intraday_backtest(
                     signal.quantity,
                     signal.intent,
                     str(eligible_pair["pair_id"]),
+                    signal.atr,
+                    signal.grid_step,
+                    signal.grid_level,
+                    signal.spread_eligible,
                 )
+            if (
+                params.dynamic_sizing
+                and signal.direction == "buy"
+                and signal.spread_eligible is not True
+            ):
+                # OHLCV bars contain no historical quote spread. Never treat
+                # unavailable spread evidence as satisfying the V1 liquidity gate.
+                continue
             requested = signal.quantity
             estimated_price = bar.close * (
                 Decimal(1) + params.slippage_bps / BASIS_POINTS
