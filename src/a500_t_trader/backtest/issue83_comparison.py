@@ -713,7 +713,7 @@ def _run_issue85_sequential_replay(
         params=IntradayBacktestParams(
             participation_rate=Decimal("0.02"),
             fee_bps=Decimal("0.5") * cost_multiplier,
-            slippage_bps=Decimal(0),
+            slippage_bps=Decimal(0) * cost_multiplier,
             order_lifetime_bars=1,
             minimum_commission=Decimal("0.1") * cost_multiplier,
             dynamic_sizing=True,
