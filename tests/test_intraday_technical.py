@@ -432,6 +432,8 @@ def test_configured_signal_threshold_changes_candidate(
     )["510300"]
 
     assert analysis.candidate == "BUY"
+
+
 def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
     bars = list(_bars(count=16))
     closes = [Decimal("100")]

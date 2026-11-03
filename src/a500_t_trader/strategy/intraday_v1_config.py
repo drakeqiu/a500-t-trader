@@ -12,8 +12,7 @@ from typing import cast
 CONFIG_SCHEMA_VERSION = "2.0"
 STRATEGY_ID = "intraday-etf-t-v1-rsi"
 RULE_SOURCE = (
-    "docs/strategy/intraday-etf-t-v1/"
-    "intraday_etf_t_quantitative_strategy_v1.0.md"
+    "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
 )
 RULE_SOURCE_SHA256 = "ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4"
 _REQUIRED_TOP_LEVEL = (
@@ -79,6 +78,7 @@ _REQUIRED_SECURITY_FIELDS = (
     "source",
     "as_of",
 )
+
 
 @dataclass(frozen=True, slots=True)
 class IntradayV1Config:

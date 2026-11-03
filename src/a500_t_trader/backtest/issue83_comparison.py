@@ -182,9 +182,7 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         }
     base_value = Decimal(groups["kdj15_rsi0"]["strategy_final_value"])
     score_value = Decimal(groups["kdj8_rsi7"]["strategy_final_value"])
-    momentum_value = Decimal(
-        groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"]
-    )
+    momentum_value = Decimal(groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"])
     groups["kdj8_rsi7"]["incremental_value_vs_kdj15_rsi0"] = str(
         score_value - base_value
     )

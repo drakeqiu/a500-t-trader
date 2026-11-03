@@ -423,6 +423,7 @@ def _route_forced_risk_exit(
         reasons=tuple(reasons),
     )
 
+
 def _filter_rsi_momentum(
     analysis: IntradayTechnicalAnalysis,
 ) -> IntradayTechnicalAnalysis:
@@ -454,7 +455,7 @@ def _rsi_value(value: object) -> Decimal | None:
         return None
     try:
         parsed = Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
+    except InvalidOperation, TypeError, ValueError:
         return None
     return parsed if parsed.is_finite() else None
 

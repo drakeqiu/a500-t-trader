@@ -584,6 +584,7 @@ def _trend(bars: list[MinuteBar], indicators: dict[str, Decimal | None]) -> str 
 def _clip(value: Decimal) -> Decimal:
     return min(ONE, max(ZERO, value))
 
+
 def _wilder_rsi(
     values: list[Decimal], period: int
 ) -> tuple[Decimal | None, Decimal | None]:

@@ -23,6 +23,7 @@ def binding() -> dict[str, object]:
         },
     }
 
+
 def config() -> dict[str, object]:
     return {
         "net_return_minimum": "0.01",
@@ -102,14 +103,20 @@ def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> 
         )
         is False
     )
-    assert certification_is_current(
-        result, binding() | {"strategy_id": "intraday-etf-t-rsi-v1"}, config()
-    ) is False
-    assert certification_is_current(
-        result,
-        binding() | {"execution_assumptions": {"fill_model": "close"}},
-        config(),
-    ) is False
+    assert (
+        certification_is_current(
+            result, binding() | {"strategy_id": "intraday-etf-t-rsi-v1"}, config()
+        )
+        is False
+    )
+    assert (
+        certification_is_current(
+            result,
+            binding() | {"execution_assumptions": {"fill_model": "close"}},
+            config(),
+        )
+        is False
+    )
 
 
 def test_certificate_requires_ruleset_identity_and_execution_assumptions() -> None:

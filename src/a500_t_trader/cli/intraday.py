@@ -39,7 +39,6 @@ def _load_completed_bars(path: str) -> tuple[MinuteBar, ...]:
     )
 
 
-
 def register_commands(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:

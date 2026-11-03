@@ -25,9 +25,10 @@ def test_comparison_groups_use_distinct_source_score_weights():
     assert groups["kdj15_rsi0"]["score_weights"]["rsi"] == 0
     assert groups["kdj8_rsi7"]["score_weights"]["kdj"] == 8
     assert groups["kdj8_rsi7"]["score_weights"]["rsi"] == 7
-    assert groups["kdj8_rsi7_rsi_momentum"]["score_weights"] == groups[
-        "kdj8_rsi7"
-    ]["score_weights"]
+    assert (
+        groups["kdj8_rsi7_rsi_momentum"]["score_weights"]
+        == groups["kdj8_rsi7"]["score_weights"]
+    )
     assert groups["kdj8_rsi7_rsi_momentum"]["rsi_momentum_filter"] is True
     assert (
         groups["kdj15_rsi0"]["analysis_parameter_hash"]
@@ -78,8 +79,10 @@ def _bars():
     current = datetime(2024, 10, 15, 9, 30, tzinfo=SHANGHAI)
     bars = []
     while current < datetime(2024, 10, 18, 14, 15, tzinfo=SHANGHAI):
-        if current.time() >= time(9, 30) and current.time() <= time(11, 30) or (
-            current.time() >= time(13, 5) and current.time() <= time(15, 0)
+        if (
+            current.time() >= time(9, 30)
+            and current.time() <= time(11, 30)
+            or (current.time() >= time(13, 5) and current.time() <= time(15, 0))
         ):
             bars.append(_bar(current, 5, 10000))
         current += timedelta(minutes=5)

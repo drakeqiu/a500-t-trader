@@ -339,6 +339,7 @@ def test_public_evaluation_does_not_rsi_block_take_profit(
     assert indicators["rsi_14_previous"] is None
     assert not any(reason.startswith("RSI_") for reason in result["reasons"])
 
+
 def test_public_evaluation_routes_explicit_risk_exit_around_rsi_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

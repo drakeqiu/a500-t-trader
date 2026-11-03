@@ -134,9 +134,7 @@ class TechnicalAnalysisSignalProvider:
         return tuple(signals)
 
 
-def _rsi_momentum_allowed(
-    analysis: IntradayTechnicalAnalysis, direction: str
-) -> bool:
+def _rsi_momentum_allowed(analysis: IntradayTechnicalAnalysis, direction: str) -> bool:
     current = analysis.indicators.get("rsi_14")
     previous = analysis.indicators.get("rsi_14_previous")
     if not isinstance(current, Decimal) or not isinstance(previous, Decimal):
@@ -144,6 +142,7 @@ def _rsi_momentum_allowed(
     if direction == "buy":
         return current > Decimal(30) and current > previous
     return direction == "sell" and current < Decimal(70) and current < previous
+
 
 @dataclass(frozen=True, slots=True)
 class IntradayBacktestParams:
