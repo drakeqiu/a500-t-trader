@@ -92,6 +92,8 @@ class _SequentialV1Signals:
         self._used_levels: set[str] = set()
         self._current_step: Decimal | None = None
         self._lots: list[dict[str, object]] = []
+        self._cost_grid_examples: list[dict[str, object]] = []
+        self._cost_grid_example_keys: set[int] = set()
         self._seen_fill_count = 0
         self._last_fill_by_side: dict[str, dict[str, object]] = {}
         self._daily_start_nav: Decimal | None = None
@@ -526,6 +528,27 @@ class _SequentialV1Signals:
             )
             if quantity < 100:
                 return ()
+            if quantity not in self._cost_grid_example_keys:
+                self._cost_grid_example_keys.add(quantity)
+                if len(self._cost_grid_examples) < 12:
+                    quantity_cost_rate = _round_trip_cost_rate(
+                        price,
+                        quantity,
+                        fee_rate=self._fee_rate,
+                        minimum_commission=self._minimum_commission,
+                        single_side_impact=self._impact_rate,
+                    )
+                    self._cost_grid_examples.append(
+                        {
+                            "candidate": candidate,
+                            "quantity": quantity,
+                            "price": str(price),
+                            "quantity_cost_rate": str(quantity_cost_rate),
+                            "cost_rate": str(cost_rate),
+                            "grid_step": str(grid),
+                            "eligible": True,
+                        }
+                    )
             level = indicators.get("grid_buy_level")
             return (
                 BarSignal(
@@ -869,18 +892,19 @@ def _run_issue85_sequential_replay(
         minimum_commission=Decimal("0.1") * cost_multiplier,
         dynamic_sizing=True,
     )
+    signals = _SequentialV1Signals(
+        warmup,
+        pre_start,
+        threshold_overrides=score_thresholds,
+        fee_rate=execution_params.fee_bps / Decimal(10000),
+        minimum_commission=execution_params.minimum_commission,
+        impact_rate=Decimal("0.0002") * cost_multiplier,
+    )
     result = run_intraday_backtest(
         symbol=SYMBOL,
         account=account,
         bars=decisions,
-        signals=_SequentialV1Signals(
-            warmup,
-            pre_start,
-            threshold_overrides=score_thresholds,
-            fee_rate=execution_params.fee_bps / Decimal(10000),
-            minimum_commission=execution_params.minimum_commission,
-            impact_rate=Decimal("0.0002") * cost_multiplier,
-        ),
+        signals=signals,
         params=execution_params,
         strategy_parameters={
             "source_strategy": STRATEGY_ID,
@@ -986,13 +1010,18 @@ def _run_issue85_sequential_replay(
         "open_pair_count": sum(pair["status"] == "open" for pair in pairs),
         "cancelled_order_count": len(result.cancellations),
         "limitations": result.strategy_parameters["limitations"],
+        "cost_grid_examples": signals._cost_grid_examples,
     }
 
 def run_issue85_sequential_replay(
     bars: tuple[MinuteBar, ...],
+    *,
+    run_stress_tests: bool = True,
 ) -> dict[str, object]:
-    """Run baseline plus full-data cost and one-at-a-time threshold stresses."""
+    """Run baseline and, by default, full-data cost and threshold stresses."""
     baseline = _run_issue85_sequential_replay(bars)
+    if not run_stress_tests:
+        return baseline
     cost = _run_issue85_sequential_replay(bars, cost_multiplier=Decimal("1.5"))
     score_parameters = TECHNICAL_PARAMETERS["scores"]
     assert isinstance(score_parameters, dict)

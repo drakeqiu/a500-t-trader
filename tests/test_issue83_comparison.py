@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import cast
@@ -13,6 +16,8 @@ from a500_t_trader.backtest.issue83_comparison import (
     _round_trip_cost_rate,
     run_issue83_comparison,
 )
+from a500_t_trader.backtest.issue83_comparison import run_issue85_sequential_replay
+from a500_t_trader.cli.intraday import _load_completed_bars
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_v1_config import RULE_SOURCE_SHA256
 from a500_t_trader.strategy.premarket import AccountSnapshot
@@ -143,3 +148,42 @@ def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
     completed = (*bars, *session(20))
     assert _average_daily_amount(completed) == Decimal("240")
     assert _average_daily_amount(completed[:-1]) is None
+
+
+def test_issue85_public_replay_audits_quantity_sensitive_cost_and_grid() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "data/market-history/563360_5m_20240601_20261028.json"
+    )
+    assert hashlib.sha256(fixture.read_bytes()).hexdigest() == (
+        "2c37f69cb258699b62b5613b9513915ac4b104c116c987db6d9a48f58c5d6a25"
+    )
+    bars = _load_completed_bars(str(fixture))
+    result = run_issue85_sequential_replay(bars, run_stress_tests=False)
+
+    assert result["decision_bar_count"] == 23_580
+    examples = result["cost_grid_examples"]
+    assert isinstance(examples, list)
+    assert len(examples) >= 2
+    assert len({example["quantity"] for example in examples}) >= 2
+    assert len({example["quantity_cost_rate"] for example in examples}) >= 2
+    assert len({example["grid_step"] for example in examples}) >= 1
+
+    for example in examples:
+        quantity = int(example["quantity"])
+        price = Decimal(str(example["price"]))
+        notional = price * quantity
+        # V1 costs both legs' greater of 0.5 bps commission / ¥0.10 minimum
+        # plus 2 bps impact per side. This independently checks the consumer
+        # audit, rather than asserting only that audit fields are present.
+        expected = (
+            Decimal("2")
+            * max(Decimal("0.1"), notional * Decimal("0.00005"))
+            / notional
+            + Decimal("0.0004")
+        )
+        assert example["candidate"] == "BUY"
+        assert example["eligible"] is True
+        assert quantity >= 100 and quantity % 100 == 0
+        assert Decimal(str(example["quantity_cost_rate"])) == expected
+        assert Decimal(str(example["grid_step"])) > 0
