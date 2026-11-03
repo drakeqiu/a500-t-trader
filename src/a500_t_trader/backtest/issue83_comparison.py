@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -33,11 +33,11 @@ IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
 
 def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
     """Return the trailing 20 complete 48-bar session amounts, if all are valid."""
-    daily: dict[object, list[MinuteBar]] = {}
+    daily: dict[date, list[MinuteBar]] = {}
     for bar in bars:
         day = bar.timestamp.astimezone(SHANGHAI).date()
         daily.setdefault(day, []).append(bar)
-    sessions: list[tuple[object, Decimal]] = []
+    sessions: list[tuple[date, Decimal]] = []
     for day, session in daily.items():
         amount = complete_session_amount(session)
         if amount is not None:

@@ -19,4 +19,4 @@ def complete_session_amount(bars: Sequence[MinuteBar]) -> Decimal | None:
         or any(bar.amount is None for bar in bars)
     ):
         return None
-    return sum((bar.amount for bar in bars), Decimal(0))
+    return sum((bar.amount for bar in bars if bar.amount is not None), Decimal(0))

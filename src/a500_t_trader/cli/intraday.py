@@ -207,13 +207,13 @@ def handle(args: argparse.Namespace) -> int:
                 item.get("is_completed", True),
             )
             grouped.setdefault(bar.symbol, []).append(bar)
-        result = evaluate_intraday_strategy(
+        strategy_result = evaluate_intraday_strategy(
             {symbol: tuple(bars) for symbol, bars in grouped.items()},
             as_of=args.as_of,
             config=config,
         )
         rendered = json.dumps(
-            result, ensure_ascii=False, indent=2, default=json_default
+            strategy_result, ensure_ascii=False, indent=2, default=json_default
         )
         print(rendered)
         if args.output:

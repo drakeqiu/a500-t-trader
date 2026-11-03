@@ -205,8 +205,8 @@ def test_issue85_short_chronological_split_partitions_days() -> None:
     assert str(result["training_end_day"]) < str(result["test_start_day"])
     training_run = cast(dict[str, object], result["training_run"])
     test_run = cast(dict[str, object], result["test_run"])
-    assert training_run["decision_bar_count"] > 0
-    assert test_run["decision_bar_count"] > 0
+    assert int(str(training_run["decision_bar_count"])) > 0
+    assert int(str(test_run["decision_bar_count"])) > 0
 
 
 @pytest.mark.slow
@@ -409,7 +409,7 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     proportional_examples = [
         example
         for example in baseline_buys
-        if Decimal(str(example["price"])) * int(example["quantity"])
+        if Decimal(str(example["price"])) * int(str(example["quantity"]))
         >= crossover_notional
     ]
     assert proportional_examples
@@ -419,7 +419,7 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     minimum_commission_examples = [
         example
         for example in small_cash_buys
-        if Decimal(str(example["price"])) * int(example["quantity"])
+        if Decimal(str(example["price"])) * int(str(example["quantity"]))
         < crossover_notional
     ]
     assert minimum_commission_examples

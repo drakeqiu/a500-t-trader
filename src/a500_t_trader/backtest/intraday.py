@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 
 from ..market_data import MinuteBar
 from ..strategy.intraday_technical import (
@@ -295,10 +295,16 @@ def run_intraday_backtest(
         raise ValueError("bar timestamps must include time zones")
     if account.as_of > selected[0].timestamp:
         raise ValueError("account snapshot must not follow first bar")
-    event_provider = signals if hasattr(signals, "signals_at") else None
-    if event_provider is not None:
+    if signals is None:
+        event_provider = None
         signals = ()
-    elif not isinstance(signals, tuple):
+    elif isinstance(signals, tuple):
+        event_provider = None
+    elif hasattr(signals, "signals_at"):
+        event_provider = cast(EventDrivenSignalProvider, signals)
+        signals = ()
+    else:
+        event_provider = None
         signals = signals.signals(symbol, selected)
     times = {bar.timestamp for bar in selected}
     if any(signal.timestamp not in times for signal in signals):
@@ -393,7 +399,7 @@ def run_intraday_backtest(
                     )
                     quantity = min(
                         quantity,
-                        max(0, int(pair["remaining_quantity"]) - pending_ahead)
+                        max(0, int(str(pair["remaining_quantity"])) - pending_ahead)
                         if pair is not None
                         else 0,
                     )
@@ -600,7 +606,7 @@ def run_intraday_backtest(
                             fill_price,
                             fees,
                             slippage,
-                            order.signal.intent,
+                            SignalIntent(order.signal.intent),
                             order.signal.pair_id,
                             order.signal.atr,
                             order.signal.grid_step,
@@ -649,10 +655,10 @@ def run_intraday_backtest(
                         )
                         if pair is not None:
                             pair["remaining_quantity"] = (
-                                int(pair["remaining_quantity"]) - quantity
+                                int(str(pair["remaining_quantity"])) - quantity
                             )
                             pair["buyback_quantity"] = (
-                                int(pair["buyback_quantity"]) + quantity
+                                int(str(pair["buyback_quantity"])) + quantity
                             )
                             pair["buyback_gross"] = str(
                                 Decimal(str(pair["buyback_gross"])) + notional
@@ -870,7 +876,11 @@ def run_intraday_backtest(
                     )
                     requested = min(
                         signal.quantity,
-                        max(0, int(pair["remaining_quantity"]) - pending_pair_quantity)
+                        max(
+                            0,
+                            int(str(pair["remaining_quantity"]))
+                            - pending_pair_quantity,
+                        )
                         if pair is not None
                         else 0,
                     )

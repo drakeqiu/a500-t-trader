@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -88,9 +89,16 @@ def account() -> AccountSnapshot:
 
 def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     class Provider:
-        observed: list[tuple[datetime, object, tuple[MinuteBar, ...], object]] = []
+        observed: list[
+            tuple[datetime, object, tuple[MinuteBar, ...], Mapping[str, object]]
+        ] = []
 
-        def signals_at(self, symbol, history, state):
+        def signals_at(
+            self,
+            symbol: str,
+            history: tuple[MinuteBar, ...],
+            state: Mapping[str, object],
+        ) -> tuple[BarSignal, ...]:
             self.observed.append(
                 (history[-1].timestamp, state["holdings"], history, dict(state))
             )
@@ -120,10 +128,9 @@ def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     assert first_state["remaining_daily_additions"] == 3
     assert first_state["free_cash"] == "10000"
     assert len(result.fills) == 1
-    assert (
-        result.assumptions["submitted_signals"][0]["timestamp"]
-        == bars[0].timestamp.isoformat()
-    )
+    submitted_signals = result.assumptions["submitted_signals"]
+    assert isinstance(submitted_signals, list)
+    assert submitted_signals[0]["timestamp"] == bars[0].timestamp.isoformat()
 
 
 def test_partial_fills_costs_t1_and_hold_baseline() -> None:
@@ -357,7 +364,9 @@ def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> No
     ]
     assert len(result.account_states) == len(bars)
     submitted = result.account_states[13]
-    assert [item["quantity"] for item in submitted["pending_orders"]] == [1_600, 400]
+    pending_orders = submitted["pending_orders"]
+    assert isinstance(pending_orders, list)
+    assert [item["quantity"] for item in pending_orders] == [1_600, 400]
     assert submitted["nav_at_close"] == "200000"
     assert result.account_states[-1]["holdings"] == 11_900
     assert result.account_states[-1]["protected_floor"] == 7_000
@@ -540,10 +549,9 @@ def test_v1_pending_ordinary_sells_reserve_daily_sell_capacity() -> None:
         implementation_version="test-v1",
     )
 
-    assert (
-        sum(order["quantity"] for order in result.account_states[13]["pending_orders"])
-        == 1_000
-    )
+    pending_orders = result.account_states[13]["pending_orders"]
+    assert isinstance(pending_orders, list)
+    assert sum(order["quantity"] for order in pending_orders) == 1_000
 
 
 def test_v1_partial_fills_stop_at_daily_fill_limit() -> None:
@@ -629,7 +637,9 @@ def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
         implementation_version="test-v1",
     )
 
-    assert Decimal(result.account_states[24]["daily_turnover"]) <= Decimal("150000")
+    assert Decimal(str(result.account_states[24]["daily_turnover"])) <= Decimal(
+        "150000"
+    )
 
 
 def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
