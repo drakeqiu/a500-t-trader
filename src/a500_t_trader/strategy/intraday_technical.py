@@ -133,7 +133,7 @@ def analyze_intraday_technical(
             parameters, sort_keys=True, separators=(",", ":")
         )
         parameter_hash = hashlib.sha256(
-            f"{parameter_hash}:{canonical_parameters}".encode()
+            f"{parameter_hash}:{canonical_parameters}".encode("utf-8")
         ).hexdigest()
     weights = score_weights
     if weights is None:

@@ -1,10 +1,11 @@
 import hashlib
-from pathlib import Path
-
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from a500_t_trader.backtest.intraday import (
     BarSignal,
@@ -18,6 +19,8 @@ from a500_t_trader.backtest.issue83_comparison import (
 from a500_t_trader.backtest.issue85_replay import (
     _max_drawdown,
     _round_trip_cost_rate,
+    _run_chronological_split,
+    _run_issue85_sequential_replay,
     run_issue85_sequential_replay,
 )
 from a500_t_trader.cli.intraday import _load_completed_bars
@@ -163,6 +166,50 @@ def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
     assert _average_daily_amount(completed[:-1]) is None
 
 
+def test_issue85_short_replay_emits_sell_signal() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "data/market-history/563360_5m_20240601_20261028.json"
+    )
+    bars = _load_completed_bars(str(fixture))
+    result = _run_issue85_sequential_replay(
+        bars,
+        decision_end=datetime(2025, 1, 22, 15, tzinfo=SHANGHAI),
+        include_walk_forward=False,
+    )
+    signals = cast(list[dict[str, object]], result["submitted_signals"])
+    assert any(signal["direction"] == "sell" for signal in signals)
+
+
+def test_issue85_short_chronological_split_partitions_days() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "data/market-history/563360_5m_20240601_20261028.json"
+    )
+    bars = _load_completed_bars(str(fixture))
+    trading_days = sorted(
+        {
+            bar.timestamp.astimezone(SHANGHAI).date()
+            for bar in bars
+            if bar.timestamp >= datetime(2024, 10, 18, tzinfo=SHANGHAI)
+        }
+    )[:10]
+    assert len(trading_days) == 10
+
+    result = _run_chronological_split(
+        bars, trading_days, initial_cash=Decimal("500000")
+    )
+
+    assert result["training_day_count"] == 7
+    assert result["test_day_count"] == 3
+    assert str(result["training_end_day"]) < str(result["test_start_day"])
+    training_run = cast(dict[str, object], result["training_run"])
+    test_run = cast(dict[str, object], result["test_run"])
+    assert training_run["decision_bar_count"] > 0
+    assert test_run["decision_bar_count"] > 0
+
+
+@pytest.mark.slow
 def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     fixture = (
         Path(__file__).resolve().parents[1]
@@ -181,6 +228,28 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert small_cash_result["decision_bar_count"] == 23_580
     assert result["initial_cash"] == "500000"
     assert small_cash_result["initial_cash"] == "10000"
+    submitted_signals = cast(
+        list[dict[str, object]], result["submitted_signals"]
+    )
+    assert any(signal["direction"] == "sell" for signal in submitted_signals)
+    chronological_split = cast(
+        dict[str, object], result["chronological_split"]
+    )
+    assert (
+        chronological_split["method"]
+        == "chronological 70/30 trading-day split"
+    )
+    assert chronological_split["training_day_count"] == 344
+    assert chronological_split["test_day_count"] == 148
+    assert str(chronological_split["training_end_day"]) < str(
+        chronological_split["test_start_day"]
+    )
+    training_gate = cast(
+        dict[str, object], chronological_split["training_gate"]
+    )
+    test_gate = cast(dict[str, object], chronological_split["test_gate"])
+    assert training_gate["status"] in {"passed", "failed", "undefined"}
+    assert test_gate["status"] in {"passed", "failed", "undefined"}
     for replay in (result, small_cash_result):
         initial_cash = Decimal(str(replay["initial_cash"]))
         final_nav = Decimal(str(replay["final_nav"]))

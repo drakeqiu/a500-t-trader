@@ -19,6 +19,51 @@ from a500_t_trader.strategy.premarket import AccountSnapshot
 TZ = ZoneInfo("Asia/Shanghai")
 
 
+def test_ohlcv_spread_proxy_uses_half_of_prior_completed_bar_range() -> None:
+    from a500_t_trader.backtest.issue85_replay import _ohlcv_spread_proxy_eligible
+
+    tight = MinuteBar(
+        "510300",
+        datetime(2026, 10, 30, 9, 0, tzinfo=TZ),
+        5,
+        Decimal("10"),
+        Decimal("10.01"),
+        Decimal("9.99"),
+        Decimal("10"),
+        1000,
+    )
+    wide = MinuteBar(
+        "510300",
+        datetime(2026, 10, 30, 9, 5, tzinfo=TZ),
+        5,
+        Decimal("10"),
+        Decimal("10.10"),
+        Decimal("9.90"),
+        Decimal("10"),
+        1000,
+    )
+
+    assert _ohlcv_spread_proxy_eligible(tight, Decimal("10"), Decimal("0.001"))
+    assert not _ohlcv_spread_proxy_eligible(wide, Decimal("10"), Decimal("0.001"))
+    assert not _ohlcv_spread_proxy_eligible(None, Decimal("10"), Decimal("0.001"))
+    assert not _ohlcv_spread_proxy_eligible(tight, Decimal("0"), Decimal("0.001"))
+
+    incomplete = MinuteBar(
+        "510300",
+        tight.timestamp,
+        5,
+        tight.open,
+        tight.high,
+        tight.low,
+        tight.close,
+        tight.volume,
+        is_completed=False,
+    )
+    assert not _ohlcv_spread_proxy_eligible(
+        incomplete, Decimal("10"), Decimal("0.001")
+    )
+
+
 def bar(day: int, minute: int, price: str, volume: int = 1000) -> MinuteBar:
     value = Decimal(price)
     return MinuteBar(
@@ -208,7 +253,7 @@ def test_v1_dynamic_sizing_fails_closed_without_risk_history() -> None:
 
     assert result.fills == ()
     assert result.final_holdings == 10_000
-def test_v1_buy_requires_evidenced_spread_eligibility() -> None:
+def test_v1_buy_requires_explicit_spread_eligibility() -> None:
     bars = tuple(bar(30, index, "10", 1_000_000) for index in range(15))
     starting = AccountSnapshot(
         account().as_of,

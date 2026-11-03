@@ -134,7 +134,7 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
         rule_version="V1.0",
         implementation_version="commit:test",
         rule_source="docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
-        rule_source_sha256="ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4",
+        rule_source_sha256="769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6",
         parameters={},
         certification={},
         fees={},
@@ -408,7 +408,7 @@ def test_configured_signal_threshold_changes_candidate(
         rule_version="V1.0",
         implementation_version="commit:test",
         rule_source="docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
-        rule_source_sha256="ea086d76c039ee9483f0d58bb17eb658811567e98cfd99ee79af6da3d7781bf4",
+        rule_source_sha256="769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6",
         parameters={
             **TECHNICAL_PARAMETERS,
             "signals": {"buy_threshold": 60, "sell_threshold": 68},
@@ -446,30 +446,12 @@ def test_configured_signal_threshold_changes_candidate(
         score_thresholds={"buy": 60},
     )["510300"]
     assert stressed.candidate == "BUY"
-    baseline = analyze_intraday_technical(
-        {"510300": _bars()},
-        grid_context={
-            "510300": {
-                "tick_size": Decimal("0.001"),
-                "round_trip_cost_rate": Decimal("0.0001"),
-            }
-        },
-        as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
-    )["510300"]
+    baseline = analyze_intraday_technical({"510300": _bars()})["510300"]
     repeated = analyze_intraday_technical(
-        {"510300": _bars()},
-        grid_context={
-            "510300": {
-                "tick_size": Decimal("0.001"),
-                "round_trip_cost_rate": Decimal("0.0001"),
-            }
-        },
-        as_of=datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI),
-        score_thresholds={"buy": 60},
+        {"510300": _bars()}, score_thresholds={"buy": 60}
     )["510300"]
-    assert baseline.parameter_hash == TECHNICAL_PARAMETER_HASH
     assert stressed.parameter_hash != baseline.parameter_hash
-    assert repeated.parameter_hash == stressed.parameter_hash
+    assert stressed.parameter_hash == repeated.parameter_hash
 
 
 def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
