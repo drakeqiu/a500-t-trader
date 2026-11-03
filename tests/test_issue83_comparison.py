@@ -111,3 +111,5 @@ def _bar(timestamp: datetime, price: int, volume: int) -> MinuteBar:
         volume,
         value * volume,
     )
+
+

@@ -223,6 +223,7 @@ class IntradayFill:
     pair_id: str | None = None
     atr: Decimal | None = None
     grid_step: Decimal | None = None
+    grid_level: str | None = None
 
 @dataclass(frozen=True, slots=True)
 class IntradayBacktestResult:
@@ -526,11 +527,12 @@ def run_intraday_backtest(
                             order.signal.pair_id,
                             order.signal.atr,
                             order.signal.grid_step,
+                            order.signal.grid_level,
                         )
                     )
                     if order.signal.direction == "sell":
                         daily_sell_notional += notional
-                        if order.signal.intent not in {"buyback", "risk_exit"}:
+                        if order.signal.intent not in {"buyback", "risk_exit", "take_profit"}:
                             pair_ledger.append(
                                 {
                                     "pair_id": f"pair-{pair_sequence}",
@@ -638,6 +640,7 @@ def run_intraday_backtest(
                             if fill.grid_step is not None
                             else None
                         ),
+                        "grid_level": fill.grid_level,
                     }
                     for fill in fills
                 ),
