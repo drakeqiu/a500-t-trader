@@ -6,13 +6,14 @@ import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from ..market_data import SHANGHAI, MinuteBar
 from ..strategy.intraday_technical import (
-    RULE_SOURCE_SHA256,
-    STRATEGY_ID,
     TECHNICAL_PARAMETER_HASH,
+    IntradayTechnicalAnalysis,
 )
+from ..strategy.intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID
 from ..strategy.premarket import AccountSnapshot
 from .intraday import (
     IntradayBacktestParams,
@@ -30,12 +31,19 @@ IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
 
 
 class _OneBoardLot:
-    def quantity_for(self, symbol, analysis, bars):
+    def quantity_for(
+        self,
+        symbol: str,
+        analysis: IntradayTechnicalAnalysis,
+        bars: tuple[MinuteBar, ...],
+    ) -> int:
         return 100
 
 
 class _ExploratoryGridContext(TechnicalGridContextProvider):
-    def context_for(self, symbol, bars):
+    def context_for(
+        self, symbol: str, bars: tuple[MinuteBar, ...]
+    ) -> dict[str, object]:
         # Only the stable fee/tick inputs are supplied; the source analyzer derives
         # a causal session grid from the bars and does not reuse any future grid state.
         return {
