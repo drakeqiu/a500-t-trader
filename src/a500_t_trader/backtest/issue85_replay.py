@@ -29,6 +29,19 @@ ZERO_SLIPPAGE_ASSUMPTION = {
 }
 
 
+def _max_affordable_quantity(
+    free_cash: Decimal,
+    price: Decimal,
+    fee_rate: Decimal,
+    impact_rate: Decimal,
+    minimum_commission: Decimal,
+) -> int:
+    cash_per_share = price * (Decimal(1) + fee_rate + impact_rate) + (
+        minimum_commission / Decimal(100)
+    )
+    return int((free_cash / cash_per_share) // 100) * 100
+
+
 def _round_trip_cost_rate(
     price: Decimal,
     quantity: int,
@@ -106,6 +119,8 @@ class _SequentialV1Signals:
         self._opposite_anchor_closes = 0
         self._anchor_side: int | None = None
         self._entry_pause_until = -1
+        self._last_nav: Decimal | None = None
+        self._daily_reset_examples: list[dict[str, str]] = []
 
     def _apply_new_fills(self, state: dict[str, object]) -> None:
         fills = state["fills"]
@@ -188,13 +203,29 @@ class _SequentialV1Signals:
                 self._completed_daily_amounts.append(self._day_amount)
             self._day = session_date
             self._day_amount = Decimal(0)
-            self._daily_start_nav = nav
+            self._daily_start_nav = self._last_nav if self._last_nav is not None else nav
+            self._daily_reset_examples.append(
+                {
+                    "date": session_date.isoformat(),
+                    "previous_close_nav": (
+                        str(self._last_nav) if self._last_nav is not None else str(nav)
+                    ),
+                    "first_decision_nav": str(nav),
+                    "daily_start_nav": str(self._daily_start_nav),
+                    "first_decision_daily_return": str(
+                        (nav - self._daily_start_nav) / self._daily_start_nav
+                        if self._daily_start_nav
+                        else Decimal(0)
+                    ),
+                }
+            )
             self._used_levels.clear()
             self._current_step = None
             self._opposite_anchor_closes = 0
             self._anchor_side = None
         elif self._daily_start_nav is None:
             self._daily_start_nav = nav
+        self._last_nav = nav
         self._grid_date = session_date
         if bar.amount is not None:
             self._day_amount += bar.amount
@@ -268,13 +299,15 @@ class _SequentialV1Signals:
                         pair_limit = min(pair_limit, int(pair["sell_quantity"]) // 4)
                     quantity = min(quantity, pair_limit)
                 elif candidate == "BUY":
-                    free_cash = Decimal(str(account_state["free_cash"]))
-                    cash_per_share = price * (
-                        Decimal(1) + self._fee_rate + self._impact_rate
-                    ) + self._minimum_commission / Decimal(100)
                     quantity = min(
                         quantity,
-                        int((free_cash / cash_per_share) // 100) * 100,
+                        _max_affordable_quantity(
+                            Decimal(str(account_state["free_cash"])),
+                            price,
+                            self._fee_rate,
+                            self._impact_rate,
+                            self._minimum_commission,
+                        ),
                     )
                     if (
                         int(account_state["daily_addition_count"]) >= 3
@@ -282,13 +315,15 @@ class _SequentialV1Signals:
                     ):
                         quantity = 0
                 elif candidate == "BUYBACK":
-                    free_cash = Decimal(str(account_state["free_cash"]))
-                    cash_per_share = price * (
-                        Decimal(1) + self._fee_rate + self._impact_rate
-                    ) + self._minimum_commission / Decimal(100)
                     quantity = min(
                         quantity,
-                        int((free_cash / cash_per_share) // 100) * 100,
+                        _max_affordable_quantity(
+                            Decimal(str(account_state["free_cash"])),
+                            price,
+                            self._fee_rate,
+                            self._impact_rate,
+                            self._minimum_commission,
+                        ),
                     )
                 quantity = min(
                     quantity,
@@ -439,15 +474,17 @@ class _SequentialV1Signals:
             pair_limit = int(pair["remaining_quantity"])
             if analysis.trend == "BEAR":
                 pair_limit = min(pair_limit, int(pair["sell_quantity"]) // 4)
-            cash_per_share = price * (
-                Decimal(1) + self._fee_rate + self._impact_rate
-            ) + self._minimum_commission / Decimal(100)
+            max_affordable = _max_affordable_quantity(
+                Decimal(str(account_state["free_cash"])),
+                price,
+                self._fee_rate,
+                self._impact_rate,
+                self._minimum_commission,
+            )
             quantity = min(
                 pair_limit,
                 self._ordinary_quantity(nav, price, atr or Decimal(0), grid or Decimal(0)),
-                int(Decimal(str(account_state["free_cash"])) / cash_per_share)
-                // 100
-                * 100,
+                max_affordable,
                 int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
                 // 100
                 * 100,
@@ -504,16 +541,15 @@ class _SequentialV1Signals:
                 or int(account_state["remaining_daily_fills"]) <= 0
             ):
                 return ()
-            cash_per_share = price * (
-                Decimal(1) + self._fee_rate + self._impact_rate
-            ) + self._minimum_commission / Decimal(100)
             quantity = min(
                 self._ordinary_quantity(nav, price, atr, grid),
-                int(
-                    Decimal(str(account_state["free_cash"])) / cash_per_share
-                )
-                // 100
-                * 100,
+                _max_affordable_quantity(
+                    Decimal(str(account_state["free_cash"])),
+                    price,
+                    self._fee_rate,
+                    self._impact_rate,
+                    self._minimum_commission,
+                ),
                 int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
                 // 100
                 * 100,
@@ -735,8 +771,8 @@ def _run_issue85_sequential_replay(
             "zero_slippage_assumption": ZERO_SLIPPAGE_ASSUMPTION,
             "limitations": [
                 "no source for independent intraday halt flags (historical provider status accepted per user)",
-                "no independent spread/depth feed; 2% OHLCV participation is a proxy",
-                "baseline slippage is a recorded zero-bps assumption; 1.5x cost replay scales fees but has no observed impact estimate",
+                "baseline slippage is a recorded zero-bps assumption; 1.5x cost replay scales fees, minimum commission, modeled impact, and slippage input (which remains zero), without observed impact evidence",
+                "modeled 0.02% per-side impact is used for policy cost estimates and is not applied a second time to simulated fill prices",
                 "one daily limit-field observation is invalid; no company-action or real-fill evidence",
             ],
         },
@@ -785,7 +821,50 @@ def _run_issue85_sequential_replay(
         "winning_pair_count": sum(Decimal(str(pair["realized_net_pnl"])) > 0 for pair in closed),
         "losing_pair_count": sum(Decimal(str(pair["realized_net_pnl"])) < 0 for pair in closed),
         "walk_forward": walk_forward,
+        "inputs": {
+            "fee_bps": str(execution_params.fee_bps),
+            "minimum_commission": str(execution_params.minimum_commission),
+            "slippage_bps": str(execution_params.slippage_bps),
+            "impact_bps": str(Decimal("0.0002") * cost_multiplier * Decimal(10000)),
+            "cost_multiplier": str(cost_multiplier),
+        },
+        "daily_reset_examples": signals._daily_reset_examples,
+        "account_states": list(result.account_states),
         "assumptions": {
+            "fee": {
+                "value": str(execution_params.fee_bps),
+                "unit": "bps per side",
+                "source": "user-provided commission rate, recorded in docs/backtest-563360-v1.md",
+                "context": "applied independently to each simulated fill",
+                "observed": False,
+            },
+            "minimum_commission": {
+                "value": str(execution_params.minimum_commission),
+                "unit": "CNY per fill",
+                "source": "user-provided minimum commission, recorded in docs/backtest-563360-v1.md",
+                "context": "applied independently to each simulated fill",
+                "observed": False,
+            },
+            "slippage": {
+                "value": str(execution_params.slippage_bps),
+                "unit": "bps per side",
+                "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+                "context": "idealized next-available-bar-open baseline; not observed fill evidence",
+                "observed": False,
+            },
+            "impact": {
+                "value": str(Decimal("0.0002") * cost_multiplier * Decimal(10000)),
+                "unit": "bps per side",
+                "source": "modeled cost-grid assumption in the Issue 85 replay",
+                "context": "used to estimate candidate cost only; not applied again to simulated fill prices",
+                "observed": False,
+            },
+            "cost_multiplier": {
+                "value": str(cost_multiplier),
+                "unit": "x",
+                "source": "registered baseline or stress replay configuration",
+                "context": "multiplies modeled fees, minimum commission, slippage, and impact inputs",
+            },
             "zero_slippage_assumption": ZERO_SLIPPAGE_ASSUMPTION,
         },
         "liquidity_quantity_examples": signals._liquidity_quantity_examples,
@@ -838,9 +917,17 @@ def run_issue85_sequential_replay(
             "net_pnl": cost["net_pnl"],
             "profit_factor": cost["profit_factor"],
             "closed_pairs": cost["closed_pairs"],
+            "cost_multiplier": cost["inputs"]["cost_multiplier"],
+            "inputs": {
+                "fee_bps": cost["inputs"]["fee_bps"],
+                "minimum_commission": cost["inputs"]["minimum_commission"],
+                "slippage_bps": cost["inputs"]["slippage_bps"],
+                "impact_bps": cost["inputs"]["impact_bps"],
+            },
             "fees_scaled": True,
-            "slippage_bps_baseline": 0,
-            "slippage_scaled": False,
+            "minimum_commission_scaled": True,
+            "slippage_scaled": True,
+            "impact_scaled": True,
             "passed": Decimal(str(cost["net_pnl"])) > 0
             and cost["profit_factor"] is not None
             and Decimal(str(cost["profit_factor"])) > 1,

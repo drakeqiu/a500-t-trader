@@ -172,7 +172,7 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         "2c37f69cb258699b62b5613b9513915ac4b104c116c987db6d9a48f58c5d6a25"
     )
     bars = _load_completed_bars(str(fixture))
-    result = run_issue85_sequential_replay(bars, run_stress_tests=False)
+    result = run_issue85_sequential_replay(bars)
     small_cash_result = run_issue85_sequential_replay(
         bars, run_stress_tests=False, initial_cash=Decimal("10000")
     )
@@ -226,15 +226,84 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
             )
             assert test_gate["passed"] is expected_pass
             assert test_gate["status"] == ("passed" if expected_pass else "failed")
+    inputs = result["inputs"]
+    assert inputs == {
+        "fee_bps": "0.5",
+        "minimum_commission": "0.1",
+        "slippage_bps": "0",
+        "impact_bps": "2.0000",
+        "cost_multiplier": "1",
+    }
+    daily_reset_examples = result["daily_reset_examples"]
+    assert isinstance(daily_reset_examples, list) and daily_reset_examples
+    first_reset = daily_reset_examples[0]
+    states = result["account_states"]
+    assert isinstance(states, list)
+    assert len(states) == result["decision_bar_count"]
+    prior_state = next(
+        state
+        for state in reversed(states)
+        if state["timestamp"][:10] < first_reset["date"]
+    )
+    assert first_reset["daily_start_nav"] == prior_state["nav_at_close"]
+    assert first_reset["previous_close_nav"] == prior_state["nav_at_close"]
+    first_nav = Decimal(str(first_reset["first_decision_nav"]))
+    previous_nav = Decimal(str(first_reset["previous_close_nav"]))
+    assert Decimal(str(first_reset["first_decision_daily_return"])) == (
+        (first_nav - previous_nav) / previous_nav
+    )
     assumptions = result["assumptions"]
     assert isinstance(assumptions, dict)
-    zero_slippage = assumptions["zero_slippage_assumption"]
-    assert zero_slippage == {
+    assert assumptions["fee"] == {
+        "value": "0.5",
+        "unit": "bps per side",
+        "source": "user-provided commission rate, recorded in docs/backtest-563360-v1.md",
+        "context": "applied independently to each simulated fill",
+        "observed": False,
+    }
+    assert assumptions["minimum_commission"] == {
+        "value": "0.1",
+        "unit": "CNY per fill",
+        "source": "user-provided minimum commission, recorded in docs/backtest-563360-v1.md",
+        "context": "applied independently to each simulated fill",
+        "observed": False,
+    }
+    assert assumptions["slippage"] == {
+        "value": "0",
+        "unit": "bps per side",
+        "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+        "context": "idealized next-available-bar-open baseline; not observed fill evidence",
+        "observed": False,
+    }
+    assert assumptions["impact"] == {
+        "value": "2.0000",
+        "unit": "bps per side",
+        "source": "modeled cost-grid assumption in the Issue 85 replay",
+        "context": "used to estimate candidate cost only; not applied again to simulated fill prices",
+        "observed": False,
+    }
+    assert assumptions["cost_multiplier"] == {
+        "value": "1",
+        "unit": "x",
+        "source": "registered baseline or stress replay configuration",
+        "context": "multiplies modeled fees, minimum commission, slippage, and impact inputs",
+    }
+    assert assumptions["zero_slippage_assumption"] == {
         "bps_per_side": "0",
         "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
         "recorded_on": "2026-11-03",
         "context": "idealized next-available-bar-open baseline; not observed fill or market-impact evidence",
         "observed": False,
+    }
+    stress_tests = result["stress_tests"]
+    assert isinstance(stress_tests, dict)
+    cost_stress = stress_tests["cost_1_5x"]
+    assert cost_stress["cost_multiplier"] == "1.5"
+    assert cost_stress["inputs"] == {
+        "fee_bps": "0.75",
+        "minimum_commission": "0.15",
+        "slippage_bps": "0.0",
+        "impact_bps": "3.00000",
     }
     liquidity_examples = result["liquidity_quantity_examples"]
     assert isinstance(liquidity_examples, list) and liquidity_examples
