@@ -58,6 +58,7 @@ def handle(args: argparse.Namespace) -> int:
         print(
             json.dumps(
                 {
+                    "schema_version": config.schema_version,
                     "strategy_id": config.strategy_id,
                     "rule_version": config.rule_version,
                     "implementation_version": config.implementation_version,
