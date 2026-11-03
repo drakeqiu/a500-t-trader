@@ -105,6 +105,7 @@ def analyze_intraday_technical(
     as_of: datetime | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
     score_weights: Mapping[str, float] | None = None,
+    score_thresholds: Mapping[str, int] | None = None,
 ) -> dict[str, IntradayTechnicalAnalysis]:
     """Score each symbol independently using tracked V1 rules."""
     if config is not None and (
@@ -116,6 +117,16 @@ def analyze_intraday_technical(
             "technical analysis requires the tracked intraday ETF T V1.0 configuration"
         )
     parameters = TECHNICAL_PARAMETERS if config is None else config.parameters
+    if score_thresholds is not None:
+        score_parameters = parameters.get("scores")
+        if not isinstance(score_parameters, Mapping):
+            raise ValueError("V1 score threshold configuration is malformed")
+        parameters = dict(parameters)
+        scores = dict(score_parameters)
+        for name, value in score_thresholds.items():
+            if name in {"direction_delta", "take_profit", "buyback", "buy", "sell"}:
+                scores[name] = value
+        parameters["scores"] = scores
     parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
     weights = score_weights
     if weights is None:
