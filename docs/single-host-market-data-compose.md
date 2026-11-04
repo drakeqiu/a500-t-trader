@@ -34,11 +34,27 @@ RabbitMQ 数据保存于 `rabbitmq-data` named volume。`docker compose down --v
 
 这是单主机 Compose 部署，不提供高可用、跨主机调度或 broker 故障切换保证。RabbitMQ durable queue 与持久化消息不等于 exactly-once；消费者语义为至少一次。离线期间逐笔事件的完整恢复不作保证。
 
-在支持 Docker 的环境可运行真实端到端验证：
+在支持 Docker Compose 的环境运行真实端到端验证：
 
 ```sh
 uv sync --frozen --no-dev
 uv run --no-sync python scripts/compose-market-data-e2e.py
 ```
 
-该脚本构建并启动 Compose 服务，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，并检查两个不同用途的消费者输出均收到该事件；清理时会移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 在 Docker runner 上运行同一脚本。
+Podman 用户可指定 Compose 命令：
+
+```sh
+A500_COMPOSE_COMMAND="podman compose" uv run --no-sync python scripts/compose-market-data-e2e.py
+```
+
+rootless Podman 首次启动 RabbitMQ 若报告 `.erlang.cookie: eacces`，先按 RabbitMQ 镜像的 UID/GID 修正该 Compose 项目卷权限，再重跑 E2E：
+
+```sh
+volume="<compose-project>_rabbitmq-data"
+mountpoint="$(podman volume inspect --format '{{.Mountpoint}}' "$volume")"
+podman unshare chown -R 100:101 "$mountpoint"
+```
+
+将 `<compose-project>` 替换为 Compose 项目名（通常是仓库目录名）。
+
+该脚本构建并启动 Compose 服务，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，并检查两个不同用途的消费者输出均收到该事件；清理时会移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 默认使用 `docker compose`，仍在 Docker runner 上运行同一脚本。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -14,14 +15,18 @@ from a500_t_trader.market_data import Trade
 from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE = ["docker", "compose", "-f", str(ROOT / "compose.yaml")]
+COMPOSE = [
+    *shlex.split(os.environ.get("A500_COMPOSE_COMMAND", "docker compose")),
+    "-f",
+    str(ROOT / "compose.yaml"),
+]
 URL = "amqp://guest:guest@localhost:5672/%2F"
 
 
 def main() -> None:
     environment = {**os.environ, "A500_RABBITMQ_URL": URL}
     subprocess.run(
-        [*COMPOSE, "up", "-d", "--build", "--wait"],
+        [*COMPOSE, "up", "-d", "--build"],
         cwd=ROOT,
         env=environment,
         check=True,
@@ -72,7 +77,6 @@ def main() -> None:
                     [
                         *COMPOSE,
                         "logs",
-                        "--no-log-prefix",
                         "--since=1m",
                         f"consumer-{purpose}",
                     ],
@@ -85,8 +89,11 @@ def main() -> None:
                 output = result.stdout
                 events = []
                 for line in output.splitlines():
+                    start = line.find("{")
+                    if start < 0:
+                        continue
                     try:
-                        item = json.loads(line)
+                        item = json.loads(line[start:])
                     except json.JSONDecodeError:
                         continue
                     if (
