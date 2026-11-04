@@ -92,7 +92,6 @@ def test_collector_retries_factory_and_publishes_events_to_consumer() -> None:
         CollectorConfig,
         MarketDataCollector,
     )
-    from a500_t_trader.market_data.events import MarketEvent
 
     stop = Event()
     attempts = 0
@@ -167,7 +166,6 @@ def test_collector_reports_stream_recovered_only_after_first_market_callback() -
         CollectorConfig,
         MarketDataCollector,
     )
-    from a500_t_trader.market_data.events import MarketEvent
 
     stop = Event()
     states: list[tuple[str, str]] = []
