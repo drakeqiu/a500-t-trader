@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -60,7 +60,7 @@ def main() -> None:
             publisher.publish(
                 Trade(
                     "563360",
-                    datetime.now(timezone.UTC),
+                    datetime.now(UTC),
                     price=Decimal("1.25"),
                     quantity=100,
                     amount=Decimal("125"),
