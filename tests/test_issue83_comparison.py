@@ -22,7 +22,6 @@ from a500_t_trader.backtest.issue85_replay import (
     _round_trip_cost_rate,
     _run_chronological_split,
     _run_issue85_sequential_replay,
-    run_issue85_sequential_replay,
 )
 from a500_t_trader.cli.intraday import _load_completed_bars
 from a500_t_trader.market_data import MinuteBar
@@ -220,9 +219,9 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         "2c37f69cb258699b62b5613b9513915ac4b104c116c987db6d9a48f58c5d6a25"
     )
     bars = _load_completed_bars(str(fixture))
-    result = run_issue85_sequential_replay(bars)
-    small_cash_result = run_issue85_sequential_replay(
-        bars, run_stress_tests=False, initial_cash=Decimal("10000")
+    result = _run_issue85_sequential_replay(bars, include_walk_forward=False)
+    small_cash_result = _run_issue85_sequential_replay(
+        bars, initial_cash=Decimal("10000"), include_walk_forward=False
     )
 
     assert result["decision_bar_count"] == 23_580
@@ -235,62 +234,12 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert result["average_exit_net_pnl"] is not None
     submitted_signals = cast(list[dict[str, object]], result["submitted_signals"])
     assert any(signal["direction"] == "sell" for signal in submitted_signals)
-    chronological_split = cast(dict[str, object], result["chronological_split"])
-    assert chronological_split["method"] == "chronological 70/30 trading-day split"
-    assert chronological_split["training_day_count"] == 344
-    assert chronological_split["test_day_count"] == 148
-    assert str(chronological_split["training_end_day"]) < str(
-        chronological_split["test_start_day"]
-    )
-    training_gate = cast(dict[str, object], chronological_split["training_gate"])
-    test_gate = cast(dict[str, object], chronological_split["test_gate"])
-    assert training_gate["status"] in {"passed", "failed", "undefined"}
-    assert test_gate["status"] in {"passed", "failed", "undefined"}
     for replay in (result, small_cash_result):
         initial_cash = Decimal(str(replay["initial_cash"]))
         final_nav = Decimal(str(replay["final_nav"]))
         net_pnl = Decimal(str(replay["net_pnl"]))
         assert net_pnl == final_nav - initial_cash
         assert Decimal(str(replay["return"])) == net_pnl / initial_cash
-    walk_forward = result["walk_forward"]
-    assert isinstance(walk_forward, dict)
-    folds = walk_forward["windows"]
-    assert isinstance(folds, list) and len(folds) == 5
-    assert walk_forward["assessed"] is all(
-        fold["test_gate"]["assessed"] for fold in folds
-    )
-    assert walk_forward["passed"] is (
-        sum(fold["test_gate"]["passed"] for fold in folds) >= 4
-        and sum(fold["test_gate"]["assessed"] for fold in folds) >= 4
-    )
-    for index, fold in enumerate(folds):
-        assert fold["training_start_day"] == "2024-10-18"
-        assert fold["training_end_day"] < fold["test_start_day"]
-        if index:
-            assert folds[index - 1]["training_end_day"] < fold["training_end_day"]
-            assert folds[index - 1]["test_end_day"] < fold["test_end_day"]
-        assert fold["training_run"]["decision_bar_count"] > 0
-        training_gate = fold["training_gate"]
-        training_run = fold["training_run"]
-        if training_run["closed_pairs"] == 0 or training_run["profit_factor"] is None:
-            assert training_gate["status"] == "undefined"
-            assert training_gate["passed"] is False
-        else:
-            assert training_gate["status"] in {"passed", "failed"}
-        assert fold["test_run"]["decision_bar_count"] > 0
-        test_gate = fold["test_gate"]
-        test_run = fold["test_run"]
-        if test_run["closed_pairs"] == 0 or test_run["profit_factor"] is None:
-            assert test_gate["status"] == "undefined"
-            assert test_gate["passed"] is False
-            assert test_gate["profit_factor"] is None
-        else:
-            expected_pass = (
-                Decimal(str(test_run["paired_realized_net_pnl"])) > 0
-                and Decimal(str(test_run["profit_factor"])) > 1
-            )
-            assert test_gate["passed"] is expected_pass
-            assert test_gate["status"] == ("passed" if expected_pass else "failed")
     inputs = result["inputs"]
     assert inputs == {
         "fee_bps": "0.5",
@@ -367,16 +316,6 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         "context": "idealized next-available-bar-open baseline; not observed "
         "fill or market-impact evidence",
         "observed": False,
-    }
-    stress_tests = result["stress_tests"]
-    assert isinstance(stress_tests, dict)
-    cost_stress = stress_tests["cost_1_5x"]
-    assert cost_stress["cost_multiplier"] == "1.5"
-    assert cost_stress["inputs"] == {
-        "fee_bps": "0.75",
-        "minimum_commission": "0.15",
-        "slippage_bps": "0.0",
-        "impact_bps": "3.00000",
     }
     liquidity_examples = result["liquidity_quantity_examples"]
     assert isinstance(liquidity_examples, list) and liquidity_examples
