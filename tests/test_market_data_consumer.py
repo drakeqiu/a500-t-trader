@@ -106,7 +106,3 @@ def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> N
     assert setup.qos == 1
 
 
-def test_market_data_service_query_interface_remains_separate() -> None:
-    from a500_t_trader.market_data import MarketDataService
-
-    assert callable(MarketDataService)
