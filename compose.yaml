@@ -1,3 +1,6 @@
+x-podman:
+  in_pod: false
+
 services:
   rabbitmq:
     image: rabbitmq:4.1-alpine
@@ -13,7 +16,6 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
 
   consumer-signals:
-    image: a500-market-data-consumer:local
     build:
       context: .
       dockerfile: Dockerfile

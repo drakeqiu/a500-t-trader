@@ -29,13 +29,14 @@ def main() -> None:
         "A500_RABBITMQ_URL": URL,
         "A500_MARKET_DATA_MODE": "tgw",
     }
-    subprocess.run(
-        [*COMPOSE, "up", "-d", "--build"],
-        cwd=ROOT,
-        env=environment,
-        check=True,
-    )
     try:
+        subprocess.run(
+            [*COMPOSE, "up", "-d", "--build"],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            timeout=300,
+        )
         connection = None
         for _ in range(60):
             try:
@@ -89,6 +90,7 @@ def main() -> None:
                     text=True,
                     capture_output=True,
                     check=True,
+                    timeout=15,
                 )
                 output = result.stdout
                 events = []
@@ -118,12 +120,24 @@ def main() -> None:
                 raise AssertionError(
                     f"schema-valid event was not routed to {purpose}: {output}"
                 )
+
+    except subprocess.CalledProcessError:
+        subprocess.run(
+            [*COMPOSE, "logs", "rabbitmq"],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            timeout=15,
+        )
+        raise
+
     finally:
         subprocess.run(
             [*COMPOSE, "down", "--volumes", "--remove-orphans"],
             cwd=ROOT,
             env=environment,
             check=True,
+            timeout=60,
         )
 
 

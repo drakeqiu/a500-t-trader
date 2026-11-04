@@ -5,8 +5,13 @@
 ## 前置条件
 
 - 安装 Docker Engine 与 Docker Compose 插件，并能拉取 `python:3.14-slim`、RabbitMQ 镜像。
+- 使用 rootless Podman Compose 时，本项目配置让服务以独立容器运行，不加入 Podman pod。
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
 - TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。
+
+## 网络
+
+Docker Compose 与 Podman Compose 均使用 Compose 默认网络；容器通过 `rabbitmq` 服务名连接 RabbitMQ。Podman rootless 网络清理仍可能输出 `permission denied` 警告。
 
 ## TGW 模式
 
@@ -44,3 +49,5 @@ uv run --no-sync python scripts/compose-market-data-e2e.py
 ```
 
 该脚本以 TGW 模式启动 Compose，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，检查两种用途消费者均收到事件，并在清理时移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 使用同一脚本。
+
+E2E 脚本为 Compose 启动设置 300 秒上限，为日志查询设置 15 秒上限，并为清理设置 60 秒上限；超时会使运行失败，而不是无限等待。
