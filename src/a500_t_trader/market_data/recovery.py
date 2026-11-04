@@ -30,6 +30,10 @@ class LatestStatePublisher:
     def publish(self, event: MarketEvent) -> None:
         if event.symbol not in self._symbols:
             raise ValueError(f"event symbol is not configured: {event.symbol}")
+        key = self._state_key(event)
+        if key is not None:
+            # A new state supersedes a stale pending value of the same kind.
+            self._pending.pop(key, None)
         self._flush()
         if self._pending:
             self._retain(event)
@@ -38,6 +42,14 @@ class LatestStatePublisher:
             self._publisher.publish(event)
         except Exception:
             self._retain(event)
+
+    @staticmethod
+    def _state_key(event: MarketEvent) -> tuple[str, str] | None:
+        if isinstance(event, Snapshot):
+            return "snapshot", event.symbol
+        if isinstance(event, MinuteBar):
+            return "minute_bar", event.symbol
+        return None
 
     def _retain(self, event: MarketEvent) -> None:
         if isinstance(event, (Snapshot, MinuteBar)):
