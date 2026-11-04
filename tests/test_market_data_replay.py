@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -69,9 +70,9 @@ def test_replay_event_preserves_market_time_and_uses_replay_clock() -> None:
     )
 
     class Channel:
-        message: dict[str, object]
+        message: dict[str, Any]
 
-        def basic_publish(self, **kwargs: object) -> None:
+        def basic_publish(self, **kwargs: Any) -> None:
             self.message = kwargs
 
     channel = Channel()
