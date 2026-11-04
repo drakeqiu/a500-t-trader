@@ -97,15 +97,25 @@ def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> N
         def basic_consume(self, **kwargs: object) -> None:
             pass
 
+    from a500_t_trader.market_data.mode import MarketDataMode
+
     setup = SetupChannel()
-    rabbit = RabbitMQConsumer("signals", observed.append, channel=setup)
-    replica = RabbitMQConsumer("signals", observed.append, channel=setup)
+    rabbit = RabbitMQConsumer(
+        "signals", observed.append, channel=setup, mode=MarketDataMode.TGW
+    )
+    replica = RabbitMQConsumer(
+        "signals", observed.append, channel=setup, mode=MarketDataMode.TGW
+    )
+    replay = RabbitMQConsumer(
+        "signals", observed.append, channel=setup, mode=MarketDataMode.REPLAY
+    )
     assert replica.queue == rabbit.queue
+    assert replay.queue != rabbit.queue
     rabbit.configure()
-    assert setup.declared == [("market.consumer.signals", True)]
+    assert setup.declared == [("market.consumer.signals.tgw", True)]
     assert setup.bindings == [
-        ("market.consumer.signals", "snapshot.*"),
-        ("market.consumer.signals", "minute_bar.*"),
-        ("market.consumer.signals", "trade.*"),
+        ("market.consumer.signals.tgw", "snapshot.*"),
+        ("market.consumer.signals.tgw", "minute_bar.*"),
+        ("market.consumer.signals.tgw", "trade.*"),
     ]
     assert setup.qos == 1

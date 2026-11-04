@@ -13,6 +13,7 @@ dependencies = ["tgw==1.0.9.2", "AmazingData==1.1.9", "PyYAML>=6.0.2", "pika>=1.
 [project.scripts]
 a500-market-data-collector = "a500_t_trader.market_data.collector_cli:main"
 a500-market-data-consumer = "a500_t_trader.market_data.consumer_cli:main"
+a500-market-data-replay = "a500_t_trader.market_data.replay:main"
 
 [dependency-groups]
 dev = [

@@ -14,6 +14,7 @@ from threading import Event
 from typing import cast
 
 from .collector import CollectorConfig, MarketDataCollector, PushConnection
+from .mode import MarketDataMode, market_data_mode
 from .rabbitmq import RabbitMQPublisher
 
 
@@ -33,6 +34,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--tgw-config", type=Path, help="JSON file passed to the external factory"
     )
     args = parser.parse_args(argv)
+    if market_data_mode() is not MarketDataMode.TGW:
+        parser.error("collector requires A500_MARKET_DATA_MODE=tgw")
     if not args.factory:
         parser.error("--factory or A500_TGW_CONNECTION_FACTORY is required")
     factory = _load_factory(args.factory)
@@ -43,7 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         connection_options=options,
     )
-    publisher = RabbitMQPublisher()
+    publisher = RabbitMQPublisher(exchange=MarketDataMode.TGW.exchange)
     collector = MarketDataCollector(
         factory,
         config,

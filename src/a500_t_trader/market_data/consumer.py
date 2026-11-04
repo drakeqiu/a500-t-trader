@@ -8,6 +8,8 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+from .mode import MarketDataMode, consumer_queue, market_data_mode
+
 Handler = Callable[[dict[str, Any]], None]
 
 
@@ -41,7 +43,12 @@ class MarketEventConsumer:
                 raise ValueError("market event must be a JSON object")
             _validate_event(event)
             event_time = datetime.fromisoformat(str(event["event_time"]))
-            age = self.clock() - event_time
+            event_clock = self.clock()
+            if event.get("source") == "replay":
+                event_clock = datetime.fromisoformat(str(event["replay_time"]))
+                age = self.clock() - event_clock
+            else:
+                age = event_clock - event_time
             if age <= self.max_age:
                 self.handler(event)
         except Exception:
@@ -62,6 +69,10 @@ def _validate_event(event: dict[str, Any]) -> None:
     event_time = datetime.fromisoformat(str(event.get("event_time", "")))
     if event_time.tzinfo is None or event_time.utcoffset() is None:
         raise ValueError("event_time must be timezone-aware")
+    if event.get("source") == "replay":
+        replay_time = datetime.fromisoformat(str(event.get("replay_time", "")))
+        if replay_time.tzinfo is None or replay_time.utcoffset() is None:
+            raise ValueError("replay_time must be timezone-aware")
     source_id = event.get("source_event_id")
     quality = event.get("source_event_id_quality")
     if source_id is not None and quality != "reliable":
@@ -77,13 +88,14 @@ class RabbitMQConsumer:
         handler: Handler,
         *,
         url: str | None = None,
-        exchange: str = "market.events",
+        mode: MarketDataMode | None = None,
         channel: Any | None = None,
         max_age: timedelta = timedelta(seconds=30),
     ) -> None:
+        self.mode = mode or market_data_mode()
         self.consumer = MarketEventConsumer(purpose, handler, max_age=max_age)
-        self.queue = f"market.consumer.{purpose}"
-        self.exchange = exchange
+        self.queue = consumer_queue(purpose, self.mode)
+        self.exchange = self.mode.exchange
         self._connection: Any | None = None
         if channel is None:
             import pika  # type: ignore[import-untyped]

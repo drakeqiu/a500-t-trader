@@ -24,7 +24,11 @@ URL = "amqp://guest:guest@localhost:5672/%2F"
 
 
 def main() -> None:
-    environment = {**os.environ, "A500_RABBITMQ_URL": URL}
+    environment = {
+        **os.environ,
+        "A500_RABBITMQ_URL": URL,
+        "A500_MARKET_DATA_MODE": "tgw",
+    }
     subprocess.run(
         [*COMPOSE, "up", "-d", "--build"],
         cwd=ROOT,
@@ -43,7 +47,7 @@ def main() -> None:
             raise RuntimeError("RabbitMQ did not become available")
         for purpose in ("signals", "audit"):
             deadline = time.monotonic() + 60
-            queue = f"market.consumer.{purpose}"
+            queue = f"market.consumer.{purpose}.tgw"
             while True:
                 try:
                     connection.channel().queue_declare(queue=queue, passive=True)
@@ -54,7 +58,7 @@ def main() -> None:
                             f"consumer queue {queue} was not declared"
                         ) from error
                     time.sleep(1)
-        publisher = RabbitMQPublisher(url=URL)
+        publisher = RabbitMQPublisher(url=URL, exchange="market.events.tgw")
         try:
             publisher.publish(
                 Trade(

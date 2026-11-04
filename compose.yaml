@@ -18,7 +18,8 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
-    environment:
+    environment: &market-data-env
+      A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
       A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:
       rabbitmq:
@@ -31,12 +32,25 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["a500-market-data-consumer", "--purpose", "audit", "--max-age-seconds", "30"]
-    environment:
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+    environment: *market-data-env
     depends_on:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+
+  replay:
+    image: a500-market-data-consumer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["a500-market-data-replay"]
+    environment: *market-data-env
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles: ["replay"]
 
 volumes:
   rabbitmq-data:
