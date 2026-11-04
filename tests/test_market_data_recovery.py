@@ -14,7 +14,7 @@ def quote(price: str, minute: int = 31) -> Snapshot:
         symbol="563360", timestamp=timestamp, received_at=timestamp,
         last_price=Decimal(price), previous_close=Decimal("1"),
         open=Decimal("1"), high=Decimal(price), low=Decimal("1"),
-        volume=1, amount=Decimal(price),
+        cumulative_volume=1, cumulative_amount=Decimal(price),
     )
 
 

@@ -20,12 +20,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="消费用途名称；同用途实例共享队列",
     )
     parser.add_argument(
+        "--symbols",
+        required=True,
+        help="逗号分隔的消费行情代码，必须覆盖采集器发布的代码",
+    )
+    parser.add_argument(
         "--max-age-seconds",
         type=float,
         default=30.0,
         help="超过该事件时间年龄的事件只确认、不传给处理器",
     )
     args = parser.parse_args(argv)
+    symbols = tuple(symbol.strip() for symbol in args.symbols.split(","))
+    if any(not symbol for symbol in symbols):
+        parser.error("--symbols must contain non-empty comma-separated symbols")
     if args.max_age_seconds < 0:
         parser.error("--max-age-seconds must not be negative")
 
@@ -35,6 +43,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     consumer = RabbitMQConsumer(
         args.purpose,
         handle,
+        symbols=symbols,
         max_age=timedelta(seconds=args.max_age_seconds),
     )
     previous = {
