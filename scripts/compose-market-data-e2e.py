@@ -96,7 +96,10 @@ def main() -> None:
                         item = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if isinstance(item, dict) and item.get("source") == "compose-e2e":
+                    if (
+                        isinstance(item, dict)
+                        and item.get("data", {}).get("source") == "compose-e2e"
+                    ):
                         events.append(item)
                 if events:
                     break
