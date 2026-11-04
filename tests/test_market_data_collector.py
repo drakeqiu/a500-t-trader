@@ -36,14 +36,12 @@ def events() -> tuple[Snapshot, MinuteBar, Trade]:
 def test_normalized_events_include_version_event_time_and_nonunique_source_id() -> None:
     timestamp = events()[0].timestamp
     expected_types = ("snapshot", "minute_bar", "trade")
+    expected_price_fields = ("last_price", "close", "price")
     expected_prices = ("1.2345", "1.25", "1.25")
-    for event, event_type, price_field, price in zip(
-        events(),
-        expected_types,
-        ("last_price", "close", "price"),
-        expected_prices,
-        strict=True,
-    ):
+    for index, event in enumerate(events()):
+        event_type = expected_types[index]
+        price_field = expected_price_fields[index]
+        price = expected_prices[index]
         encoded = encode_market_event(event)
         assert encoded["schema_version"] == 1
         assert encoded["event_type"] == event_type
