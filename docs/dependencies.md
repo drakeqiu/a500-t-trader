@@ -15,3 +15,12 @@ gh release download deps-v1 \
   --pattern "*.whl" \
   --dir wheels
 ```
+
+构建项目 wheel：
+
+```bash
+uv build --wheel
+```
+
+生成的 wheel 位于 `dist/`。该 wheel 只包含项目本身；运行依赖需另行安装，
+`AmazingData` 和 `tgw` 仍需先放入 `wheels/` 并通过 `uv sync --locked` 安装。
