@@ -119,7 +119,6 @@ def main() -> None:
         )
 
 
-
 def _verify_latest_state_backlog(connection: pika.BlockingConnection) -> None:
     queue_channel = connection.channel()
     consumer = RabbitMQConsumer(
@@ -203,6 +202,7 @@ def _verify_latest_state_backlog(connection: pika.BlockingConnection) -> None:
     trade_state = queue_channel.queue_declare(queue=trade_queue, passive=True).method
     if trade_state.message_count != 2:
         raise AssertionError("latest-state coalescing changed the trade backlog")
+
 
 if __name__ == "__main__":
     main()

@@ -103,9 +103,9 @@ class RabbitMQConsumer:
             for event_type in ("snapshot", "minute_bar")
             for symbol in symbols
         )
-        self.queues = tuple(
-            queue for queue, _ in self.latest_queues
-        ) + (self.trade_queue,)
+        self.queues = tuple(queue for queue, _ in self.latest_queues) + (
+            self.trade_queue,
+        )
         self.exchange = exchange
         self._connection: Any | None = None
         if channel is None:

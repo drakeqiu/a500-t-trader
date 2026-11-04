@@ -11,11 +11,10 @@ from .events import MarketEvent
 
 ConnectionState = Literal["disconnected", "connected", "stopped"]
 
-SubscriptionState = Literal[
-    "idle", "awaiting_data", "subscribed", "failed", "stopped"
-]
+SubscriptionState = Literal["idle", "awaiting_data", "subscribed", "failed", "stopped"]
 
 StatusCallback = Callable[[ConnectionState, SubscriptionState], None]
+
 
 @dataclass(frozen=True, slots=True)
 class CollectorConfig:
@@ -168,4 +167,3 @@ def _is_connected(connection: PushConnection) -> bool:
     if state is None:
         state = getattr(connection, "connected", None)
     return bool(state() if callable(state) else state)
-

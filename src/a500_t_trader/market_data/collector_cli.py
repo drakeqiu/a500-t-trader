@@ -23,8 +23,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--factory",
         default=os.environ.get("A500_TGW_CONNECTION_FACTORY"),
         help=(
-            "external module:callable that connects tgw and "
-            "returns a push connection"
+            "external module:callable that connects tgw and returns a push connection"
         ),
     )
     parser.add_argument(
@@ -40,9 +39,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     options = _load_config(args.tgw_config)
     config = CollectorConfig(
         symbols=tuple(
-            symbol.strip()
-            for symbol in args.symbols.split(",")
-            if symbol.strip()
+            symbol.strip() for symbol in args.symbols.split(",") if symbol.strip()
         ),
         connection_options=options,
     )

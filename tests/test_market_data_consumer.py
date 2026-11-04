@@ -17,6 +17,7 @@ def test_consumer_acknowledges_fresh_json_and_nacks_handler_failure() -> None:
         "symbol": "563360",
         "data": {"symbol": "563360", "timestamp": now.isoformat()},
     }
+
     class Channel:
         def __init__(self) -> None:
             self.acks: list[int] = []
@@ -63,6 +64,7 @@ def test_consumer_routes_each_latest_state_to_its_bounded_shared_queue() -> None
     consumer = MarketEventConsumer(
         "trades", observed.append, max_age=timedelta(seconds=5), clock=lambda: now
     )
+
     class Channel:
         def basic_ack(self, *, delivery_tag: int) -> None:
             pass
@@ -92,9 +94,7 @@ def test_consumer_routes_each_latest_state_to_its_bounded_shared_queue() -> None
         ) -> None:
             self.declared.append((queue, durable, arguments))
 
-        def queue_bind(
-            self, *, queue: str, exchange: str, routing_key: str
-        ) -> None:
+        def queue_bind(self, *, queue: str, exchange: str, routing_key: str) -> None:
             self.bindings.append((queue, routing_key))
 
         def basic_qos(self, *, prefetch_count: int) -> None:
@@ -130,5 +130,3 @@ def test_consumer_routes_each_latest_state_to_its_bounded_shared_queue() -> None
     assert setup.qos == 1
     audit = RabbitMQConsumer("audit", observed.append, symbols=symbols, channel=setup)
     assert set(audit.queues).isdisjoint(rabbit.queues)
-
-

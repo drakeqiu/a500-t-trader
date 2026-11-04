@@ -11,26 +11,45 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 def quote(price: str, minute: int = 31, symbol: str = "563360") -> Snapshot:
     timestamp = datetime(2026, 11, 4, 9, minute, tzinfo=SHANGHAI)
     return Snapshot(
-        symbol=symbol, timestamp=timestamp, received_at=timestamp,
-        last_price=Decimal(price), previous_close=Decimal("1"),
-        open=Decimal("1"), high=Decimal(price), low=Decimal("1"),
-        cumulative_volume=1, cumulative_amount=Decimal(price),
+        symbol=symbol,
+        timestamp=timestamp,
+        received_at=timestamp,
+        last_price=Decimal(price),
+        previous_close=Decimal("1"),
+        open=Decimal("1"),
+        high=Decimal(price),
+        low=Decimal("1"),
+        cumulative_volume=1,
+        cumulative_amount=Decimal(price),
     )
 
 
 def bar(price: str, minute: int = 31) -> MinuteBar:
     timestamp = datetime(2026, 11, 4, 9, minute, tzinfo=SHANGHAI)
     return MinuteBar(
-        symbol="563360", timestamp=timestamp, interval_minutes=1,
-        open=Decimal(price), high=Decimal(price), low=Decimal(price),
-        close=Decimal(price), volume=1, amount=Decimal(price),
+        symbol="563360",
+        timestamp=timestamp,
+        interval_minutes=1,
+        open=Decimal(price),
+        high=Decimal(price),
+        low=Decimal(price),
+        close=Decimal(price),
+        volume=1,
+        amount=Decimal(price),
     )
 
 
 def trade() -> Trade:
     timestamp = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
-    return Trade(symbol="563360", timestamp=timestamp, price=Decimal("1"),
-                 quantity=1, amount=Decimal("1"), side=None, source="tgw")
+    return Trade(
+        symbol="563360",
+        timestamp=timestamp,
+        price=Decimal("1"),
+        quantity=1,
+        amount=Decimal("1"),
+        side=None,
+        source="tgw",
+    )
 
 
 def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> None:

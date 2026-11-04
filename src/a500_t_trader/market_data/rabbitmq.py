@@ -29,9 +29,7 @@ class RabbitMQPublisher:
             rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
             if not rabbit_url:
                 raise ValueError("A500_RABBITMQ_URL is required")
-            self._connection = pika.BlockingConnection(
-                pika.URLParameters(rabbit_url)
-            )
+            self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
             channel = self._connection.channel()
             channel.exchange_declare(
                 exchange=exchange, exchange_type="topic", durable=True
@@ -50,8 +48,7 @@ class RabbitMQPublisher:
         self._channel.basic_publish(
             exchange=self._exchange,
             routing_key=(
-                f"{encoded['event_type']}."
-                f"{quote(str(encoded['symbol']), safe='')}"
+                f"{encoded['event_type']}.{quote(str(encoded['symbol']), safe='')}"
             ),
             body=json.dumps(
                 encoded, separators=(",", ":"), ensure_ascii=False
@@ -63,4 +60,3 @@ class RabbitMQPublisher:
     def close(self) -> None:
         if self._connection is not None and self._connection.is_open:
             self._connection.close()
-

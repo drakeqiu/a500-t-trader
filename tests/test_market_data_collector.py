@@ -13,22 +13,43 @@ def events() -> tuple[MarketEvent, ...]:
     timestamp = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
     return (
         Snapshot(
-            symbol="563360", timestamp=timestamp, received_at=timestamp,
-            last_price=Decimal("1.2345"), previous_close=Decimal("1.2"),
-            open=Decimal("1.21"), high=Decimal("1.24"), low=Decimal("1.2"),
-            cumulative_volume=100, cumulative_amount=Decimal("123.45"),
-            bid_price=Decimal("1.23"), bid_volume=10, ask_price=Decimal("1.24"),
-            ask_volume=20, source="tgw",
+            symbol="563360",
+            timestamp=timestamp,
+            received_at=timestamp,
+            last_price=Decimal("1.2345"),
+            previous_close=Decimal("1.2"),
+            open=Decimal("1.21"),
+            high=Decimal("1.24"),
+            low=Decimal("1.2"),
+            cumulative_volume=100,
+            cumulative_amount=Decimal("123.45"),
+            bid_price=Decimal("1.23"),
+            bid_volume=10,
+            ask_price=Decimal("1.24"),
+            ask_volume=20,
+            source="tgw",
         ),
         MinuteBar(
-            symbol="563360", timestamp=timestamp, interval_minutes=1,
-            open=Decimal("1.2"), high=Decimal("1.3"), low=Decimal("1.1"),
-            close=Decimal("1.25"), volume=100, amount=Decimal("125"),
-            is_completed=True, source="tgw",
+            symbol="563360",
+            timestamp=timestamp,
+            interval_minutes=1,
+            open=Decimal("1.2"),
+            high=Decimal("1.3"),
+            low=Decimal("1.1"),
+            close=Decimal("1.25"),
+            volume=100,
+            amount=Decimal("125"),
+            is_completed=True,
+            source="tgw",
         ),
         Trade(
-            symbol="563360", timestamp=timestamp, price=Decimal("1.25"),
-            quantity=100, amount=Decimal("125"), side=None, source="tgw",
+            symbol="563360",
+            timestamp=timestamp,
+            price=Decimal("1.25"),
+            quantity=100,
+            amount=Decimal("125"),
+            side=None,
+            source="tgw",
         ),
     )
 
@@ -53,6 +74,7 @@ def test_normalized_events_include_version_event_time_and_nonunique_source_id() 
         assert isinstance(data, dict)
         assert data["timestamp"] == timestamp.isoformat()
         assert data[price_field] == price
+
 
 def test_rabbitmq_publisher_confirms_encoded_event_through_injected_channel() -> None:
     from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
