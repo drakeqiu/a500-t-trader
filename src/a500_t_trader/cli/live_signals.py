@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from ..market_data import MinuteBar
@@ -279,9 +279,27 @@ def _evaluate(
         {},
         configuration.fingerprint,
     )
-    analysis = analyze_intraday_technical({symbol: bars}, config=v1, as_of=as_of)[
-        symbol
-    ]
+    cost_inputs = configuration.costs.get(symbol)
+    grid_context: dict[str, Decimal] | None = None
+    if cost_inputs is not None:
+        tick_size = cast(Decimal, cost_inputs["tick_size"])
+        commission_rate = cast(Decimal, cost_inputs["commission_rate"])
+        minimum_commission = cast(Decimal, cost_inputs["minimum_commission"])
+        reference_quantity = cast(int, cost_inputs["reference_quantity"])
+        notional = latest.close * reference_quantity
+        commission_per_side = max(notional * commission_rate, minimum_commission)
+        grid_context = {
+            "tick_size": tick_size,
+            "round_trip_cost_rate": (
+                Decimal(2) * commission_per_side / notional
+            ).normalize(),
+        }
+    analysis = analyze_intraday_technical(
+        {symbol: bars},
+        config=v1,
+        grid_context=None if grid_context is None else {symbol: grid_context},
+        as_of=as_of,
+    )[symbol]
     reasons = list(analysis.reasons)
     if analysis.completed_valid_bars < 180:
         status = "WAIT"
@@ -290,6 +308,15 @@ def _evaluate(
         reasons.append(
             f"insufficient completed five-minute history: "
             f"{analysis.completed_valid_bars}/180"
+        )
+    elif grid_context is None:
+        status = "UNAVAILABLE"
+        direction = None
+        quantity = None
+        reasons.append(
+            "missing commission cost configuration for this ETF; "
+            "configure tick_size, commission_rate, minimum_commission, "
+            "and reference_quantity"
         )
     elif analysis.candidate in {"BUY", "SELL"} and analysis.risk_status == "READY":
         status = analysis.candidate
@@ -313,6 +340,7 @@ def _evaluate(
         "status": status,
         "direction": direction,
         "quantity": quantity,
+        "grid_context": grid_context,
         "reasons": list(dict.fromkeys(reasons)),
     }
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
@@ -105,8 +106,8 @@ class IntradayV1Config:
 class LiveSignalConfig:
     etfs: tuple[str, ...]
     parameters: dict[str, object]
+    costs: dict[str, dict[str, object]]
     fingerprint: str
-
 
 DEFAULT_LIVE_CONFIG_PATH = Path("config/intraday-signals.yaml")
 
@@ -119,49 +120,124 @@ def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignal
 
     parameters = deepcopy(TECHNICAL_PARAMETERS)
     etfs: tuple[str, ...] = ()
-    if path.exists():
-        try:
-            import yaml
-        except ImportError as error:
-            raise ValueError(
-                "YAML configuration requires the PyYAML package"
-            ) from error
-        try:
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as error:
-            raise ValueError(f"cannot load live signal YAML: {error}") from None
-        if not isinstance(document, dict) or set(document) - {"etfs", "parameters"}:
-            raise ValueError("live YAML accepts only etfs and parameters")
-        raw_etfs = document.get("etfs")
-        if (
-            not isinstance(raw_etfs, list)
-            or not raw_etfs
-            or any(
-                not isinstance(item, (str, int)) or isinstance(item, bool)
-                for item in raw_etfs
-            )
-        ):
-            raise ValueError("etfs must be a non-empty list of six-digit ETF codes")
-        etfs = tuple(dict.fromkeys(str(item) for item in raw_etfs))
-        if any(len(symbol) != 6 or not symbol.isdigit() for symbol in etfs):
-            raise ValueError("etfs must contain only six-digit ETF codes")
-        overrides = document.get("parameters", {})
-        if not isinstance(overrides, dict):
-            raise ValueError("parameters must be a mapping")
-        _merge_live_parameters(parameters, overrides, "parameters")
-        _validate_score_threshold_intervals(parameters["scores"])
+    costs: dict[str, dict[str, object]] = {}
+    try:
+        import yaml
+    except ImportError as error:
+        raise ValueError(
+            "YAML configuration requires the PyYAML package"
+        ) from error
+    if not path.exists():
+        canonical = json.dumps(
+            {"etfs": etfs, "parameters": parameters, "costs": costs},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return LiveSignalConfig(
+            etfs,
+            parameters,
+            costs,
+            hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        )
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(f"cannot load live signal YAML: {error}") from None
+    if not isinstance(document, dict) or set(document) - {
+        "etfs",
+        "parameters",
+        "costs",
+    }:
+        raise ValueError("live YAML accepts only etfs, parameters, and costs")
+    raw_etfs = document.get("etfs")
+    if (
+        not isinstance(raw_etfs, list)
+        or not raw_etfs
+        or any(
+            not isinstance(item, (str, int)) or isinstance(item, bool)
+            for item in raw_etfs
+        )
+    ):
+        raise ValueError("etfs must be a non-empty list of six-digit ETF codes")
+    etfs = tuple(dict.fromkeys(str(item) for item in raw_etfs))
+    if any(len(symbol) != 6 or not symbol.isdigit() for symbol in etfs):
+        raise ValueError("etfs must contain only six-digit ETF codes")
+    overrides = document.get("parameters", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("parameters must be a mapping")
+    _merge_live_parameters(parameters, overrides, "parameters")
+    _validate_score_threshold_intervals(parameters["scores"])
+    costs = _parse_live_costs(document.get("costs", {}), etfs)
     canonical = json.dumps(
-        parameters,
+        {"etfs": etfs, "parameters": parameters, "costs": costs},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
+        default=str,
     )
     return LiveSignalConfig(
         etfs,
         parameters,
+        costs,
         hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
 
+
+
+def _parse_live_costs(
+    raw_costs: object, etfs: tuple[str, ...]
+) -> dict[str, dict[str, object]]:
+    if not isinstance(raw_costs, dict):
+        raise ValueError("costs must be a mapping keyed by ETF code")
+    costs: dict[str, dict[str, object]] = {}
+    expected = {
+        "tick_size",
+        "commission_rate",
+        "minimum_commission",
+        "reference_quantity",
+    }
+    for raw_symbol, raw_values in raw_costs.items():
+        symbol = str(raw_symbol)
+        if symbol not in etfs:
+            raise ValueError(f"costs.{symbol} must name an ETF in etfs")
+        if not isinstance(raw_values, dict) or set(raw_values) != expected:
+            raise ValueError(
+                f"costs.{symbol} must define exactly {', '.join(sorted(expected))}"
+            )
+        values: dict[str, object] = {}
+        for key in ("tick_size", "commission_rate", "minimum_commission"):
+            raw_value = raw_values[key]
+            if isinstance(raw_value, bool):
+                raise ValueError(f"costs.{symbol}.{key} must be a decimal number")
+            try:
+                value = Decimal(str(raw_value))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValueError(
+                    f"costs.{symbol}.{key} must be a decimal number"
+                ) from None
+            if not value.is_finite():
+                raise ValueError(f"costs.{symbol}.{key} must be finite")
+            if key == "tick_size" and value <= 0:
+                raise ValueError(f"costs.{symbol}.tick_size must be positive")
+            if key != "tick_size" and value < 0:
+                raise ValueError(f"costs.{symbol}.{key} cannot be negative")
+            values[key] = value
+        quantity = raw_values["reference_quantity"]
+        if (
+            isinstance(quantity, bool)
+            or not isinstance(quantity, int)
+            or quantity <= 0
+            or quantity % 100
+        ):
+            raise ValueError(
+                f"costs.{symbol}.reference_quantity must be a positive "
+                "multiple of 100"
+            )
+        values["reference_quantity"] = quantity
+        costs[symbol] = values
+    return costs
 
 def _merge_live_parameters(
     defaults: dict[str, object], overrides: dict[object, object], path: str

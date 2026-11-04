@@ -279,6 +279,69 @@ def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(
     assert first.fingerprint == second.fingerprint
 
 
+
+def test_live_yaml_loads_account_costs_and_fingerprints_them(tmp_path: Path) -> None:
+    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+
+    path = tmp_path / "signals.yaml"
+    path.write_text(
+        "etfs: [510300]\ncosts:\n"
+        "  510300:\n"
+        "    tick_size: 0.001\n"
+        "    commission_rate: 0.00005\n"
+        "    minimum_commission: 0.1\n"
+        "    reference_quantity: 40000\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_live_signal_config(path)
+
+    assert loaded.costs["510300"] == {
+        "tick_size": Decimal("0.001"),
+        "commission_rate": Decimal("0.00005"),
+        "minimum_commission": Decimal("0.1"),
+        "reference_quantity": 40000,
+    }
+
+    original_fingerprint = loaded.fingerprint
+    path.write_text(
+        "etfs: [510300]\ncosts:\n"
+        "  510300:\n"
+        "    tick_size: 0.001\n"
+        "    commission_rate: 0.00006\n"
+        "    minimum_commission: 0.1\n"
+        "    reference_quantity: 40000\n",
+        encoding="utf-8",
+    )
+    assert load_live_signal_config(path).fingerprint != original_fingerprint
+
+
+def test_live_cli_calculates_round_trip_commission_from_config(
+    tmp_path: Path, capsys: Any
+) -> None:
+    config = tmp_path / "signals.yaml"
+    config.write_text(
+        "etfs: [510300]\ncosts:\n"
+        "  510300:\n"
+        "    tick_size: 0.001\n"
+        "    commission_rate: 0.00005\n"
+        "    minimum_commission: 0.1\n"
+        "    reference_quantity: 40000\n",
+        encoding="utf-8",
+    )
+
+    main(
+        ["live-signals", "--config", str(config), "--once"],
+        push_provider=_Provider(_events()),
+        as_of=datetime(2026, 11, 4, 10, 5, tzinfo=SHANGHAI),
+    )
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["grid_context"] == {
+        "tick_size": "0.001",
+        "round_trip_cost_rate": "0.0001",
+    }
+
 def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path: Path) -> None:
     import pytest
 

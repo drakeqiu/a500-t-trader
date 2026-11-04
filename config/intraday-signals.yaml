@@ -1,4 +1,12 @@
 # Explicitly scoped default live coverage; V1 rule parameters remain code defaults.
 etfs:
   - "563360"
-parameters: {}
+costs:
+  "563360":
+    # ETF 价格最小变动单位（元/份）。
+    tick_size: 0.001
+    # 账户佣金：万0.5/边；不足最低佣金时按最低佣金计。
+    commission_rate: 0.00005
+    minimum_commission: 0.1
+    # 成本网格参考成交量，不是信号生成的下单数量；按实际计划规模调整。
+    reference_quantity: 40000

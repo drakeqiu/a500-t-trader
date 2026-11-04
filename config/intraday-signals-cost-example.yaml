@@ -1,0 +1,20 @@
+# live-signals 可直接加载的成本配置示例。
+# 佣金按账户费率万0.5/边、最低0.1元/边计算；请与券商交割单核对。
+# reference_quantity 仅用于估算网格成本，不是信号给出的下单数量。
+# 将示例成交量替换为计划单笔数量；不包含滑点假设。
+
+etfs:
+  - "563360"
+
+parameters: {}
+
+costs:
+  "563360":
+    # ETF 最小价格变动单位，元/份。
+    tick_size: 0.001
+    # 万0.5，按每边收取。
+    commission_rate: 0.00005
+    # 最低佣金，元/边。
+    minimum_commission: 0.1
+    # 参考成交份额（必须为100的整数倍）。
+    reference_quantity: 40000
