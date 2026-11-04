@@ -1,6 +1,6 @@
 # A500 T-Trader
 
-面向 Python 调用方的行情数据 API：通过 AmazingData 按需查询快照和分钟线，或将调用方已连接的 tgw 推送适配为统一行情模型。
+面向量化工具使用者：按实时推送行情与 V1 策略规则生成结构化交易信号。项目不以量化研究框架或严格回测为目标。
 
 ![AmazingData 查询和已连接 tgw 推送经过各自 provider，使用 Snapshot、MinuteBar、Trade 统一行情模型](./assets/readme/market-data-flow.svg)
 
@@ -10,13 +10,13 @@
 - **推送订阅：** `TgwPushProvider` 适配调用方已初始化的 tgw API，可订阅快照、分钟线和逐笔成交。
 - **统一数据模型：** 查询与推送使用 `Snapshot`、`MinuteBar`、`Trade`；时间戳统一为 `Asia/Shanghai`。
 - **显式能力边界：** 当前 AmazingData provider 不支持按需成交查询；数据可用性取决于连接方式、账号权限和数据源能力。
-- **盘前建议：** CLI 可根据用户维护的 ETF/策略规则、账户快照、规范化行情和交易日历生成风险审核后的做T建议；不连接券商或下单。
+- **实时策略信号（目标）：** 按用户明确配置的 ETF 与已完成五分钟行情评估 V1 信号；不连接券商、不验证券商账户、不下单。
 
 ## 使用
 
-详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。盘前计划的本地配置格式、账户快照及命令见[盘前计划指南](docs/premarket-plan.md)。
+详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。当前盘前计划与历史回测是已有独立能力；产品目标和 V1 配置决策见 [ADR-0009](docs/adr/0009-live-signals-and-configurable-v1-parameters.md)。
 
-项目要求 Python 3.14。盘前工作流为建议用途，不连接券商、不验证账户，也不下单。
+项目要求 Python 3.14。所有信号及数量建议均为参考信息，不是订单、成交或收益承诺。
 
 ## 开发与贡献
 

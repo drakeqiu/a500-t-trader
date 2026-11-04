@@ -79,6 +79,8 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 `MarketDataService.get_trades()` 在接口上存在，但当前 AmazingData provider不支持按需成交查询，会抛出 `CapabilityUnavailableError`。逐笔成交仅通过具备相应能力的 tgw 推送订阅获取。
 
 ### 已完成 5 分钟技术分析与策略评估 API
+> **产品目标与现状：** [ADR-0009](adr/0009-live-signals-and-configurable-v1-parameters.md) 将目标定为推送行情驱动的实时信号，并规定 V1 参数默认值及 YAML 覆盖规则。本文下方的 API、盘前命令和认证说明记录当前已有能力；其中历史认证门控描述的是当前实现，不能解释为新目标中的实时信号门槛。实时推送 CLI 与 YAML 默认配置尚未完全落地。
+
 
 `a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。候选包括 BUY、SELL、TAKE_PROFIT、BUYBACK 和 WAIT；评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成交易候选。
 
