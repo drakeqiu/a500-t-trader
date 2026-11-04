@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar, Snapshot, Trade
 from a500_t_trader.market_data.recovery import LatestStatePublisher
+
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
