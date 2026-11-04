@@ -9,19 +9,9 @@
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
 - TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。
 
-## Podman rootless 网络
+## 网络
 
-使用 rootless Podman 时，可选择 `slirp4netns` 网络模式，避开默认 rootless bridge 网络清理时的 `permission denied` 警告。该模式下容器通过主机网关访问 RabbitMQ，需将以下变量用于启动、查看日志和停止服务：
-
-```sh
-export A500_PODMAN_NETWORK_MODE=slirp4netns:allow_host_loopback=true
-export A500_CONTAINER_RABBITMQ_URL=amqp://guest:guest@host.containers.internal:5672/%2F
-A500_MARKET_DATA_MODE=tgw podman compose up -d --build
-podman compose ps
-podman compose logs -f consumer-signals consumer-audit
-```
-
-`A500_CONTAINER_RABBITMQ_URL` 仅覆盖容器内消费者地址；主机侧 E2E 仍使用 `localhost:5672`。不设置这两个变量时，Compose 使用默认网络和 `rabbitmq` 服务名。
+Docker Compose 与 Podman Compose 均使用 Compose 默认网络；容器通过 `rabbitmq` 服务名连接 RabbitMQ。Podman rootless 网络清理仍可能输出 `permission denied` 警告。
 
 ## TGW 模式
 
