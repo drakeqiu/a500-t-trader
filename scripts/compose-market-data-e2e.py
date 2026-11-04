@@ -120,6 +120,17 @@ def main() -> None:
                 raise AssertionError(
                     f"schema-valid event was not routed to {purpose}: {output}"
                 )
+
+    except subprocess.CalledProcessError:
+        subprocess.run(
+            [*COMPOSE, "logs", "rabbitmq"],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            timeout=15,
+        )
+        raise
+
     finally:
         subprocess.run(
             [*COMPOSE, "down", "--volumes", "--remove-orphans"],
