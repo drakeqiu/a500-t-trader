@@ -1,7 +1,11 @@
+x-podman:
+  in_pod: false
+
 services:
   rabbitmq:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
+    network_mode: ${A500_PODMAN_NETWORK_MODE:-}
     ports:
       - "5672:5672"
     healthcheck:
@@ -14,13 +18,14 @@ services:
 
   consumer-signals:
     image: a500-market-data-consumer:local
+    network_mode: ${A500_PODMAN_NETWORK_MODE:-}
     build:
       context: .
       dockerfile: Dockerfile
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
     environment: &market-data-env
       A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      A500_RABBITMQ_URL: ${A500_CONTAINER_RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/%2F}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -28,6 +33,7 @@ services:
 
   consumer-audit:
     image: a500-market-data-consumer:local
+    network_mode: ${A500_PODMAN_NETWORK_MODE:-}
     build:
       context: .
       dockerfile: Dockerfile
@@ -40,6 +46,7 @@ services:
 
   replay:
     image: a500-market-data-consumer:local
+    network_mode: ${A500_PODMAN_NETWORK_MODE:-}
     build:
       context: .
       dockerfile: Dockerfile

@@ -29,13 +29,14 @@ def main() -> None:
         "A500_RABBITMQ_URL": URL,
         "A500_MARKET_DATA_MODE": "tgw",
     }
-    subprocess.run(
-        [*COMPOSE, "up", "-d", "--build"],
-        cwd=ROOT,
-        env=environment,
-        check=True,
-    )
     try:
+        subprocess.run(
+            [*COMPOSE, "up", "-d", "--build"],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            timeout=300,
+        )
         connection = None
         for _ in range(60):
             try:
@@ -89,6 +90,7 @@ def main() -> None:
                     text=True,
                     capture_output=True,
                     check=True,
+                    timeout=15,
                 )
                 output = result.stdout
                 events = []
@@ -124,6 +126,7 @@ def main() -> None:
             cwd=ROOT,
             env=environment,
             check=True,
+            timeout=60,
         )
 
 

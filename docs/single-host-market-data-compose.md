@@ -5,8 +5,23 @@
 ## 前置条件
 
 - 安装 Docker Engine 与 Docker Compose 插件，并能拉取 `python:3.14-slim`、RabbitMQ 镜像。
+- 使用 rootless Podman Compose 时，本项目配置让服务以独立容器运行，不加入 Podman pod。
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
 - TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。
+
+## Podman rootless 网络
+
+使用 rootless Podman 时，可选择 `slirp4netns` 网络模式，避开默认 rootless bridge 网络清理时的 `permission denied` 警告。该模式下容器通过主机网关访问 RabbitMQ，需将以下变量用于启动、查看日志和停止服务：
+
+```sh
+export A500_PODMAN_NETWORK_MODE=slirp4netns:allow_host_loopback=true
+export A500_CONTAINER_RABBITMQ_URL=amqp://guest:guest@host.containers.internal:5672/%2F
+A500_MARKET_DATA_MODE=tgw podman compose up -d --build
+podman compose ps
+podman compose logs -f consumer-signals consumer-audit
+```
+
+`A500_CONTAINER_RABBITMQ_URL` 仅覆盖容器内消费者地址；主机侧 E2E 仍使用 `localhost:5672`。不设置这两个变量时，Compose 使用默认网络和 `rabbitmq` 服务名。
 
 ## TGW 模式
 
@@ -44,3 +59,5 @@ uv run --no-sync python scripts/compose-market-data-e2e.py
 ```
 
 该脚本以 TGW 模式启动 Compose，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，检查两种用途消费者均收到事件，并在清理时移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 使用同一脚本。
+
+E2E 脚本为 Compose 启动设置 300 秒上限，为日志查询设置 15 秒上限，并为清理设置 60 秒上限；超时会使运行失败，而不是无限等待。
