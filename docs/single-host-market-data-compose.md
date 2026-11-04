@@ -1,0 +1,41 @@
+# 单机行情消费者部署
+
+本 Compose 部署在一台主机上运行 RabbitMQ，以及两个用途不同的规范化行情消费者（`signals`、`audit`）。`A500_MARKET_DATA_SYMBOLS` 是逗号分隔的完整行情代码清单，默认 `563360`；两个用途分别为每个代码的快照和分钟线建立独立 durable latest-state queue，并各自维护一个逐笔 durable queue。同一用途的多个副本共享对应队列并竞争消费；不同用途有独立副本。
+
+## 前置条件
+
+- 安装 Docker Engine 与 Docker Compose 插件，并能拉取 `python:3.14-slim`、RabbitMQ 镜像。
+- 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
+- 该部署不包含 TGW collector。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；见 [TGW 运行时验证](tgw-runtime-validation.md)。必须由已验证的外部采集器向 RabbitMQ 发布符合项目契约的规范化事件。
+
+## 启动与维护
+
+```sh
+docker compose up -d --build
+docker compose ps
+docker compose logs -f consumer-signals consumer-audit
+```
+
+消费者从 `A500_RABBITMQ_URL` 读取 AMQP 地址，行情代码从 `A500_MARKET_DATA_SYMBOLS` 配置；Compose 内部地址为 `amqp://guest:guest@rabbitmq:5672/%2F`。该代码清单必须与采集器发布的代码一致。若需替换 RabbitMQ 凭据或对外暴露服务，应在部署环境中配置并妥善管理凭据；默认端口仅发布到主机用于本机生产者连接。
+升级旧消费者拓扑时，先停止旧消费者并确认不再有旧实例使用队列，再从 RabbitMQ 管理端删除旧的 `market.consumer.<purpose>` 队列；新版本改用按用途、行情代码和事件类型拆分的队列。不要在旧消费者仍运行时删除或混用队列。
+
+```sh
+docker compose pull rabbitmq
+docker compose up -d --build
+docker compose down
+```
+
+RabbitMQ 数据保存于 `rabbitmq-data` named volume。`docker compose down --volumes` 会删除队列和持久化数据，仅用于明确接受数据丢失的清理或 E2E 测试。
+
+## 边界与验证
+
+这是单主机 Compose 部署，不提供高可用、跨主机调度或 broker 故障切换保证。RabbitMQ durable queue 与持久化消息不等于 exactly-once；消费者语义为至少一次。离线期间逐笔事件的完整恢复不作保证。
+
+在支持 Docker 的环境可运行真实端到端验证：
+
+```sh
+uv sync --frozen --no-dev
+uv run --no-sync python scripts/compose-market-data-e2e.py
+```
+
+该脚本构建并启动 Compose 服务，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，并检查两个不同用途的消费者输出均收到该事件；清理时会移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 在 Docker runner 上运行同一脚本。

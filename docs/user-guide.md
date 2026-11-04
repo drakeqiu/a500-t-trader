@@ -230,7 +230,26 @@ finally:
 
 迭代订阅的缓冲区有界：快照和分钟线缓冲区满时会丢弃旧事件、保留最新更新；tick 不会这样合并，缓冲区溢出会终止订阅，迭代读取时抛出 `TickOverflowError`。根据消费速度选择合适的 `buffer_size`，并处理溢出；不要把 tick 缓冲区当作可无损无限队列。关闭 provider 会取消剩余订阅并关闭 tgw 连接。
 
-## 7. 交易日状态
+## 7. 版本化行情事件采集与发布
+
+`MarketDataCollector` 将 `TgwPushProvider` 的规范化快照、1 分钟 bar、tick 事件发布到 RabbitMQ。每个 JSON 消息包含 `schema_version: 1`、`event_type`、来源事件时间 `event_time`、证券代码及 `data`。目前 tgw 适配层未确认可用的可靠来源事件 ID，因此 `source_event_id` 为 `null`，`source_event_id_quality` 为 `absent`；该字段不可用作唯一键或去重承诺。
+broker 发布失败时，可将 `LatestStatePublisher` 作为 collector 的 `Publisher` adapter，按 `CollectorConfig.symbols` 配置证券范围。适配器只在内存中为每个证券保留至多一个最新快照和一个最新分钟 bar（全量上限为证券数的两倍）；逐笔成交失败时直接丢弃。后续发布调用先尝试发送所保留状态；恢复时不会回放已被新事件覆盖的旧状态。进程重启会丢失这些状态，不使用本地持久化 spool。发布采用至少一次语义，故障边界可能出现重复；来源没有可靠事件 ID，不保证恰好一次或可靠去重。消费者须按自身用途判断事件时间新鲜度，最新保留状态不代表仍然新鲜。
+
+采集器接收外部连接工厂，不创建或猜测 tgw 登录方式。工厂接收 `CollectorConfig`，可通过 `connection_options` 读取外部配置，并返回支持 `subscribe(symbol, event_type, callback)`、`close()` 的连接；连接必须暴露 `connected` 或 `is_connected` 状态，只有外部适配器确认实际连接/登录后状态为真，采集器才报告已连接。没有明确状态视为未确认并触发退避重试。订阅应返回带 `error` 属性的句柄（无该属性时视为未报告错误）。采集器分别暴露 `connection_state` 和 `subscription_state`；订阅意图成功提交后、首个行情回调到达前为 `awaiting_data`，只有收到行情回调后才报告 `subscribed`，因此连接成功或订阅调用成功不会冒充行情流恢复。采集器提供速率受控的指数退避重连。原有 `MarketDataService` 查询 API 不变。
+
+命令行需要接入方提供真实的 tgw 连接工厂和配置，不含容器或 tgw 凭据假设：
+
+```sh
+export A500_RABBITMQ_URL='amqp://user:password@localhost:5672/%2F'
+export A500_TGW_CONNECTION_FACTORY='my_tgw_adapter:create_connection'
+a500-market-data-collector \
+  --symbols 563360,510300 \
+  --tgw-config ./tgw-connection.json
+```
+
+也可用 `--factory package.module:callable` 指定工厂。工厂形如 `def create_connection(config: CollectorConfig) -> PushConnection`，`config.connection_options` 是 `--tgw-config` JSON 对象；工厂负责按实际部署环境建立并返回已确认连接的对象。RabbitMQ 使用 AMQP topic exchange `market.events`（持久 exchange），routing key 格式为 `<event_type>.<symbol>`；通过 `RabbitMQPublisher(channel=...)` 可注入受控 channel。命令行会在标准错误输出中分别报告连接与订阅状态，SIGINT/SIGTERM 会触发有序关闭。未配置外部 tgw 工厂及 RabbitMQ URL 时不会启动采集。
+
+## 8. 交易日状态
 
 `session_status()` 返回 `(state, stale)`，可选传入待查询日期；默认查询当前上海日期：
 
@@ -246,7 +265,7 @@ else:
 
 `state` 为 `TRADING`、`CLOSED` 或 `UNKNOWN`。交易状态由交易日历数据决定，不根据星期几推测。`stale=True` 表示日历数据不可用或过期；若没有可用的日历数据，状态为 `UNKNOWN`。将未知状态与休市区分处理。
 
-## 8. 统一行情模型
+## 9. 统一行情模型
 
 查询结果和 tgw 推送均使用标准模型：`Snapshot`、`MinuteBar` 和 `Trade`。金额与价格使用人民币（CNY），成交量/数量使用股；价格和金额字段使用 `Decimal`。时间戳是带时区的 `datetime`，统一转换为 `Asia/Shanghai`。
 

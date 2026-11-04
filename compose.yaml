@@ -1,0 +1,57 @@
+---
+services:
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  consumer-signals:
+    image: a500-market-data-consumer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - a500-market-data-consumer
+      - --purpose
+      - signals
+      - --symbols
+      - ${A500_MARKET_DATA_SYMBOLS:-563360}
+      - --max-age-seconds
+      - "30"
+    environment:
+      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  consumer-audit:
+    image: a500-market-data-consumer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - a500-market-data-consumer
+      - --purpose
+      - audit
+      - --symbols
+      - ${A500_MARKET_DATA_SYMBOLS:-563360}
+      - --max-age-seconds
+      - "30"
+    environment:
+      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-data:

@@ -44,6 +44,11 @@ class Subscription(Iterator[Snapshot | MinuteBar | Trade]):
         self._error: BaseException | None = None
 
     @property
+    def error(self) -> BaseException | None:
+        with self._condition:
+            return self._error
+
+    @property
     def closed(self) -> bool:
         with self._condition:
             return self._closed
