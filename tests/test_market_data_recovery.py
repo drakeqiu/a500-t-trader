@@ -8,10 +8,10 @@ from a500_t_trader.market_data.recovery import LatestStatePublisher
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def quote(price: str, minute: int = 31) -> Snapshot:
+def quote(price: str, minute: int = 31, symbol: str = "563360") -> Snapshot:
     timestamp = datetime(2026, 11, 4, 9, minute, tzinfo=SHANGHAI)
     return Snapshot(
-        symbol="563360", timestamp=timestamp, received_at=timestamp,
+        symbol=symbol, timestamp=timestamp, received_at=timestamp,
         last_price=Decimal(price), previous_close=Decimal("1"),
         open=Decimal("1"), high=Decimal(price), low=Decimal("1"),
         cumulative_volume=1, cumulative_amount=Decimal(price),
@@ -34,8 +34,6 @@ def trade() -> Trade:
 
 
 def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> None:
-    from a500_t_trader.market_data.recovery import LatestStatePublisher
-
     class Broker:
         available = False
         messages = []
@@ -60,8 +58,6 @@ def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> Non
 
 
 def test_recovery_state_is_bounded_by_configured_symbols_and_process_lifetime() -> None:
-    from a500_t_trader.market_data.recovery import LatestStatePublisher
-
     class Broker:
         def publish(self, event):
             raise ConnectionError("broker unavailable")
@@ -72,7 +68,7 @@ def test_recovery_state_is_bounded_by_configured_symbols_and_process_lifetime() 
     restarted_process = LatestStatePublisher(Broker(), symbols=("563360",))
     assert restarted_process.pending_count == 0
     try:
-        first_process.publish(quote("1.2"))
+        first_process.publish(quote("1.2", symbol="510300"))
     except ValueError:
         pass
     else:
