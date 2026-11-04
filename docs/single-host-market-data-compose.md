@@ -22,7 +22,6 @@ docker compose logs -f consumer-signals consumer-audit
 
 旧版本按用途、事件类型和证券代码声明队列；新版本改为每个用途一个共享 durable queue。升级时先停止所有旧版消费者，再启动新版，避免同一用途的新旧消费者同时处理重复投递。RabbitMQ 不会自动删除旧队列；确认没有旧消费者且无需保留其中积压消息后，再通过 RabbitMQ 管理端清理旧队列。
 
-
 ```sh
 docker compose pull rabbitmq
 docker compose up -d --build

@@ -235,7 +235,6 @@ finally:
 `MarketDataCollector` 将 `TgwPushProvider` 的规范化快照、1 分钟 bar、tick 事件发布到 RabbitMQ。每个 JSON 消息包含 `schema_version: 1`、`event_type`、来源事件时间 `event_time`、证券代码及 `data`。目前 tgw 适配层未确认可用的可靠来源事件 ID，因此 `source_event_id` 为 `null`，`source_event_id_quality` 为 `absent`；该字段不可用作唯一键或去重承诺。
 broker 发布失败时，可将 `LatestStatePublisher` 作为 collector 的 `Publisher` adapter，按 `CollectorConfig.symbols` 配置证券范围。适配器只在内存中为每个证券保留至多一个最新快照和一个最新分钟 bar（全量上限为证券数的两倍）；逐笔成交失败时直接丢弃。后续发布调用在新事件前尝试发送所保留状态；恢复时不回放被覆盖的旧状态。重启进程会丢失这些状态，不存在本地持久化 spool。转发端按至少一次语义工作，失败确认边界可能导致重复，且来源没有可靠事件 ID，消费者不得依赖恰好一次或可靠去重。消费者需按自身用途判断事件时间新鲜度；最新保留不等于仍新鲜。
 
-
 采集器接收外部连接工厂，不创建或猜测 tgw 登录方式。工厂接收 `CollectorConfig`，可通过 `connection_options` 读取外部配置，并返回支持 `subscribe(symbol, event_type, callback)`、`close()` 的连接；连接必须暴露 `connected` 或 `is_connected` 状态，只有外部适配器确认实际连接/登录后状态为真，采集器才报告已连接。没有明确状态视为未确认并触发退避重试。订阅应返回带 `error` 属性的句柄（无该属性时视为未报告错误）。采集器分别暴露 `connection_state` 和 `subscription_state`；`subscribed` 表示订阅建立成功，不承诺市场事件持续到达，状态不会把连接恢复冒充成行情恢复。采集器提供速率受控的指数退避重连。原有 `MarketDataService` 查询 API 不变。
 命令行需要接入方提供真实的 tgw 连接工厂和配置，不含容器或 tgw 凭据假设：
 
