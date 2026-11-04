@@ -10,6 +10,7 @@ import pytest
 from a500_t_trader.backtest.intraday import (
     BarSignal,
     IntradayBacktestParams,
+    SignalIntent,
     run_intraday_backtest,
 )
 from a500_t_trader.backtest.issue83_comparison import (
@@ -228,6 +229,10 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert small_cash_result["decision_bar_count"] == 23_580
     assert result["initial_cash"] == "500000"
     assert small_cash_result["initial_cash"] == "10000"
+    assert result["pair_count"] == 0
+    assert cast(int, result["closed_exit_trades"]) > 0
+    assert result["realized_exit_net_pnl"] is not None
+    assert result["average_exit_net_pnl"] is not None
     submitted_signals = cast(list[dict[str, object]], result["submitted_signals"])
     assert any(signal["direction"] == "sell" for signal in submitted_signals)
     chronological_split = cast(dict[str, object], result["chronological_split"])
@@ -425,3 +430,41 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert minimum_commission_examples
     for example in minimum_commission_examples:
         assert Decimal(str(example["quantity_cost_rate"])) > Decimal("0.00050")
+
+
+def test_risk_exit_realized_pnl_is_reported_separately_from_pairs() -> None:
+    from a500_t_trader.backtest.intraday import IntradayFill
+    from a500_t_trader.backtest.issue85_replay import _realized_exit_metrics
+
+    timestamp = datetime(2026, 1, 2, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    fills = (
+        IntradayFill(
+            "buy",
+            100,
+            timestamp,
+            timestamp,
+            Decimal("10"),
+            Decimal("0.1"),
+            Decimal(0),
+            SignalIntent.ORDINARY,
+        ),
+        IntradayFill(
+            "sell",
+            100,
+            timestamp,
+            timestamp,
+            Decimal("11"),
+            Decimal("0.1"),
+            Decimal(0),
+            SignalIntent.RISK_EXIT,
+        ),
+    )
+
+    assert _realized_exit_metrics(
+        fills, initial_quantity=0, initial_cost=Decimal(0)
+    ) == {
+        "closed_exit_trades": 1,
+        "realized_exit_net_pnl": "99.800",
+        "average_exit_net_pnl": "99.800",
+        "exit_profit_factor": None,
+    }
