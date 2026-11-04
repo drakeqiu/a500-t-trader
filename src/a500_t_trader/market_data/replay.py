@@ -79,13 +79,9 @@ def replay_history(
     ):
         raise ValueError("replay start time must be timezone-aware")
     warmup = [
-        bar
-        for bar in bars
-        if start_time is not None and bar.timestamp < start_time
+        bar for bar in bars if start_time is not None and bar.timestamp < start_time
     ]
-    active = [
-        bar for bar in bars if start_time is None or bar.timestamp >= start_time
-    ]
+    active = [bar for bar in bars if start_time is None or bar.timestamp >= start_time]
     published = 0
     for bar in warmup:
         if stop is not None and stop.is_set():
@@ -127,9 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         replay_history(
             bars,
-            lambda bar, *, warmup: publisher.publish(
-                bar, replay=True, warmup=warmup
-            ),
+            lambda bar, *, warmup: publisher.publish(bar, replay=True, warmup=warmup),
             start_time=args.start_time,
             speed=args.speed,
         )

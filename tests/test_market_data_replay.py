@@ -57,8 +57,15 @@ def test_replay_loads_completed_bars_and_start_time_warms_up_without_delay(
 def test_replay_event_preserves_market_time_and_uses_replay_clock() -> None:
     timestamp = datetime(2026, 11, 2, 9, 30, tzinfo=SHANGHAI)
     bar = MinuteBar(
-        "563360", timestamp, 1, Decimal("1"), Decimal("1"), Decimal("1"),
-        Decimal("1"), 1, source="replay",
+        "563360",
+        timestamp,
+        1,
+        Decimal("1"),
+        Decimal("1"),
+        Decimal("1"),
+        Decimal("1"),
+        1,
+        source="replay",
     )
 
     class Channel:
