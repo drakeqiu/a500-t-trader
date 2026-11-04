@@ -177,14 +177,11 @@ def _merge_live_parameters(
         elif isinstance(default, list):
             _validate_live_list(path, key, value, default)
             defaults[key] = value
-        elif (
-            type(value) is not type(default)
-            and not (
-                isinstance(default, (int, float))
-                and not isinstance(default, bool)
-                and isinstance(value, (int, float))
-                and not isinstance(value, bool)
-            )
+        elif type(value) is not type(default) and not (
+            isinstance(default, (int, float))
+            and not isinstance(default, bool)
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
         ):
             raise ValueError(f"{path}.{key} has an invalid value type")
         else:
@@ -222,7 +219,7 @@ def _validate_live_leaf(path: str, key: str, value: object) -> None:
         raise ValueError(f"{path} must be a non-negative finite number")
     try:
         number = Decimal(str(value))
-    except (InvalidOperation, ValueError):
+    except InvalidOperation, ValueError:
         raise ValueError(f"{path} must be a non-negative finite number") from None
     if not number.is_finite() or number < 0:
         raise ValueError(f"{path} must be a non-negative finite number")

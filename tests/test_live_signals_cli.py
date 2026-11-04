@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.cli.main import main
@@ -17,7 +20,7 @@ class _Subscription:
         self.events = events
         self.closed = False
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[MinuteBar]:
         return iter(self.events)
 
     def close(self) -> None:
@@ -29,7 +32,9 @@ class _Provider:
         self.events = events
         self.closed = False
 
-    def subscribe(self, symbol: str, event_type: str, callback=None):
+    def subscribe(
+        self, symbol: str, event_type: str, callback: object | None = None
+    ) -> _Subscription:
         assert event_type == "bar"
         return _Subscription(
             tuple(event for event in self.events if event.symbol == symbol)
@@ -37,6 +42,7 @@ class _Provider:
 
     def close(self) -> None:
         self.closed = True
+
 
 def _events(symbol: str = "510300") -> tuple[MinuteBar, ...]:
     start = datetime(2026, 11, 4, 10, 0, tzinfo=SHANGHAI)
@@ -58,7 +64,7 @@ def _events(symbol: str = "510300") -> tuple[MinuteBar, ...]:
 
 
 def test_live_cli_emits_one_completed_five_minute_wait_and_closes_provider(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -85,7 +91,7 @@ def test_live_cli_emits_one_completed_five_minute_wait_and_closes_provider(
 
 
 def test_live_cli_deduplicates_same_rule_identity_and_timestamp(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -103,7 +109,7 @@ def test_live_cli_deduplicates_same_rule_identity_and_timestamp(
 
 
 def test_live_cli_deduplicates_repeated_minute_before_aggregation(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -121,7 +127,7 @@ def test_live_cli_deduplicates_repeated_minute_before_aggregation(
     assert json.loads(outputs[0])["status"] == "WAIT"
 
 
-def test_live_output_deduplicates_by_symbol_not_only_timestamp(capsys) -> None:
+def test_live_output_deduplicates_by_symbol_not_only_timestamp(capsys: Any) -> None:
     from a500_t_trader.cli.live_signals import _emit_once
 
     seen: set[tuple[str, str]] = set()
@@ -138,7 +144,7 @@ def test_live_output_deduplicates_by_symbol_not_only_timestamp(capsys) -> None:
 
 
 def test_live_cli_reports_incomplete_five_minute_sequence_on_transition(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -168,8 +174,9 @@ def test_live_cli_reports_incomplete_five_minute_sequence_on_transition(
     assert outputs[0]["status"] == "UNAVAILABLE"
     assert "missing one-minute input" in outputs[0]["reasons"][0]
 
+
 def test_live_cli_reports_missing_minute_as_directionless_unavailable(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -203,10 +210,12 @@ def test_live_cli_reports_missing_minute_as_directionless_unavailable(
 
 
 def test_live_cli_reports_provider_failure_and_closes_provider(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     class FailedProvider(_Provider):
-        def subscribe(self, symbol: str, event_type: str, callback=None):
+        def subscribe(
+            self, symbol: str, event_type: str, callback: object | None = None
+        ) -> _Subscription:
             raise RuntimeError("push connection lost")
 
     config = tmp_path / "signals.yaml"
@@ -228,7 +237,7 @@ def test_live_cli_reports_provider_failure_and_closes_provider(
 
 
 def test_live_cli_uses_explicit_etf_scope_and_reports_stale_data(
-    tmp_path, capsys
+    tmp_path: Path, capsys: Any
 ) -> None:
     config = tmp_path / "signals.yaml"
     config.write_text("etfs: [510300]\n", encoding="utf-8")
@@ -248,7 +257,9 @@ def test_live_cli_uses_explicit_etf_scope_and_reports_stale_data(
     assert any("stale" in reason for reason in result["reasons"])
 
 
-def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(tmp_path) -> None:
+def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(
+    tmp_path: Path,
+) -> None:
     from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
 
     path = tmp_path / "signals.yaml"
@@ -261,12 +272,14 @@ def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(tmp_path) 
     second = load_live_signal_config(path)
 
     assert first.etfs == ("510300",)
-    assert first.parameters["scores"]["buy"] == 75
-    assert first.parameters["scores"]["sell"] == TECHNICAL_PARAMETERS["scores"]["sell"]
+    scores = first.parameters["scores"]
+    assert isinstance(scores, Mapping)
+    assert scores["buy"] == 75
+    assert scores["sell"] == TECHNICAL_PARAMETERS["scores"]["sell"]
     assert first.fingerprint == second.fingerprint
 
 
-def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path) -> None:
+def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path: Path) -> None:
     import pytest
 
     from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
@@ -279,8 +292,10 @@ def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path) -> None:
         )
         with pytest.raises(ValueError):
             load_live_signal_config(path)
+
+
 def test_live_yaml_validates_nested_timing_windows_and_rejects_short_etfs(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     import pytest
 
@@ -292,7 +307,9 @@ def test_live_yaml_validates_nested_timing_windows_and_rejects_short_etfs(
         '    buy_sell_windows: [["09:55", "11:15"], ["13:00", "14:20"]]\n',
     )
     loaded = load_live_signal_config(path)
-    assert loaded.parameters["timing"]["buy_sell_windows"] == [
+    timing = loaded.parameters["timing"]
+    assert isinstance(timing, Mapping)
+    assert timing["buy_sell_windows"] == [
         ["09:55", "11:15"],
         ["13:00", "14:20"],
     ]
@@ -310,7 +327,7 @@ def test_live_yaml_validates_nested_timing_windows_and_rejects_short_etfs(
         load_live_signal_config(path)
 
 
-def test_missing_live_yaml_uses_rule_defaults(tmp_path) -> None:
+def test_missing_live_yaml_uses_rule_defaults(tmp_path: Path) -> None:
     from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
 
     config = load_live_signal_config(tmp_path / "missing.yaml")

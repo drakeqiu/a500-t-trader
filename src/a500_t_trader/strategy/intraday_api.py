@@ -508,7 +508,6 @@ def _timestamp(value: object) -> datetime | None:
     )
 
 
-
 def _position(account: Mapping[str, object], symbol: str) -> dict[str, object]:
     positions = account.get("positions")
     value = positions.get(symbol) if isinstance(positions, dict) else None

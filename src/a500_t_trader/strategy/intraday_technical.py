@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
+from typing import Any, cast
 
 from ..market_data import SHANGHAI, MinuteBar
 from .intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID, IntradayV1Config
@@ -18,7 +19,7 @@ BAR_INTERVAL = 5
 MINIMUM_HISTORY = 180
 TECHNICAL_PARAMETER_VERSION = STRATEGY_ID
 
-TECHNICAL_PARAMETERS = {
+TECHNICAL_PARAMETERS: dict[str, Any] = {
     "indicators": {
         "ema": [20, 60],
         "bollinger": [20, 2],
@@ -215,7 +216,9 @@ def _analyze_symbol(
     trend = _trend(valid, indicators, parameters) if enough_history else None
     grid_anchor = indicators.get("grid_anchor", indicators.get("vwap_0945"))
     if grid_anchor is None:
-        grid_settings = parameters.get("grid", TECHNICAL_PARAMETERS["grid"])
+        grid_settings = cast(
+            Mapping[str, Any], parameters.get("grid", TECHNICAL_PARAMETERS["grid"])
+        )
         anchor = grid_settings.get("anchor", "09:45")
         reasons.append(f"missing {anchor} VWAP anchor")
     breakdown = (
@@ -245,12 +248,7 @@ def _analyze_symbol(
         breakdown = None
     scores = _scores(breakdown)
     candidate = "WAIT"
-    if (
-        enough_history
-        and not invalid_data
-        and grid_anchor is not None
-        and breakdown
-    ):
+    if enough_history and not invalid_data and grid_anchor is not None and breakdown:
         delta = (
             breakdown["buy_total"]
             + breakdown.get("atr_grid_buy", 0.0)
@@ -464,15 +462,17 @@ def _indicators(
     bars: list[MinuteBar], parameters: Mapping[str, object] | None = None
 ) -> dict[str, Decimal | None]:
     settings = parameters or TECHNICAL_PARAMETERS
-    indicator_settings = settings.get("indicators", {})
-    if not isinstance(indicator_settings, Mapping):
-        indicator_settings = TECHNICAL_PARAMETERS["indicators"]
+    indicator_settings = cast(
+        Mapping[str, Any],
+        settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+    )
     ema_periods = indicator_settings.get("ema", [20, 60])
     bollinger = indicator_settings.get("bollinger", [20, 2])
     kdj_periods = indicator_settings.get("kdj", [9, 3, 3])
     rsi_period = indicator_settings.get("rsi", 14)
     atr_period = indicator_settings.get("atr", 14)
-    if not all(isinstance(value, int) and value > 0 for value in (*ema_periods, *bollinger, *kdj_periods, rsi_period, atr_period)):
+    periods = (*ema_periods, *bollinger, *kdj_periods, rsi_period, atr_period)
+    if not all(isinstance(value, int) and value > 0 for value in periods):
         return _indicators(bars)
     fast, slow = ema_periods
     boll_period, boll_width = bollinger
@@ -483,13 +483,18 @@ def _indicators(
     if len(closes) >= boll_period:
         window = closes[-boll_period:]
         boll_mid = sum(window, ZERO) / Decimal(boll_period)
-        boll_sigma = (sum(((value - boll_mid) ** 2 for value in window), ZERO) / Decimal(boll_period)).sqrt()
+        variance = sum(((value - boll_mid) ** 2 for value in window), ZERO) / Decimal(
+            boll_period
+        )
+        boll_sigma = variance.sqrt()
         boll_upper = boll_mid + Decimal(boll_width) * boll_sigma
         boll_lower = boll_mid - Decimal(boll_width) * boll_sigma
     kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(bars, *kdj_periods)
     rsi, previous_rsi = _wilder_rsi(closes, rsi_period)
     atr = _wilder_atr(bars, atr_period)
-    grid_settings = settings.get("grid", TECHNICAL_PARAMETERS["grid"])
+    grid_settings = cast(
+        Mapping[str, Any], settings.get("grid", TECHNICAL_PARAMETERS["grid"])
+    )
     grid_anchor_time = (
         time.fromisoformat(str(grid_settings.get("anchor", "09:45")))
         if isinstance(grid_settings, Mapping)
@@ -623,13 +628,29 @@ def _trend(
     parameters: Mapping[str, object] | None = None,
 ) -> str | None:
     technical_settings = parameters or TECHNICAL_PARAMETERS
-    settings = technical_settings.get("trend", TECHNICAL_PARAMETERS["trend"])
-    indicator_settings = technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"])
+    settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("trend", TECHNICAL_PARAMETERS["trend"]),
+    )
+    indicator_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+    )
     fast, slow = indicator_settings.get("ema", (20, 60))
     atr_period = indicator_settings.get("atr", 14)
-    ema_fast, ema_slow, atr = indicators.get(f"ema_{fast}"), indicators.get(f"ema_{slow}"), indicators.get(f"atr_{atr_period}")
-    previous = _ema([bar.close for bar in bars[:-3]], fast) if len(bars) >= fast + 44 else None
-    if ema_fast is None or ema_slow is None or atr is None or atr <= ZERO or previous is None:
+    ema_fast = indicators.get(f"ema_{fast}")
+    ema_slow = indicators.get(f"ema_{slow}")
+    atr = indicators.get(f"atr_{atr_period}")
+    previous = (
+        _ema([bar.close for bar in bars[:-3]], fast) if len(bars) >= fast + 44 else None
+    )
+    if (
+        ema_fast is None
+        or ema_slow is None
+        or atr is None
+        or atr <= ZERO
+        or previous is None
+    ):
         return None
     d, m = (ema_fast - ema_slow) / atr, (ema_fast - previous) / atr
     strong_d = Decimal(str(settings.get("strong_d", "0.90")))
@@ -698,9 +719,9 @@ def _score_components(
     if not isinstance(weights, Mapping):
         raise ValueError("configured score weights are unavailable")
     settings = parameters or TECHNICAL_PARAMETERS
-    score_settings = settings.get("scores", {})
-    if not isinstance(score_settings, Mapping):
-        score_settings = TECHNICAL_PARAMETERS["scores"]
+    score_settings = cast(
+        Mapping[str, Any], settings.get("scores", TECHNICAL_PARAMETERS["scores"])
+    )
     kdj_weight = Decimal(str(weights.get("kdj", 8)))
     rsi_weight = Decimal(str(weights.get("rsi", 7)))
     ema_weight = Decimal(str(weights.get("ema", 20)))
@@ -708,8 +729,11 @@ def _score_components(
     vwap_weight = Decimal(str(weights.get("vwap", 25)))
     close = indicators["close"]
     mid, sigma = indicators["bollinger_mid"], indicators["bollinger_sigma"]
-    indicator_settings = (parameters or TECHNICAL_PARAMETERS).get(
-        "indicators", TECHNICAL_PARAMETERS["indicators"]
+    indicator_settings = cast(
+        Mapping[str, Any],
+        (parameters or TECHNICAL_PARAMETERS).get(
+            "indicators", TECHNICAL_PARAMETERS["indicators"]
+        ),
     )
     atr_period = indicator_settings.get("atr", 14)
     rsi_period = indicator_settings.get("rsi", 14)
@@ -817,11 +841,21 @@ def _grid(
     parameters: Mapping[str, object] | None = None,
 ) -> tuple[Decimal, int, int, str | None, str | None] | None:
     technical_settings = parameters or TECHNICAL_PARAMETERS
-    settings = technical_settings.get("grid", TECHNICAL_PARAMETERS["grid"])
-    score_settings = technical_settings.get("scores", TECHNICAL_PARAMETERS["scores"])
-    weights = score_settings.get("weights", TECHNICAL_PARAMETERS["scores"]["weights"])
-    indicator_settings = technical_settings.get(
-        "indicators", TECHNICAL_PARAMETERS["indicators"]
+    settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("grid", TECHNICAL_PARAMETERS["grid"]),
+    )
+    score_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("scores", TECHNICAL_PARAMETERS["scores"]),
+    )
+    weights = cast(
+        Mapping[str, Any],
+        score_settings.get("weights", TECHNICAL_PARAMETERS["scores"]["weights"]),
+    )
+    indicator_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
     )
     atr_period = indicator_settings.get("atr", 14)
     anchor, atr, close = (
@@ -838,9 +872,12 @@ def _grid(
         return None
     if tick <= ZERO or cost < ZERO or close <= ZERO:
         return None
-    factor = Decimal(str(settings["strong_trend_multiplier"])) if trend in ("STRONG_BULL", "STRONG_BEAR") else ONE
+    strong_trend = trend in ("STRONG_BULL", "STRONG_BEAR")
+    factor = Decimal(str(settings["strong_trend_multiplier"])) if strong_trend else ONE
     atr_ratio = atr / close
-    if not Decimal(str(settings["minimum_atr_ratio"])) <= atr_ratio <= Decimal(str(settings["maximum_atr_ratio"])):
+    minimum = Decimal(str(settings["minimum_atr_ratio"]))
+    maximum = Decimal(str(settings["maximum_atr_ratio"]))
+    if not minimum <= atr_ratio <= maximum:
         return None
     ratio = max(
         Decimal(str(settings["atr_multiplier"])) * factor * atr_ratio,
@@ -987,7 +1024,7 @@ def _confirmations(
 def _window_allows(
     as_of: datetime, parameters: Mapping[str, object] | None = None
 ) -> tuple[bool, bool]:
-    settings = parameters or TECHNICAL_PARAMETERS["timing"]
+    settings = cast(Mapping[str, Any], parameters or TECHNICAL_PARAMETERS["timing"])
     stamp = as_of.astimezone(SHANGHAI).time()
     windows = settings["buy_sell_windows"]
     parsed_windows = [

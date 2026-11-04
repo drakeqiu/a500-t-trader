@@ -391,7 +391,6 @@ def _paired_api_result(
     return result
 
 
-
 def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context() -> (
     None
 ):
@@ -487,13 +486,14 @@ def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason
         _assert_blocked(result, reason)
 
 
-
 def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> None:
     first = _evaluate()["510300"]
     second = _evaluate()["510300"]
 
     assert first == second
-    assert not any("certification" in reason for reason in first["reasons"])
+    reasons = first["reasons"]
+    assert isinstance(reasons, list)
+    assert not any("certification" in reason for reason in reasons)
     execution = first["execution"]
     assert isinstance(execution, dict)
     assert execution["suggested_price"] is None

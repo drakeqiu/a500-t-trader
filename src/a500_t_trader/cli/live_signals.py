@@ -87,6 +87,7 @@ def run_live_signals(
             )
             workers.append(worker)
             worker.start()
+
     previous_hup_handler = None
     try:
         if hasattr(signal, "SIGHUP"):
@@ -114,6 +115,8 @@ def run_live_signals(
                     buckets.clear()
                     histories.clear()
                 configuration = reloaded
+                continue
+            if not isinstance(event, MinuteBar):
                 continue
             if event.symbol not in configuration.etfs or not event.is_completed:
                 continue
@@ -226,6 +229,7 @@ def run_live_signals(
             worker.join(timeout=1)
     return 0
 
+
 def _pump_subscription(
     subscription: Any, events: Queue[MinuteBar | str | Exception]
 ) -> None:
@@ -235,7 +239,6 @@ def _pump_subscription(
                 events.put(event)
     except Exception as error:
         events.put(error)
-
 
 
 def _emit_once(payload: dict[str, object], seen: set[tuple[str, str]]) -> None:
@@ -276,9 +279,9 @@ def _evaluate(
         {},
         configuration.fingerprint,
     )
-    analysis = analyze_intraday_technical(
-        {symbol: bars}, config=v1, as_of=as_of
-    )[symbol]
+    analysis = analyze_intraday_technical({symbol: bars}, config=v1, as_of=as_of)[
+        symbol
+    ]
     reasons = list(analysis.reasons)
     if analysis.completed_valid_bars < 180:
         status = "WAIT"
@@ -346,9 +349,7 @@ def _aggregate_five_minute(start: datetime, bars: list[MinuteBar]) -> MinuteBar:
         sum(bar.volume for bar in bars),
         None
         if any(bar.amount is None for bar in bars)
-        else sum(
-            (bar.amount for bar in bars if bar.amount is not None), Decimal(0)
-        ),
+        else sum((bar.amount for bar in bars if bar.amount is not None), Decimal(0)),
         True,
         source=bars[-1].source,
     )
