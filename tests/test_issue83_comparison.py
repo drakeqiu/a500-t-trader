@@ -230,7 +230,7 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert result["initial_cash"] == "500000"
     assert small_cash_result["initial_cash"] == "10000"
     assert result["pair_count"] == 0
-    assert result["closed_exit_trades"] > 0
+    assert cast(int, result["closed_exit_trades"]) > 0
     assert result["realized_exit_net_pnl"] is not None
     assert result["average_exit_net_pnl"] is not None
     submitted_signals = cast(list[dict[str, object]], result["submitted_signals"])
