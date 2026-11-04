@@ -93,6 +93,14 @@ V1.0 的候选分数门槛与方向差门槛均取自调用方的完整策略参
 
 `intraday-signals` 是使用默认保存的 563360 五分钟行情的历史研究回放。实时推送命令为 `python -m a500_t_trader live-signals --config config/intraday-signals.yaml`，需由应用注入已初始化的 push provider；配置明确列出 ETF 范围，可部分覆盖 V1 技术参数。配置在启动时读取，Linux 下收到 `SIGHUP` 时显式重载；配置文件不存在时参数采用规则默认值，但不会推断 ETF 范围，CLI 会拒绝空范围。实时信号只使用已完成的一分钟 bar 聚合五分钟线，历史不足或行情过期时返回无方向的 WAIT/UNAVAILABLE；不模拟成交，不给出数量，不连接券商。
 
+### 实时网格佣金成本配置
+
+`config/intraday-signals.yaml` 和 `config/intraday-signals-cost-example.yaml` 均使用 `live-signals` 可加载的 `costs` 配置。每只 ETF 必须显式设置 `tick_size`、`commission_rate`、`minimum_commission` 和 `reference_quantity`。当前 563360 示例配置为万0.5/边、最低0.1元/边；运行前请与本人券商账户费率及交割单核实。成本只计佣金，不加入滑点代理。
+
+CLI 根据最新完成五分钟线收盘价 $P$ 与参考数量 $Q$ 计算：单边佣金为 `max(P × Q × commission_rate, minimum_commission)`，往返成本率为 `2 × 单边佣金 / (P × Q)`。例如价格4元、参考数量40000份时，成交额160000元，每边佣金8元，往返成本率为0.0001（1 bp）。低成交额触发最低佣金时，成本率会随价格及数量变化。
+
+`reference_quantity` 必须是100的整数倍，只用于估算技术网格成本，不是信号建议的实际下单数量；按计划单笔规模调整。未配置某只 ETF 的成本时，历史数据达到技术分析最低要求后该证券返回 `UNAVAILABLE`，不会猜测费率。该 CLI 仍是只读建议，不连接券商或下单。配置的 `tick_size` 是显式市场规则输入；请按实际 ETF 核对。未建模真实滑点及可能另收的费用；确认万0.5是否包含交易所费用，避免漏计或重复计费。
+
 ```python
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
 
