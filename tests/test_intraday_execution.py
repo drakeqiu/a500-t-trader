@@ -140,7 +140,6 @@ def test_sell_quantity_is_capped_at_eight_percent_of_nav(tmp_path: Path) -> None
                 "grid_step": "0.01",
             }
         },
-        certification_passed=True,
         daily_activity={
             "turnover_notional": "0",
             "sell_notional": "0",
@@ -196,7 +195,6 @@ def test_buy_quantity_respects_remaining_daily_turnover_budget(tmp_path: Path) -
                 "grid_step": "0.01",
             }
         },
-        certification_passed=True,
         daily_activity={
             "turnover_notional": "80000",
             "sell_notional": "0",

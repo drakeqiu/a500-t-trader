@@ -80,18 +80,18 @@ history = market_data.get_history_bars("563360", today, today, interval_minutes=
 
 ### 已完成 5 分钟技术分析与策略评估 API
 
-> **产品目标与现状：** [ADR-0009](adr/0009-live-signals-and-configurable-v1-parameters.md) 将目标定为推送行情驱动的实时信号，并规定 V1 参数默认值及 YAML 覆盖规则。本文下方的 API、盘前命令和认证说明记录当前已有能力；其中历史认证门控描述的是当前实现，不能解释为新目标中的实时信号门槛。实时推送 CLI 与 YAML 默认配置尚未完全落地。
+> **产品目标与现状：** [ADR-0009](adr/0009-live-signals-and-configurable-v1-parameters.md) 规定推送行情驱动的实时信号、V1 参数默认值及 YAML 覆盖规则。`live-signals` CLI 订阅注入的推送 provider，仅评估已完成五分钟线；ETF 范围必须在 `config/intraday-signals.yaml` 中明确列出。实时输出仅为技术信号，不连接券商、不生成数量或订单。
 
 `a500_t_trader.strategy.intraday_technical.analyze_intraday_technical` 使用仓库跟踪的 V1.0 源规则，对按证券隔离的已完成 `MinuteBar` 序列返回指标、趋势、分数、候选、动态网格及阻断理由。候选包括 BUY、SELL、TAKE_PROFIT、BUYBACK 和 WAIT；评估时应传入 `IntradayV1Config`、带时区的 `as_of`，以及每只证券的 `grid_context`；网格上下文至少提供 `tick_size` 和数量对应的 `round_trip_cost_rate`，可包含已持久化的网格日期、间距、挂单和已使用层级。缺少有效网格输入时不会生成交易候选。
 
-`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、完整 `IntradayV1Config`（含本次账户快照和逐证券规则）及带时区的 `as_of`，数量建议需提供逐证券流动性数据、费用匹配的当前回测认证及其完整 binding、持久状态库、已结订单状态和动态网格上下文。认证使用 `certification_is_current` 对照 V1 源 SHA-256、规则版本、完整参数、实现版本、回测数据快照 SHA-256、费用模型和认证阈值；任何字段缺失、失败或变化均阻断数量。网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
+`a500_t_trader.strategy.intraday_api.evaluate_intraday_strategy` 是公开的完整评估入口。除了市场 bars、完整 `IntradayV1Config`（含本次账户快照和逐证券规则）及带时区的 `as_of`，数量建议需提供逐证券流动性数据、持久状态库、已结订单状态和动态网格上下文。数量仍受账户、交易规则、持久状态、流动性和费用约束；网格上下文的成本率应由调用方按候选数量计算，API 不会猜测。
 
 `paired_state` 是可选的逐证券配对映射，键为 `take_profit` / `buyback`，值必须提供基于对应真实成交及冻结网格、费用计算的 `target_price`、尚未完成的配对 `quantity` 和持久状态中的 `trade_pair_id`。TAKE_PROFIT 还要求合法可卖账户库存；BUYBACK 只允许回补该配对的未回补数量，BEAR 趋势下还受 25% 原卖出量上限约束。缺失或无效的配对目标/数量/ID 不会创造意图或数量；API 不会把账户持仓、总可卖量或历史建议猜成配对状态。信号返回配对 ID，调用方确认真实成交时应将该 ID 连同建议 ID传给 `StrategyFill`，不能生成合成配对 ID。V1 股票 ETF 的初始成熟可卖份额可通过状态库 `InitialHoldings` 显式登记，日内实际成交须经用户确认并关联配对 ID；当日新买份额不得因配对映射而绕过 T+1。
 
-策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、认证校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL/TAKE_PROFIT/BUYBACK 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/认证约束失败时，数量为零且 `allowed` 为 false。该 API 不生成订单价格、不连接券商或下单。
+策略评估按顺序使用源定义技术分析、账户/证券/行情新鲜度校验、持久网格及订单约束，最后仅对通过前置约束的 BUY/SELL/TAKE_PROFIT/BUYBACK 候选调用 `calculate_intraday_execution`。建议通过后只记录策略建议，不记作成交；未知输入、WAIT、技术阻断或任一风险/执行约束失败时，数量为零且 `allowed` 为 false。历史回测认证不再作为实时信号或数量建议的门槛；账户/证券、行情、仓位、T+1、费用、流动性、网格及订单状态约束仍然有效。该 API 不生成订单价格、不连接券商或下单。
 V1.0 的候选分数门槛与方向差门槛均取自调用方的完整策略参数（源规则基准：BUY 72、SELL 68、TAKE_PROFIT 60、BUYBACK 68，弱 BEAR 下 BUYBACK 78；方向差为 ±12），不会在执行环节退回硬编码默认值。同一交易时段内漏失已完成 5 分钟线会阻断候选，午休时段除外。通过其他限制的单笔委托数量仍受净资产 8% 上限、证券库存/仓位、可卖量、流动性及费用约束；配对意图还须受已持久化配对未完成数量约束。
 
-命令 `uv run python -m a500_t_trader intraday-signals` 使用默认保存的 563360 五分钟行情，按固定 40,000 份回放 V1 的 BUY/SELL 技术候选；可用 `--quantity` 覆盖份数、`--bars` 指定其他单标的行情 JSON，并用 `--output` 保存结果。使用 181 根滚动窗口以满足 180 根预热并控制回放开销。该命令不模拟成交、持仓变化、T+1、底仓/可卖量或网格层级状态；信号数量不是可执行建议。网格上下文使用[上交所基金交易规则](https://www.sse.com.cn/assortment/fund/etf/question/c/c_20240118_5734754.shtml)中的 ETF 0.001 元最小价位、每边万 0.5 佣金和每笔 0.1 元最低佣金，不含滑点。输出会记录这些限制。
+`intraday-signals` 是使用默认保存的 563360 五分钟行情的历史研究回放。实时推送命令为 `python -m a500_t_trader live-signals --config config/intraday-signals.yaml`，需由应用注入已初始化的 push provider；配置明确列出 ETF 范围，可部分覆盖 V1 技术参数。配置在启动时读取，Linux 下收到 `SIGHUP` 时显式重载；配置文件不存在时参数采用规则默认值，但不会推断 ETF 范围，CLI 会拒绝空范围。实时信号只使用已完成的一分钟 bar 聚合五分钟线，历史不足或行情过期时返回无方向的 WAIT/UNAVAILABLE；不模拟成交，不给出数量，不连接券商。
 
 ```python
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
@@ -122,13 +122,10 @@ result = evaluate_intraday_strategy(
     },
     state_store=state_store,
     pending_order_state=current_order_state,
-    certification=certification_result,
-    certification_binding=current_backtest_binding,
     liquidity=liquidity_by_symbol,
-)
 ```
 
-`analyze_intraday_technical` 也可独立调用，用于只读研究；其 `risk_status == READY` 仅表示技术规则允许候选，不表示账户或认证允许执行。账户约束、流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率和日内上限均由执行层另行检查。不得将技术候选视为订单或真实成交。
+`analyze_intraday_technical` 也可独立调用，用于只读研究；其 `risk_status == READY` 仅表示技术规则允许候选，不表示账户或执行约束允许执行。账户约束、流动性、保护底仓、可卖库存、预留现金、预算、组合仓位、风险、成交参与率和日内上限均由执行层另行检查。不得将技术候选视为订单或真实成交。
 
 ## 4. 盘前计划 CLI
 
@@ -258,8 +255,9 @@ loads the explicit V1 configuration and a JSON array of minute-bar objects
 (`symbol`, `timestamp`, `interval_minutes`, `open`, `high`, `low`, `close`,
 `volume`; optional `amount` and `is_completed`) and calls the public strategy
 API. Standard output and `--output` contain the same structured JSON result.
-The CLI does not reimplement strategy scoring or sizing. Unknown scoring and
-certification gates remain fail-closed; blocked executions do not expose a
-positive actionable quantity. This advisory system does not connect to a
-broker and cannot see pending broker orders, so unseen orders may cause
-duplicate orders.
+The `live-signals` command subscribes to an injected push provider and emits
+only completed five-minute advisory evaluations. Its YAML file explicitly
+scopes ETFs and may override V1 technical parameters; missing config uses
+defaults but does not infer an ETF universe. Certification is not a live-signal
+or sizing gate. Execution inputs and constraints remain fail-closed. Neither
+CLI connects to a broker or submits orders.

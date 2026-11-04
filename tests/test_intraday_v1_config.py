@@ -112,6 +112,29 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     assert config.securities["510300"]["t_plus"] == "T+1"
 
 
+@pytest.mark.parametrize(
+    ("start", "full"),
+    [("0.35", "0.35"), ("0.35", "0.34")],
+)
+def test_live_yaml_requires_full_score_threshold_above_start(
+    tmp_path: Path, start: str, full: str
+) -> None:
+    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+
+    path = tmp_path / "signals.yaml"
+    path.write_text(
+        "etfs: ['510300']\n"
+        "parameters:\n"
+        "  scores:\n"
+        f"    bollinger_z_start: '{start}'\n"
+        f"    bollinger_z_full: '{full}'\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="bollinger_z_full.*greater than"):
+        load_live_signal_config(path)
+
+
 def test_missing_configuration_is_reported_by_exact_field_path(tmp_path: Path) -> None:
     document = _complete_config()
     del document["fees"]

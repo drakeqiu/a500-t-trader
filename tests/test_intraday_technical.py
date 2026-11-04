@@ -135,7 +135,20 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
         implementation_version="commit:test",
         rule_source="docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
         rule_source_sha256="769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6",
-        parameters={},
+        parameters={
+            **TECHNICAL_PARAMETERS,
+            "indicators": {
+                **TECHNICAL_PARAMETERS["indicators"],
+                "ema": [10, 30],
+            },
+            "scores": {
+                **TECHNICAL_PARAMETERS["scores"],
+                "weights": {
+                    **TECHNICAL_PARAMETERS["scores"]["weights"],
+                    "ema": 40,
+                },
+            },
+        },
         certification={},
         fees={},
         account={},
@@ -148,6 +161,27 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
     assert analysis.parameter_hash == config.fingerprint
 
     assert analysis.scores is not None
+    assert analysis.indicators["ema_10"] is not None
+    baseline = analyze_intraday_technical({"510300": _bars()})["510300"]
+    assert analysis.score_breakdown is not None
+    assert baseline.score_breakdown is not None
+    assert analysis.score_breakdown["ema_buy"] != baseline.score_breakdown["ema_buy"]
+
+
+def test_timing_overrides_control_signal_windows() -> None:
+    from a500_t_trader.strategy.intraday_technical import _window_allows
+
+    timestamp = datetime(2026, 10, 30, 9, 55, tzinfo=SHANGHAI)
+    timing = {
+        **TECHNICAL_PARAMETERS["timing"],
+        "buy_sell_windows": [["09:50", "11:20"]],
+        "no_buy_after": "09:55",
+        "closeout_only_after": "14:45",
+        "protection_only_after": "14:50",
+    }
+
+    assert _window_allows(timestamp) == (True, True)
+    assert _window_allows(timestamp, timing) == (False, True)
 
 
 def test_grid_anchor_uses_session_context_and_retains_step_between_rechecks() -> None:
@@ -268,7 +302,7 @@ def test_source_exact_paired_targets_emit_take_profit_and_buyback(
     import a500_t_trader.strategy.intraday_technical as technical
 
     monkeypatch.setattr(
-        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+        technical, "_indicators", lambda *_args: {"vwap_0945": Decimal("4.00")}
     )
     monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
     monkeypatch.setattr(
@@ -319,7 +353,7 @@ def test_paired_target_does_not_override_ordinary_buy_candidate(
     import a500_t_trader.strategy.intraday_technical as technical
 
     monkeypatch.setattr(
-        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+        technical, "_indicators", lambda *_args: {"vwap_0945": Decimal("4.00")}
     )
     monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
     monkeypatch.setattr(
@@ -388,7 +422,7 @@ def test_configured_signal_threshold_changes_candidate(
     import a500_t_trader.strategy.intraday_technical as technical
 
     monkeypatch.setattr(
-        technical, "_indicators", lambda _bars: {"vwap_0945": Decimal("4.00")}
+        technical, "_indicators", lambda *_args: {"vwap_0945": Decimal("4.00")}
     )
     monkeypatch.setattr(technical, "_trend", lambda *_args: "RANGE")
     monkeypatch.setattr(

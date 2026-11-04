@@ -101,6 +101,163 @@ class IntradayV1Config:
         return CONFIG_SCHEMA_VERSION
 
 
+@dataclass(frozen=True, slots=True)
+class LiveSignalConfig:
+    etfs: tuple[str, ...]
+    parameters: dict[str, object]
+    fingerprint: str
+
+
+DEFAULT_LIVE_CONFIG_PATH = Path("config/intraday-signals.yaml")
+
+
+def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignalConfig:
+    """Load optional ETF scope and parameter overrides over immutable V1 defaults."""
+    from copy import deepcopy
+
+    from .intraday_technical import TECHNICAL_PARAMETERS
+
+    parameters = deepcopy(TECHNICAL_PARAMETERS)
+    etfs: tuple[str, ...] = ()
+    if path.exists():
+        try:
+            import yaml
+        except ImportError as error:
+            raise ValueError(
+                "YAML configuration requires the PyYAML package"
+            ) from error
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as error:
+            raise ValueError(f"cannot load live signal YAML: {error}") from None
+        if not isinstance(document, dict) or set(document) - {"etfs", "parameters"}:
+            raise ValueError("live YAML accepts only etfs and parameters")
+        raw_etfs = document.get("etfs")
+        if (
+            not isinstance(raw_etfs, list)
+            or not raw_etfs
+            or any(
+                not isinstance(item, (str, int)) or isinstance(item, bool)
+                for item in raw_etfs
+            )
+        ):
+            raise ValueError("etfs must be a non-empty list of six-digit ETF codes")
+        etfs = tuple(dict.fromkeys(str(item) for item in raw_etfs))
+        if any(len(symbol) != 6 or not symbol.isdigit() for symbol in etfs):
+            raise ValueError("etfs must contain only six-digit ETF codes")
+        overrides = document.get("parameters", {})
+        if not isinstance(overrides, dict):
+            raise ValueError("parameters must be a mapping")
+        _merge_live_parameters(parameters, overrides, "parameters")
+        _validate_score_threshold_intervals(parameters["scores"])
+    canonical = json.dumps(
+        parameters,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return LiveSignalConfig(
+        etfs,
+        parameters,
+        hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    )
+
+
+def _merge_live_parameters(
+    defaults: dict[str, object], overrides: dict[object, object], path: str
+) -> None:
+    for key, value in overrides.items():
+        if not isinstance(key, str) or key not in defaults:
+            raise ValueError(f"unknown V1 parameter: {path}.{key}")
+        default = defaults[key]
+        if isinstance(default, dict):
+            if not isinstance(value, dict):
+                raise ValueError(f"{path}.{key} must be a mapping")
+            _merge_live_parameters(default, value, f"{path}.{key}")
+        elif isinstance(default, list):
+            _validate_live_list(path, key, value, default)
+            defaults[key] = value
+        elif (
+            type(value) is not type(default)
+            and not (
+                isinstance(default, (int, float))
+                and not isinstance(default, bool)
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            )
+        ):
+            raise ValueError(f"{path}.{key} has an invalid value type")
+        else:
+            _validate_live_leaf(f"{path}.{key}", key, value)
+            defaults[key] = value
+
+
+def _validate_live_list(
+    parent: str, key: str, value: object, expected: list[object]
+) -> None:
+    path = f"{parent}.{key}"
+    if not isinstance(value, list) or len(value) != len(expected):
+        raise ValueError(f"{path} must match the default list shape")
+    for index, (item, default) in enumerate(zip(value, expected, strict=True)):
+        item_path = f"{path}[{index}]"
+        if isinstance(default, list):
+            _validate_live_list(path, str(index), item, default)
+        else:
+            if type(item) is not type(default):
+                raise ValueError(f"{item_path} contains invalid values")
+            _validate_live_leaf(item_path, key, item)
+
+
+def _validate_live_leaf(path: str, key: str, value: object) -> None:
+    from datetime import datetime
+    from decimal import Decimal, InvalidOperation
+
+    if isinstance(value, str) and (".timing." in path or key == "anchor"):
+        try:
+            datetime.strptime(value, "%H:%M")
+        except ValueError:
+            raise ValueError(f"{path} must use HH:MM time format") from None
+        return
+    if isinstance(value, bool):
+        raise ValueError(f"{path} must be a non-negative finite number")
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{path} must be a non-negative finite number") from None
+    if not number.is_finite() or number < 0:
+        raise ValueError(f"{path} must be a non-negative finite number")
+    if "indicators." in path and number <= 0:
+        raise ValueError(f"{path} must be greater than zero")
+    if path.startswith("parameters.scores.") and number > 100:
+        raise ValueError(f"{path} must not exceed 100")
+    if (
+        path.startswith("parameters.grid.")
+        and key in {"levels", "minimum_ticks"}
+        and number <= 0
+    ):
+        raise ValueError(f"{path} must be greater than zero")
+
+
+def _validate_score_threshold_intervals(scores: object) -> None:
+    from decimal import Decimal
+
+    if not isinstance(scores, dict):
+        return
+    for full_key, full_value in scores.items():
+        if not isinstance(full_key, str) or not full_key.endswith("_full"):
+            continue
+        start_key = f"{full_key[:-5]}_start"
+        if start_key not in scores:
+            continue
+        start = Decimal(str(scores[start_key]))
+        full = Decimal(str(full_value))
+        if full <= start:
+            raise ValueError(
+                f"parameters.scores.{full_key} must be greater than "
+                f"parameters.scores.{start_key}"
+            )
+
+
 def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     """Load the complete V1 configuration without supplying implicit values."""
     document = json.loads(Path(path).read_text(encoding="utf-8"))
