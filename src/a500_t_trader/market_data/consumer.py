@@ -7,7 +7,6 @@ import os
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import quote
 
 Handler = Callable[[dict[str, Any]], None]
 
@@ -70,42 +69,20 @@ def _validate_event(event: dict[str, Any]) -> None:
 
 
 class RabbitMQConsumer:
-    """Consume purpose-specific latest-state queues and a competing trade queue."""
+    """Bind a consumer purpose to its own shared durable queue."""
 
     def __init__(
         self,
         purpose: str,
         handler: Handler,
         *,
-        symbols: tuple[str, ...],
         url: str | None = None,
         exchange: str = "market.events",
         channel: Any | None = None,
         max_age: timedelta = timedelta(seconds=30),
     ) -> None:
         self.consumer = MarketEventConsumer(purpose, handler, max_age=max_age)
-        allowed_symbol_chars = (
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
-        )
-        if not symbols or any(
-            not symbol or any(char not in allowed_symbol_chars for char in symbol)
-            for symbol in symbols
-        ):
-            raise ValueError("symbols must be non-empty routing-key-safe strings")
-        symbols = tuple(dict.fromkeys(symbols))
-        prefix = f"market.consumer.{purpose}"
-        self.trade_queue = f"{prefix}.trade"
-        self.latest_queues = tuple(
-            (
-                f"{prefix}.{event_type}.{quote(symbol, safe='')}",
-                f"{event_type}.{quote(symbol, safe='')}",
-            )
-            for event_type in ("snapshot", "minute_bar")
-            for symbol in symbols
-        )
-        self.queues = tuple(queue for queue, _ in self.latest_queues) + (
-            self.trade_queue,
-        )
+        self.queue = f"market.consumer.{purpose}"
         self.exchange = exchange
         self._connection: Any | None = None
         if channel is None:
@@ -122,36 +99,23 @@ class RabbitMQConsumer:
         self._channel.exchange_declare(
             exchange=self.exchange, exchange_type="topic", durable=True
         )
-        state_arguments = {"x-max-length": 1, "x-overflow": "drop-head"}
-        for queue, routing_key in self.latest_queues:
-            self._channel.queue_declare(
-                queue=queue, durable=True, arguments=state_arguments
-            )
+        self._channel.queue_declare(queue=self.queue, durable=True)
+        for routing_key in ("snapshot.*", "minute_bar.*", "trade.*"):
             self._channel.queue_bind(
-                queue=queue, exchange=self.exchange, routing_key=routing_key
+                queue=self.queue, exchange=self.exchange, routing_key=routing_key
             )
-        self._channel.queue_declare(queue=self.trade_queue, durable=True)
-        self._channel.queue_bind(
-            queue=self.trade_queue,
-            exchange=self.exchange,
-            routing_key="trade.*",
-        )
         self._channel.basic_qos(prefetch_count=1)
 
     def run(self) -> None:
         self.configure()
-        for queue in self.queues:
-            self._channel.basic_consume(
-                queue=queue,
-                on_message_callback=self._handle_delivery,
-                auto_ack=False,
-            )
+        self._channel.basic_consume(
+            queue=self.queue,
+            on_message_callback=lambda channel, method, properties, body: (
+                self.consumer.handle_delivery(channel, method.delivery_tag, body)
+            ),
+            auto_ack=False,
+        )
         self._channel.start_consuming()
-
-    def _handle_delivery(
-        self, channel: Any, method: Any, properties: Any, body: bytes
-    ) -> None:
-        self.consumer.handle_delivery(channel, method.delivery_tag, body)
 
     def stop(self) -> None:
         self._channel.stop_consuming()

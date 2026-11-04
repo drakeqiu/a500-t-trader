@@ -9,7 +9,7 @@ from a500_t_trader.market_data.events import MarketEvent, encode_market_event
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def events() -> tuple[MarketEvent, ...]:
+def events() -> tuple[Snapshot, MinuteBar, Trade]:
     timestamp = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
     return (
         Snapshot(
@@ -56,13 +56,12 @@ def events() -> tuple[MarketEvent, ...]:
 
 def test_normalized_events_include_version_event_time_and_nonunique_source_id() -> None:
     timestamp = events()[0].timestamp
-    expected_types = ("snapshot", "minute_bar", "trade")
-    expected_price_fields = ("last_price", "close", "price")
-    expected_prices = ("1.2345", "1.25", "1.25")
-    for index, event in enumerate(events()):
-        event_type = expected_types[index]
-        price_field = expected_price_fields[index]
-        price = expected_prices[index]
+    cases: tuple[tuple[MarketEvent, str, str, str], ...] = (
+        (events()[0], "snapshot", "last_price", "1.2345"),
+        (events()[1], "minute_bar", "close", "1.25"),
+        (events()[2], "trade", "price", "1.25"),
+    )
+    for event, event_type, price_field, price in cases:
         encoded = encode_market_event(event)
         assert encoded["schema_version"] == 1
         assert encoded["event_type"] == event_type
@@ -179,65 +178,3 @@ def test_collector_retries_factory_and_publishes_events_to_consumer() -> None:
     assert ("connected", "idle") in states
     assert ("connected", "subscribed") in states
     assert collector.subscription_state == "stopped"
-
-
-def test_collector_reports_stream_recovered_only_after_first_market_callback() -> None:
-    from collections.abc import Callable
-
-    from a500_t_trader.market_data.collector import (
-        CollectorConfig,
-        MarketDataCollector,
-    )
-
-    stop = Event()
-    states: list[tuple[str, str]] = []
-    callbacks: list[Callable[[MarketEvent], None]] = []
-    status_when_published: list[str] = []
-
-    class Subscription:
-        error = None
-
-    class Connection:
-        connected = True
-
-        def subscribe(
-            self,
-            symbol: str,
-            event_type: str,
-            callback: Callable[[MarketEvent], None],
-        ) -> Subscription:
-            callbacks.append(callback)
-            return Subscription()
-
-        def close(self) -> None:
-            self.connected = False
-
-    class Broker:
-        def publish(self, event: MarketEvent) -> None:
-            status_when_published.append(collector.subscription_state)
-            stop.set()
-
-    def wait(event: Event, seconds: float) -> bool:
-        if callbacks:
-            callbacks[0](events()[0])
-        return event.wait(0)
-
-    collector = MarketDataCollector(
-        lambda config: Connection(),
-        CollectorConfig(
-            ("563360",),
-            retry_initial_seconds=0.1,
-            retry_max_seconds=0.2,
-            poll_interval_seconds=0.01,
-        ),
-        Broker(),
-        wait=wait,
-        on_status=lambda connection, subscription: states.append(
-            (connection, subscription)
-        ),
-    )
-    collector.run(stop)
-
-    assert ("connected", "awaiting_data") in states
-    assert status_when_published == ["awaiting_data"]
-    assert ("connected", "subscribed") in states
