@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from . import MinuteBar, Snapshot, Trade
 
-type MarketEvent = Snapshot | MinuteBar | Trade
+MarketEvent = Snapshot | MinuteBar | Trade
 SCHEMA_VERSION = 1
 
 

@@ -24,7 +24,7 @@ class RabbitMQPublisher:
         self._connection: Any | None = None
         self._properties: Any | None = None
         if channel is None:
-            import pika  # type: ignore[import-untyped]
+            import pika
 
             rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
             if not rabbit_url:
