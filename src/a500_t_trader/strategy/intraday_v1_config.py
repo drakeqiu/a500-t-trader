@@ -109,6 +109,7 @@ class LiveSignalConfig:
     costs: dict[str, dict[str, object]]
     fingerprint: str
 
+
 DEFAULT_LIVE_CONFIG_PATH = Path("config/intraday-signals.yaml")
 
 
@@ -124,9 +125,7 @@ def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignal
     try:
         import yaml
     except ImportError as error:
-        raise ValueError(
-            "YAML configuration requires the PyYAML package"
-        ) from error
+        raise ValueError("YAML configuration requires the PyYAML package") from error
     if not path.exists():
         canonical = json.dumps(
             {"etfs": etfs, "parameters": parameters, "costs": costs},
@@ -185,7 +184,6 @@ def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignal
     )
 
 
-
 def _parse_live_costs(
     raw_costs: object, etfs: tuple[str, ...]
 ) -> dict[str, dict[str, object]]:
@@ -213,7 +211,7 @@ def _parse_live_costs(
                 raise ValueError(f"costs.{symbol}.{key} must be a decimal number")
             try:
                 value = Decimal(str(raw_value))
-            except (InvalidOperation, TypeError, ValueError):
+            except InvalidOperation, TypeError, ValueError:
                 raise ValueError(
                     f"costs.{symbol}.{key} must be a decimal number"
                 ) from None
@@ -232,12 +230,12 @@ def _parse_live_costs(
             or quantity % 100
         ):
             raise ValueError(
-                f"costs.{symbol}.reference_quantity must be a positive "
-                "multiple of 100"
+                f"costs.{symbol}.reference_quantity must be a positive multiple of 100"
             )
         values["reference_quantity"] = quantity
         costs[symbol] = values
     return costs
+
 
 def _merge_live_parameters(
     defaults: dict[str, object], overrides: dict[object, object], path: str

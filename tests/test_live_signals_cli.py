@@ -279,7 +279,6 @@ def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(
     assert first.fingerprint == second.fingerprint
 
 
-
 def test_live_yaml_loads_account_costs_and_fingerprints_them(tmp_path: Path) -> None:
     from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
 
@@ -341,6 +340,7 @@ def test_live_cli_calculates_round_trip_commission_from_config(
         "tick_size": "0.001",
         "round_trip_cost_rate": "0.0001",
     }
+
 
 def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path: Path) -> None:
     import pytest
