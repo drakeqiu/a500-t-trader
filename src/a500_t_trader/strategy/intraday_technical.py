@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
+from typing import Any, cast
 
 from ..market_data import SHANGHAI, MinuteBar
 from .intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID, IntradayV1Config
@@ -18,7 +19,7 @@ BAR_INTERVAL = 5
 MINIMUM_HISTORY = 180
 TECHNICAL_PARAMETER_VERSION = STRATEGY_ID
 
-TECHNICAL_PARAMETERS = {
+TECHNICAL_PARAMETERS: dict[str, Any] = {
     "indicators": {
         "ema": [20, 60],
         "bollinger": [20, 2],
@@ -58,6 +59,8 @@ TECHNICAL_PARAMETERS = {
         "strong_trend_multiplier": "1.20",
         "minimum_ratio": "0.0025",
         "maximum_ratio": "0.009",
+        "minimum_atr_ratio": "0.0008",
+        "maximum_atr_ratio": "0.015",
         "minimum_ticks": 4,
         "levels": 3,
         "anchor": "09:45",
@@ -207,14 +210,19 @@ def _analyze_symbol(
         reasons.append("invalid or mismatched five-minute bar data")
     if len(valid) < MINIMUM_HISTORY:
         reasons.append("fewer than 180 completed valid 5-minute bars")
-    indicators = _indicators(valid)
+    indicators = _indicators(valid, parameters)
     output_indicators: dict[str, object] = dict(indicators)
     enough_history = len(valid) >= MINIMUM_HISTORY
-    trend = _trend(valid, indicators) if enough_history else None
-    if indicators["vwap_0945"] is None:
-        reasons.append("missing 09:45 VWAP anchor")
+    trend = _trend(valid, indicators, parameters) if enough_history else None
+    grid_anchor = indicators.get("grid_anchor", indicators.get("vwap_0945"))
+    if grid_anchor is None:
+        grid_settings = cast(
+            Mapping[str, Any], parameters.get("grid", TECHNICAL_PARAMETERS["grid"])
+        )
+        anchor = grid_settings.get("anchor", "09:45")
+        reasons.append(f"missing {anchor} VWAP anchor")
     breakdown = (
-        _score_components(valid, indicators, trend, score_weights)
+        _score_components(valid, indicators, trend, score_weights, parameters)
         if enough_history
         else None
     )
@@ -222,7 +230,7 @@ def _analyze_symbol(
     grid_buy_level: str | None = None
     grid_sell_level: str | None = None
     if enough_history and breakdown is not None:
-        grid = _grid(valid, indicators, trend, grid_context)
+        grid = _grid(valid, indicators, trend, grid_context, parameters)
         if grid is None:
             reasons.append(
                 "dynamic grid inputs unavailable or grid width exceeds 0.90%"
@@ -233,7 +241,6 @@ def _analyze_symbol(
             grid_step, grid_buy, grid_sell, grid_buy_level, grid_sell_level = grid
             breakdown["atr_grid_buy"] = grid_buy
             breakdown["atr_grid_sell"] = grid_sell
-            indicators["grid_anchor"] = indicators["vwap_0945"]
             indicators["grid_step"] = grid_step
             output_indicators["grid_buy_level"] = grid_buy_level
             output_indicators["grid_sell_level"] = grid_sell_level
@@ -241,12 +248,7 @@ def _analyze_symbol(
         breakdown = None
     scores = _scores(breakdown)
     candidate = "WAIT"
-    if (
-        enough_history
-        and not invalid_data
-        and indicators["vwap_0945"] is not None
-        and breakdown
-    ):
+    if enough_history and not invalid_data and grid_anchor is not None and breakdown:
         delta = (
             breakdown["buy_total"]
             + breakdown.get("atr_grid_buy", 0.0)
@@ -256,7 +258,12 @@ def _analyze_symbol(
         direction_confirmed = _confirmations(
             valid, indicators, breakdown, grid_buy_level, grid_sell_level
         )
-        window = _window_allows(as_of or valid[-1].timestamp)
+        timing_parameters = parameters.get("timing", TECHNICAL_PARAMETERS["timing"])
+        window = (
+            _window_allows(as_of or valid[-1].timestamp, timing_parameters)
+            if isinstance(timing_parameters, Mapping)
+            else (False, False)
+        )
         buy_total = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
         sell_total = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
         score_parameters = parameters.get("scores")
@@ -376,7 +383,7 @@ def _analyze_symbol(
         if (
             not enough_history
             or invalid_data
-            or indicators["vwap_0945"] is None
+            or grid_anchor is None
             or grid_step is None
         )
         else "READY"
@@ -451,27 +458,55 @@ def _has_session_gap(bars: list[MinuteBar]) -> bool:
     return False
 
 
-def _indicators(bars: list[MinuteBar]) -> dict[str, Decimal | None]:
+def _indicators(
+    bars: list[MinuteBar], parameters: Mapping[str, object] | None = None
+) -> dict[str, Decimal | None]:
+    settings = parameters or TECHNICAL_PARAMETERS
+    indicator_settings = cast(
+        Mapping[str, Any],
+        settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+    )
+    ema_periods = indicator_settings.get("ema", [20, 60])
+    bollinger = indicator_settings.get("bollinger", [20, 2])
+    kdj_periods = indicator_settings.get("kdj", [9, 3, 3])
+    rsi_period = indicator_settings.get("rsi", 14)
+    atr_period = indicator_settings.get("atr", 14)
+    periods = (*ema_periods, *bollinger, *kdj_periods, rsi_period, atr_period)
+    if not all(isinstance(value, int) and value > 0 for value in periods):
+        return _indicators(bars)
+    fast, slow = ema_periods
+    boll_period, boll_width = bollinger
+    ema_fast = _ema([bar.close for bar in bars], fast)
+    ema_slow = _ema([bar.close for bar in bars], slow)
     closes = [bar.close for bar in bars]
-    ema20 = _ema(closes, 20)
-    ema60 = _ema(closes, 60)
     boll_mid = boll_upper = boll_lower = boll_sigma = None
-    if len(closes) >= 20:
-        window = closes[-20:]
-        boll_mid = sum(window, ZERO) / Decimal(20)
-        boll_sigma = (
-            sum(((value - boll_mid) ** 2 for value in window), ZERO) / Decimal(20)
-        ).sqrt()
-        boll_upper = boll_mid + Decimal(2) * boll_sigma
-        boll_lower = boll_mid - Decimal(2) * boll_sigma
-    kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(bars)
-    rsi, previous_rsi = _wilder_rsi(closes, 14)
-    atr = _wilder_atr(bars, 14)
-    vwap, vwap_anchor = _session_vwaps(bars)
+    if len(closes) >= boll_period:
+        window = closes[-boll_period:]
+        boll_mid = sum(window, ZERO) / Decimal(boll_period)
+        variance = sum(((value - boll_mid) ** 2 for value in window), ZERO) / Decimal(
+            boll_period
+        )
+        boll_sigma = variance.sqrt()
+        boll_upper = boll_mid + Decimal(boll_width) * boll_sigma
+        boll_lower = boll_mid - Decimal(boll_width) * boll_sigma
+    kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(bars, *kdj_periods)
+    rsi, previous_rsi = _wilder_rsi(closes, rsi_period)
+    atr = _wilder_atr(bars, atr_period)
+    grid_settings = cast(
+        Mapping[str, Any], settings.get("grid", TECHNICAL_PARAMETERS["grid"])
+    )
+    grid_anchor_time = (
+        time.fromisoformat(str(grid_settings.get("anchor", "09:45")))
+        if isinstance(grid_settings, Mapping)
+        else time(9, 45)
+    )
+    vwap, vwap_anchor = _session_vwaps(bars, grid_anchor_time)
     return {
         "close": closes[-1] if closes else None,
-        "ema_20": ema20,
-        "ema_60": ema60,
+        f"ema_{fast}": ema_fast,
+        f"ema_{slow}": ema_slow,
+        "ema_20": ema_fast if fast == 20 else ema_slow if slow == 20 else None,
+        "ema_60": ema_fast if fast == 60 else ema_slow if slow == 60 else None,
         "bollinger_mid": boll_mid,
         "bollinger_upper": boll_upper,
         "bollinger_lower": boll_lower,
@@ -482,8 +517,11 @@ def _indicators(bars: list[MinuteBar]) -> dict[str, Decimal | None]:
         "kdj_previous_k": kdj_prev_k,
         "kdj_previous_d": kdj_prev_d,
         "kdj_recent_min_k": kdj_min,
+        f"rsi_{rsi_period}": rsi,
+        f"rsi_{rsi_period}_previous": previous_rsi,
         "rsi_14": rsi,
         "rsi_14_previous": previous_rsi,
+        f"atr_{atr_period}": atr,
         "atr_14": atr,
         "vwap": vwap,
         "vwap_0945": vwap_anchor,
@@ -505,7 +543,7 @@ def _ema(values: list[Decimal], period: int) -> Decimal | None:
 
 
 def _kdj(
-    bars: list[MinuteBar],
+    bars: list[MinuteBar], period: int = 9, k_smoothing: int = 3, d_smoothing: int = 3
 ) -> tuple[
     Decimal | None,
     Decimal | None,
@@ -514,12 +552,12 @@ def _kdj(
     Decimal | None,
     Decimal | None,
 ]:
-    if len(bars) < 9:
+    if len(bars) < period:
         return (None,) * 6
     k = d = Decimal(50)
     values = []
-    for end in range(8, len(bars)):
-        window = bars[end - 8 : end + 1]
+    for end in range(period - 1, len(bars)):
+        window = bars[end - period + 1 : end + 1]
         low = min(bar.low for bar in window)
         high = max(bar.high for bar in window)
         rsv = (
@@ -527,8 +565,8 @@ def _kdj(
             if high == low
             else (bars[end].close - low) * Decimal(100) / (high - low)
         )
-        k = (Decimal(2) * k + rsv) / Decimal(3)
-        d = (Decimal(2) * d + k) / Decimal(3)
+        k = (Decimal(k_smoothing - 1) * k + rsv) / Decimal(k_smoothing)
+        d = (Decimal(d_smoothing - 1) * d + k) / Decimal(d_smoothing)
         values.append((k, d))
     previous = values[-2] if len(values) > 1 else (None, None)
     return (
@@ -559,7 +597,9 @@ def _wilder_atr(bars: list[MinuteBar], period: int) -> Decimal | None:
     return atr
 
 
-def _session_vwaps(bars: list[MinuteBar]) -> tuple[Decimal | None, Decimal | None]:
+def _session_vwaps(
+    bars: list[MinuteBar], anchor_time: time = time(9, 45)
+) -> tuple[Decimal | None, Decimal | None]:
     if not bars:
         return None, None
     today = bars[-1].timestamp.astimezone(SHANGHAI).date()
@@ -576,25 +616,54 @@ def _session_vwaps(bars: list[MinuteBar]) -> tuple[Decimal | None, Decimal | Non
             return None, None
         amount += bar.amount
         volume += Decimal(bar.volume)
-        if stamp == time(9, 45):
+        if stamp == anchor_time:
             anchor = None if volume == ZERO else amount / volume
     current = None if volume == ZERO else amount / volume
     return current, anchor
 
 
-def _trend(bars: list[MinuteBar], indicators: dict[str, Decimal | None]) -> str | None:
-    ema20, ema60, atr = indicators["ema_20"], indicators["ema_60"], indicators["atr_14"]
-    previous = _ema([bar.close for bar in bars[:-3]], 20) if len(bars) >= 64 else None
-    if ema20 is None or ema60 is None or atr is None or atr <= ZERO or previous is None:
+def _trend(
+    bars: list[MinuteBar],
+    indicators: dict[str, Decimal | None],
+    parameters: Mapping[str, object] | None = None,
+) -> str | None:
+    technical_settings = parameters or TECHNICAL_PARAMETERS
+    settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("trend", TECHNICAL_PARAMETERS["trend"]),
+    )
+    indicator_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+    )
+    fast, slow = indicator_settings.get("ema", (20, 60))
+    atr_period = indicator_settings.get("atr", 14)
+    ema_fast = indicators.get(f"ema_{fast}")
+    ema_slow = indicators.get(f"ema_{slow}")
+    atr = indicators.get(f"atr_{atr_period}")
+    previous = (
+        _ema([bar.close for bar in bars[:-3]], fast) if len(bars) >= fast + 44 else None
+    )
+    if (
+        ema_fast is None
+        or ema_slow is None
+        or atr is None
+        or atr <= ZERO
+        or previous is None
+    ):
         return None
-    d, m = (ema20 - ema60) / atr, (ema20 - previous) / atr
-    if d >= Decimal("0.90") and m >= Decimal("0.25"):
+    d, m = (ema_fast - ema_slow) / atr, (ema_fast - previous) / atr
+    strong_d = Decimal(str(settings.get("strong_d", "0.90")))
+    strong_m = Decimal(str(settings.get("strong_m", "0.25")))
+    bull_d = Decimal(str(settings.get("bull_d", "0.20")))
+    bull_m = Decimal(str(settings.get("bull_m", "0.05")))
+    if d >= strong_d and m >= strong_m:
         return "STRONG_BULL"
-    if d <= Decimal("-0.90") and m <= Decimal("-0.25"):
+    if d <= -strong_d and m <= -strong_m:
         return "STRONG_BEAR"
-    if d >= Decimal("0.20") and m >= Decimal("0.05"):
+    if d >= bull_d and m >= bull_m:
         return "BULL"
-    if d <= Decimal("-0.20") and m <= Decimal("-0.05"):
+    if d <= -bull_d and m <= -bull_m:
         return "BEAR"
     return "RANGE"
 
@@ -645,14 +714,30 @@ def _score_components(
     indicators: dict[str, Decimal | None],
     trend: str | None,
     weights: object,
+    parameters: Mapping[str, object] | None = None,
 ) -> dict[str, float]:
     if not isinstance(weights, Mapping):
         raise ValueError("configured score weights are unavailable")
+    settings = parameters or TECHNICAL_PARAMETERS
+    score_settings = cast(
+        Mapping[str, Any], settings.get("scores", TECHNICAL_PARAMETERS["scores"])
+    )
     kdj_weight = Decimal(str(weights.get("kdj", 8)))
     rsi_weight = Decimal(str(weights.get("rsi", 7)))
+    ema_weight = Decimal(str(weights.get("ema", 20)))
+    bollinger_weight = Decimal(str(weights.get("bollinger", 20)))
+    vwap_weight = Decimal(str(weights.get("vwap", 25)))
     close = indicators["close"]
     mid, sigma = indicators["bollinger_mid"], indicators["bollinger_sigma"]
-    atr, vwap = indicators["atr_14"], indicators["vwap"]
+    indicator_settings = cast(
+        Mapping[str, Any],
+        (parameters or TECHNICAL_PARAMETERS).get(
+            "indicators", TECHNICAL_PARAMETERS["indicators"]
+        ),
+    )
+    atr_period = indicator_settings.get("atr", 14)
+    rsi_period = indicator_settings.get("rsi", 14)
+    atr, vwap = indicators.get(f"atr_{atr_period}"), indicators["vwap"]
     if (
         close is None
         or mid is None
@@ -677,15 +762,17 @@ def _score_components(
             "sell_total": 0.0,
         }
     ema_buy, ema_sell = (
-        (20, 0)
+        (ema_weight, ZERO)
         if trend in ("BULL", "STRONG_BULL")
-        else (0, 20)
+        else (ZERO, ema_weight)
         if trend in ("BEAR", "STRONG_BEAR")
-        else (10, 10)
+        else (ema_weight / 2, ema_weight / 2)
     )
+    boll_start = Decimal(str(score_settings["bollinger_z_start"]))
+    boll_full = Decimal(str(score_settings["bollinger_z_full"]))
     z = ZERO if sigma == ZERO else (close - mid) / (Decimal(2) * sigma)
-    boll_buy = Decimal(20) * _clip((-z - Decimal("0.35")) / Decimal("0.65"))
-    boll_sell = Decimal(20) * _clip((z - Decimal("0.35")) / Decimal("0.65"))
+    boll_buy = bollinger_weight * _clip((-z - boll_start) / (boll_full - boll_start))
+    boll_sell = bollinger_weight * _clip((z - boll_start) / (boll_full - boll_start))
     k, d = indicators["kdj_k"], indicators["kdj_d"]
     pk, pd, recent_min = (
         indicators["kdj_previous_k"],
@@ -701,16 +788,18 @@ def _score_components(
         and pd is not None
         and recent_min is not None
     ):
-        if pk <= pd and k > d and recent_min <= 35:
+        kdj_buy_min = Decimal(str(score_settings["kdj_cross_buy_min"]))
+        kdj_sell_min = Decimal(str(score_settings["kdj_cross_sell_min"]))
+        if pk <= pd and k > d and recent_min <= kdj_buy_min:
             kdj_buy = kdj_weight
-        elif k > d and k > pk and k <= 45:
+        elif k > d and k > pk and k <= Decimal(45):
             kdj_buy = kdj_weight / Decimal(2)
-        if pk >= pd and k < d and max(pk, k) >= 65:
+        if pk >= pd and k < d and max(pk, k) >= kdj_sell_min:
             kdj_sell = kdj_weight
-        elif k < d and k < pk and k >= 55:
+        elif k < d and k < pk and k >= Decimal(55):
             kdj_sell = kdj_weight / Decimal(2)
-    rsi = indicators["rsi_14"]
-    previous_rsi = indicators["rsi_14_previous"]
+    rsi = indicators.get(f"rsi_{rsi_period}")
+    previous_rsi = indicators.get(f"rsi_{rsi_period}_previous")
     rsi_buy = ZERO
     rsi_sell = ZERO
     if rsi is not None and previous_rsi is not None:
@@ -723,8 +812,10 @@ def _score_components(
         elif 55 <= rsi < 70 and rsi < previous_rsi:
             rsi_sell = rsi_weight * Decimal(4) / Decimal(7)
     v = (close - vwap) / atr
-    vwap_buy = Decimal(25) * _clip((-v - Decimal("0.30")) / Decimal("0.90"))
-    vwap_sell = Decimal(25) * _clip((v - Decimal("0.30")) / Decimal("0.90"))
+    vwap_start = Decimal(str(score_settings["vwap_atr_start"]))
+    vwap_full = Decimal(str(score_settings["vwap_atr_full"]))
+    vwap_buy = vwap_weight * _clip((-v - vwap_start) / (vwap_full - vwap_start))
+    vwap_sell = vwap_weight * _clip((v - vwap_start) / (vwap_full - vwap_start))
     return {
         "ema_buy": float(ema_buy),
         "ema_sell": float(ema_sell),
@@ -747,10 +838,29 @@ def _grid(
     indicators: Mapping[str, Decimal | None],
     trend: str | None,
     context: Mapping[str, object] | None,
+    parameters: Mapping[str, object] | None = None,
 ) -> tuple[Decimal, int, int, str | None, str | None] | None:
+    technical_settings = parameters or TECHNICAL_PARAMETERS
+    settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("grid", TECHNICAL_PARAMETERS["grid"]),
+    )
+    score_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("scores", TECHNICAL_PARAMETERS["scores"]),
+    )
+    weights = cast(
+        Mapping[str, Any],
+        score_settings.get("weights", TECHNICAL_PARAMETERS["scores"]["weights"]),
+    )
+    indicator_settings = cast(
+        Mapping[str, Any],
+        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+    )
+    atr_period = indicator_settings.get("atr", 14)
     anchor, atr, close = (
-        indicators["vwap_0945"],
-        indicators["atr_14"],
+        indicators.get("grid_anchor", indicators.get("vwap_0945")),
+        indicators.get(f"atr_{atr_period}"),
         indicators["close"],
     )
     if context is None or anchor is None or atr is None or close is None:
@@ -762,17 +872,20 @@ def _grid(
         return None
     if tick <= ZERO or cost < ZERO or close <= ZERO:
         return None
-    factor = Decimal("1.20") if trend in ("STRONG_BULL", "STRONG_BEAR") else ONE
+    strong_trend = trend in ("STRONG_BULL", "STRONG_BEAR")
+    factor = Decimal(str(settings["strong_trend_multiplier"])) if strong_trend else ONE
     atr_ratio = atr / close
-    if not Decimal("0.0008") <= atr_ratio <= Decimal("0.015"):
+    minimum = Decimal(str(settings["minimum_atr_ratio"]))
+    maximum = Decimal(str(settings["maximum_atr_ratio"]))
+    if not minimum <= atr_ratio <= maximum:
         return None
     ratio = max(
-        Decimal("0.9") * factor * atr_ratio,
-        Decimal("0.0025"),
+        Decimal(str(settings["atr_multiplier"])) * factor * atr_ratio,
+        Decimal(str(settings["minimum_ratio"])),
         3 * cost,
-        4 * tick / close,
+        Decimal(str(settings["minimum_ticks"])) * tick / close,
     )
-    if ratio > Decimal("0.009"):
+    if ratio > Decimal(str(settings["maximum_ratio"])):
         return None
     calculated_step = (close * ratio / tick).to_integral_value(
         rounding=ROUND_CEILING
@@ -807,7 +920,8 @@ def _grid(
         return None
     latest_two = bars[-2:]
     down = up = None
-    for level_index in range(3, 0, -1):
+    levels = int(settings["levels"])
+    for level_index in range(levels, 0, -1):
         level = anchor - step * level_index
         if (
             any(bar.low <= level for bar in latest_two)
@@ -815,7 +929,7 @@ def _grid(
         ):
             down = (level_index, level)
             break
-    for level_index in range(3, 0, -1):
+    for level_index in range(levels, 0, -1):
         level = anchor + step * level_index
         if (
             any(bar.high >= level for bar in latest_two)
@@ -828,23 +942,25 @@ def _grid(
     sell_level: str | None = None
     buy_score = 0
     sell_score = 0
+    grid_score_weight = int(weights["atr_grid"])
+    proximity = Decimal(str(settings["reclaim_score_proximity"]))
     if down:
         idx, level = down
         buy_score = (
-            20
+            grid_score_weight
             if current.close > level
-            else 10
-            if level - Decimal("0.1") * step <= current.close <= level
+            else grid_score_weight // 2
+            if level - proximity * step <= current.close <= level
             else 0
         )
         buy_level = f"L{idx}"
     if up:
         idx, level = up
         sell_score = (
-            20
+            grid_score_weight
             if current.close < level
-            else 10
-            if level <= current.close <= level + Decimal("0.1") * step
+            else grid_score_weight // 2
+            if level <= current.close <= level + proximity * step
             else 0
         )
         sell_level = f"U{idx}"
@@ -883,7 +999,10 @@ def _confirmations(
     upper = indicators["bollinger_upper"]
     boll_buy = lower is not None and previous.low <= lower and current.close > lower
     boll_sell = upper is not None and previous.high >= upper and current.close < upper
-    anchor, step = indicators["grid_anchor"], indicators["grid_step"]
+    anchor, step = (
+        indicators.get("grid_anchor", indicators.get("vwap_0945")),
+        indicators["grid_step"],
+    )
     grid_buy = grid_sell = False
     if anchor is not None and step is not None and buy_level:
         index = int(buy_level[1:])
@@ -902,11 +1021,26 @@ def _confirmations(
     )
 
 
-def _window_allows(as_of: datetime) -> tuple[bool, bool]:
+def _window_allows(
+    as_of: datetime, parameters: Mapping[str, object] | None = None
+) -> tuple[bool, bool]:
+    settings = cast(Mapping[str, Any], parameters or TECHNICAL_PARAMETERS["timing"])
     stamp = as_of.astimezone(SHANGHAI).time()
-    normal = time(9, 50) <= stamp < time(11, 20) or time(13, 10) <= stamp < time(14, 30)
-    sell = normal or time(14, 30) <= stamp < time(14, 45)
-    return normal, sell
+    windows = settings["buy_sell_windows"]
+    parsed_windows = [
+        (time.fromisoformat(str(start)), time.fromisoformat(str(end)))
+        for start, end in windows
+    ]
+    normal = any(start <= stamp < end for start, end in parsed_windows)
+    no_buy_after = time.fromisoformat(str(settings["no_buy_after"]))
+    closeout_only_after = time.fromisoformat(str(settings["closeout_only_after"]))
+    protection_only_after = time.fromisoformat(str(settings["protection_only_after"]))
+    sell_cutoff = min(closeout_only_after, protection_only_after)
+    buy = normal and stamp < no_buy_after
+    sell = stamp < sell_cutoff and (
+        normal or (bool(parsed_windows) and stamp >= parsed_windows[-1][1])
+    )
+    return buy, bool(sell)
 
 
 def _scores(

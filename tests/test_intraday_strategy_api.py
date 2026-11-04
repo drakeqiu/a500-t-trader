@@ -6,11 +6,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import a500_t_trader.strategy.intraday_api as intraday_api
-from a500_t_trader.backtest.certification import (
-    CertificationEvidence,
-    CertificationResult,
-    certify_intraday_backtest,
-)
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.strategy.intraday_api import evaluate_intraday_strategy
 from a500_t_trader.strategy.intraday_state import (
@@ -165,8 +160,6 @@ def _evaluate(**overrides: object) -> dict[str, dict[str, object]]:
         "bars_by_symbol": {"510300": _bars()},
         "as_of": AS_OF,
         "config": _config(),
-        "certification": None,
-        "certification_binding": None,
     }
     arguments.update(overrides)
     return evaluate_intraday_strategy(**arguments)  # type: ignore[arg-type]
@@ -398,22 +391,6 @@ def _paired_api_result(
     return result
 
 
-def _current_binding(config: IntradayV1Config) -> dict[str, object]:
-    return {
-        "strategy_id": config.strategy_id,
-        "rule_source_sha256": config.rule_source_sha256,
-        "rule_version": config.rule_version,
-        "parameters": config.parameters,
-        "implementation_version": config.implementation_version,
-        "data_snapshot_sha256": "b" * 64,
-        "cost_model": config.fees,
-        "execution_assumptions": {
-            "fill_model": "next-bar-open",
-            "initial_account": "full-ledger",
-        },
-    }
-
-
 def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context() -> (
     None
 ):
@@ -430,7 +407,7 @@ def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context(
     assert result["risk"]["status"] == "BLOCKED"  # type: ignore[index]
 
 
-def test_uncertified_technical_intent_is_visible_without_actionable_quantity(
+def test_technical_intent_is_visible_without_actionable_quantity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -449,68 +426,7 @@ def test_uncertified_technical_intent_is_visible_without_actionable_quantity(
     assert isinstance(execution, dict)
     assert execution["allowed"] is False
     assert execution["quantity"] == 0
-    assert "certification evidence unavailable" in result["reasons"]
-
-
-def test_certification_gate_reports_missing_failed_and_mismatched_binding() -> None:
-    config = _config()
-    evidence = CertificationResult(False, None, ("failed",), {})
-    passed_but_unverifiable = CertificationResult(True, "f" * 64, (), {})
-    cases = (
-        (_evaluate()["510300"], "certification evidence unavailable"),
-        (
-            _evaluate(certification=evidence)["510300"],
-            "certification is failed or not passed",
-        ),
-        (
-            _evaluate(
-                certification=passed_but_unverifiable,
-                certification_binding=_current_binding(config),
-            )["510300"],
-            "certification is stale or mismatched with current inputs",
-        ),
-        (
-            _evaluate(
-                certification=passed_but_unverifiable,
-                certification_binding=_current_binding(config) | {"rule_version": "V0"},
-            )["510300"],
-            "certification binding mismatches current configuration: rule_version",
-        ),
-    )
-    for result, reason in cases:
-        _assert_blocked(result, reason)
-
-
-def test_current_certification_binding_is_accepted() -> None:
-    config = _config()
-    binding = _current_binding(config)
-    evidence = CertificationEvidence(
-        Decimal("1"),
-        tuple(Decimal("1") for _ in range(20)),
-        Decimal("2"),
-        Decimal("2"),
-        Decimal("2"),
-        Decimal("0"),
-        20,
-        Decimal("0.5"),
-        Decimal("1.5"),
-        Decimal("1.5"),
-        (Decimal("1"),),
-        (Decimal("1.5"),),
-        (Decimal("1"), Decimal("1"), Decimal("1")),
-        (Decimal("1.5"), Decimal("1.5"), Decimal("1.5")),
-    )
-    certification = certify_intraday_backtest(evidence, binding, config.certification)
-    assert certification.certified
-
-    result = _evaluate(certification=certification, certification_binding=binding)[
-        "510300"
-    ]
-
-    reasons = result["reasons"]
-    assert isinstance(reasons, list)
-    assert "certification is stale or mismatched with current inputs" not in reasons
-    assert "certification binding unavailable" not in reasons
+    assert not any("certification" in reason for reason in result["reasons"])
 
 
 def _assert_blocked(result: dict[str, object], *reasons_to_check: str) -> None:
@@ -533,7 +449,7 @@ def test_api_returns_separate_technical_candidate_and_risk_veto() -> None:
     assert set(signal["scores"]) == {"buy", "sell", "delta"}
     assert signal["trend"] is not None
     assert result["risk"]["status"] == "BLOCKED"  # type: ignore[index]
-    _assert_blocked(result, "certification evidence unavailable")
+    _assert_blocked(result)
 
 
 def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason() -> (
@@ -570,19 +486,14 @@ def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason
         _assert_blocked(result, reason)
 
 
-def test_certification_mapping_is_not_accepted_as_verified_evidence() -> None:
-    _assert_blocked(
-        _evaluate(certification={"status": "passed"})["510300"],
-        "certification is failed or not passed",
-    )
-
-
 def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> None:
     first = _evaluate()["510300"]
     second = _evaluate()["510300"]
 
     assert first == second
-    _assert_blocked(first, "certification evidence unavailable")
+    reasons = first["reasons"]
+    assert isinstance(reasons, list)
+    assert not any("certification" in reason for reason in reasons)
     execution = first["execution"]
     assert isinstance(execution, dict)
     assert execution["suggested_price"] is None

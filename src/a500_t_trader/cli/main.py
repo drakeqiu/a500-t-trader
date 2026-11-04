@@ -7,6 +7,7 @@ from datetime import datetime
 
 from . import account, history, intraday, planning
 from .common import MarketData
+from .live_signals import run_live_signals
 from .parser import build_parser
 
 
@@ -14,10 +15,27 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     market_data: MarketData | None = None,
+    push_provider: object | None = None,
     as_of: datetime | None = None,
 ) -> int:
-    """Run CLI commands; injected data/time form the public CLI-to-app seam."""
+    """Run CLI commands; injected providers/time form public app seams."""
     args = build_parser().parse_args(argv)
+    if args.command == "live-signals":
+        if push_provider is None:
+            import sys
+
+            print(
+                "live-signals requires an initialized TgwPushProvider "
+                "supplied by the application",
+                file=sys.stderr,
+            )
+            return 2
+        return run_live_signals(
+            push_provider,
+            config_path=args.config,
+            once=args.once,
+            as_of=as_of,
+        )
     if args.command in {
         "intraday-config",
         "intraday-strategy",

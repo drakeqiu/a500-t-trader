@@ -90,6 +90,20 @@ def register_commands(
         help="saved five-minute history JSON",
     )
     dynamic_replay.add_argument("--output", help="optional JSON output file")
+    live = commands.add_parser(
+        "live-signals",
+        help="consume tgw one-minute push bars and emit V1 live signals",
+    )
+    live.add_argument(
+        "--config",
+        default="config/intraday-signals.yaml",
+        help="optional YAML ETF scope and V1 parameter overrides",
+    )
+    live.add_argument(
+        "--once",
+        action="store_true",
+        help="exit after the first evaluated five-minute bar",
+    )
 
 
 def handle(args: argparse.Namespace) -> int:

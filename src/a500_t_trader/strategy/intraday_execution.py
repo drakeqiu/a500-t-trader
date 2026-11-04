@@ -48,14 +48,11 @@ def calculate_intraday_execution(
     config: IntradayV1Config,
     as_of: datetime,
     liquidity: Mapping[str, Mapping[str, object]],
-    certification_passed: bool = False,
     daily_activity: Mapping[str, object] | None = None,
 ) -> IntradayExecution:
-    """Size candidates against explicit account/rule inputs; never infer rules.
+    """Size candidates using explicit account, market, and execution inputs.
 
-    Liquidity values must contain average_daily_amount, latest_bar_amount,
-    latest_bar_volume, spread, and atr. Explicit freshness and daily-counter
-    values are required before authorization; unknowns fail closed.
+    Required freshness and daily-counter values remain fail-closed.
     """
     portfolio_reasons: list[str] = []
     nav = _nav(config, portfolio_reasons)
@@ -80,8 +77,6 @@ def calculate_intraday_execution(
                 if candidate in {"BUY", "BUYBACK"}
                 else candidate.lower()
             )
-            if not certification_passed:
-                reasons.append("V1 strategy certification has not passed")
             score = analysis.scores.get("buy" if side == "buy" else "sell")
             if analysis.risk_status != "READY":
                 reasons.append("technical/risk candidate is not cleared for execution")

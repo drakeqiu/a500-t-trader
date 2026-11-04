@@ -1,0 +1,4 @@
+# Explicitly scoped default live coverage; V1 rule parameters remain code defaults.
+etfs:
+  - "563360"
+parameters: {}

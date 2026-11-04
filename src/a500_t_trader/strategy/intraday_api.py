@@ -10,12 +10,11 @@ from decimal import Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from ..backtest.certification import CertificationResult, certification_is_current
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
 from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
 from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
-from .intraday_v1_config import RULE_SOURCE_SHA256, IntradayV1Config
+from .intraday_v1_config import IntradayV1Config
 from .premarket import MAX_INPUT_AGE
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -28,8 +27,6 @@ def evaluate_intraday_strategy(
     config: IntradayV1Config | None,
     liquidity: Mapping[str, Mapping[str, object]] | None = None,
     daily_activity: Mapping[str, object] | None = None,
-    certification: CertificationResult | None = None,
-    certification_binding: Mapping[str, object] | None = None,
     state_store: IntradayStrategyStateStore | None = None,
     pending_order_state: str | None = None,
     paired_state: Mapping[str, Mapping[str, object]] | None = None,
@@ -40,15 +37,10 @@ def evaluate_intraday_strategy(
 
     The technical grid context is explicit because its cost rate is
     quantity-specific. Missing context blocks a candidate in the analyzer.
-    Certification is current only when its fingerprint verifies against the
-    exact V1 rules, parameters, implementation, data snapshot, costs, and
-    certification thresholds supplied to this call. ``paired_state`` is a
-    per-symbol mapping with optional ``take_profit`` and ``buyback`` records;
-    each record supplies a cost-adjusted ``target_price`` and outstanding
-    pair ``quantity``. Missing or malformed pair data never creates an intent.
-    ``risk_exit_required`` carries an explicit per-symbol upstream risk decision;
-    routing it bypasses only the RSI momentum gate, not execution safety checks.
-    The risk trigger itself must be supplied by the caller.
+    ``paired_state`` is a per-symbol mapping with optional ``take_profit`` and
+    ``buyback`` records; missing or malformed pair data never creates an intent.
+    ``risk_exit_required`` carries an explicit upstream risk decision and
+    bypasses only the RSI momentum gate, not execution constraints.
     """
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("strategy timestamp must include a timezone")
@@ -143,12 +135,6 @@ def evaluate_intraday_strategy(
                 )
             )
 
-        certification_reasons = _certification_reasons(
-            certification,
-            certification_binding,
-            config,
-        )
-        reasons.extend(certification_reasons)
         side = (
             "sell"
             if analysis is not None
@@ -288,7 +274,6 @@ def evaluate_intraday_strategy(
                     config=config,
                     as_of=as_of,
                     liquidity=liquidity or {},
-                    certification_passed=True,
                     daily_activity=daily_activity,
                 ).symbols.get(symbol)
             except ValueError, TypeError, ArithmeticError:
@@ -521,63 +506,6 @@ def _timestamp(value: object) -> datetime | None:
     return (
         parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
     )
-
-
-def _certification_reasons(
-    certification: CertificationResult | None,
-    binding: Mapping[str, object] | None,
-    config: IntradayV1Config | None,
-) -> list[str]:
-    if certification is None:
-        return ["certification evidence unavailable"]
-    if (
-        not isinstance(certification, CertificationResult)
-        or not certification.certified
-    ):
-        return ["certification is failed or not passed"]
-    if config is None or binding is None:
-        return ["certification binding unavailable"]
-    expected = {
-        "strategy_id": config.strategy_id,
-        "rule_source_sha256": config.rule_source_sha256,
-        "rule_version": config.rule_version,
-        "parameters": config.parameters,
-        "implementation_version": config.implementation_version,
-        "cost_model": config.fees,
-    }
-    if (
-        not isinstance(config.rule_source_sha256, str)
-        or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
-    ):
-        return ["certification rule source does not match current technical rules"]
-    missing = (
-        "strategy_id",
-        "rule_source_sha256",
-        "rule_version",
-        "parameters",
-        "implementation_version",
-        "data_snapshot_sha256",
-        "cost_model",
-        "execution_assumptions",
-    )
-    absent = [
-        field
-        for field in missing
-        if field not in binding or binding[field] in (None, "", {})
-    ]
-    if absent:
-        return [f"certification binding missing required fields: {', '.join(absent)}"]
-    mismatched = [
-        field for field, value in expected.items() if binding.get(field) != value
-    ]
-    if mismatched:
-        return [
-            "certification binding mismatches current configuration: "
-            f"{', '.join(mismatched)}"
-        ]
-    if not certification_is_current(certification, binding, config.certification):
-        return ["certification is stale or mismatched with current inputs"]
-    return []
 
 
 def _position(account: Mapping[str, object], symbol: str) -> dict[str, object]:
