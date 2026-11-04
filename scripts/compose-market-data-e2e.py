@@ -130,7 +130,7 @@ def _verify_latest_state_backlog(connection: pika.BlockingConnection) -> None:
     consumer.configure()
     publisher = RabbitMQPublisher(url=URL)
     try:
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(UTC)
         publisher.publish(
             Snapshot(
                 "563360", now, now, last_price=Decimal("1.10"), source="old-snapshot"
