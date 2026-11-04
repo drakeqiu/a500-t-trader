@@ -19,6 +19,7 @@ from ..strategy.premarket import AccountSnapshot
 from .intraday import (
     BarSignal,
     IntradayBacktestParams,
+    IntradayFill,
     SignalIntent,
     run_intraday_backtest,
 )
@@ -29,6 +30,52 @@ from .issue83_comparison import (
     SYMBOL,
 )
 from .session_amount import complete_session_amount
+
+
+def _realized_exit_metrics(
+    fills: tuple[IntradayFill, ...],
+    *,
+    initial_quantity: int,
+    initial_cost: Decimal,
+) -> dict[str, object]:
+    """Report realized risk exits without conflating them with paired trades."""
+    lots: list[list[Decimal | int]] = []
+    if initial_quantity:
+        lots.append([initial_quantity, initial_cost])
+    pnl_by_signal: dict[datetime, Decimal] = {}
+    for fill in fills:
+        if fill.side == "buy":
+            lots.append([fill.quantity, fill.fill_price + fill.fees / fill.quantity])
+            continue
+        remaining = fill.quantity
+        allocated_cost = Decimal(0)
+        while remaining and lots:
+            lot_quantity, unit_cost = lots[0]
+            take = min(remaining, int(lot_quantity))
+            allocated_cost += Decimal(take) * Decimal(unit_cost)
+            lots[0][0] = int(lot_quantity) - take
+            remaining -= take
+            if lots[0][0] == 0:
+                lots.pop(0)
+        if remaining:
+            raise ValueError("sell fills exceed replay inventory")
+        if fill.intent is SignalIntent.RISK_EXIT:
+            pnl_by_signal[fill.signal_timestamp] = (
+                pnl_by_signal.get(fill.signal_timestamp, Decimal(0))
+                + fill.fill_price * fill.quantity
+                - fill.fees
+                - allocated_cost
+            )
+    pnl_values = list(pnl_by_signal.values())
+    wins = sum((pnl for pnl in pnl_values if pnl > 0), Decimal(0))
+    losses = sum((-pnl for pnl in pnl_values if pnl < 0), Decimal(0))
+    total = sum(pnl_values, Decimal(0))
+    return {
+        "closed_exit_trades": len(pnl_values),
+        "realized_exit_net_pnl": str(total),
+        "average_exit_net_pnl": str(total / len(pnl_values)) if pnl_values else None,
+        "exit_profit_factor": str(wins / losses) if losses else None,
+    }
 
 
 def _int_value(value: object) -> int:
@@ -944,6 +991,11 @@ def _run_issue85_sequential_replay(
         "net_pnl": str(result.strategy_final_value - result.initial_cash),
         "return": str(result.strategy_return),
         "max_drawdown": str(_max_drawdown(result.account_states, initial_cash)),
+        **_realized_exit_metrics(
+            result.fills,
+            initial_quantity=account.holdings.get(SYMBOL, 0),
+            initial_cost=account.cost_basis.get(SYMBOL, Decimal(0)),
+        ),
         "signal_count": len(submitted_signals),
         "submitted_signals": list(submitted_signals),
         "fill_count": len(result.fills),
