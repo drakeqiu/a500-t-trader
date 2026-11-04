@@ -17,7 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
+    command: ["a500-market-data-consumer", "--purpose", "signals", "--symbols", "${A500_MARKET_DATA_SYMBOLS:-563360}", "--max-age-seconds", "30"]
     environment:
       A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:
@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["a500-market-data-consumer", "--purpose", "audit", "--max-age-seconds", "30"]
+    command: ["a500-market-data-consumer", "--purpose", "audit", "--symbols", "${A500_MARKET_DATA_SYMBOLS:-563360}", "--max-age-seconds", "30"]
     environment:
       A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:

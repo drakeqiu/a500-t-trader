@@ -1,6 +1,6 @@
 # 单机行情消费者部署
 
-本 Compose 部署在一台主机上运行 RabbitMQ，以及两个用途不同的规范化行情消费者（`signals`、`audit`）。两个用途分别使用 `market.consumer.<purpose>` durable queue；每个队列绑定 `snapshot.*`、`minute_bar.*`、`trade.*`，所以同一条事件会被分别路由到两个用途队列。同一用途的多个副本则竞争消费该用途队列。
+本 Compose 部署在一台主机上运行 RabbitMQ，以及两个用途不同的规范化行情消费者（`signals`、`audit`）。`A500_MARKET_DATA_SYMBOLS` 是逗号分隔的完整行情代码清单，默认 `563360`；两个用途分别为每个代码的快照和分钟线建立独立 durable latest-state queue，并各自维护一个逐笔 durable queue。同一用途的多个副本共享对应队列并竞争消费；不同用途有独立副本。
 
 ## 前置条件
 
@@ -16,7 +16,8 @@ docker compose ps
 docker compose logs -f consumer-signals consumer-audit
 ```
 
-消费者从 `A500_RABBITMQ_URL` 读取 AMQP 地址；Compose 内部地址为 `amqp://guest:guest@rabbitmq:5672/%2F`。若需替换 RabbitMQ 凭据或对外暴露服务，应在部署环境中配置并妥善管理凭据；默认端口仅发布到主机用于本机生产者连接。
+消费者从 `A500_RABBITMQ_URL` 读取 AMQP 地址，行情代码从 `A500_MARKET_DATA_SYMBOLS` 配置；Compose 内部地址为 `amqp://guest:guest@rabbitmq:5672/%2F`。该代码清单必须与采集器发布的代码一致。若需替换 RabbitMQ 凭据或对外暴露服务，应在部署环境中配置并妥善管理凭据；默认端口仅发布到主机用于本机生产者连接。
+升级旧消费者拓扑时，先停止旧消费者并确认不再有旧实例使用队列，再从 RabbitMQ 管理端删除旧的 `market.consumer.<purpose>` 队列；新版本改用按用途、行情代码和事件类型拆分的队列。不要在旧消费者仍运行时删除或混用队列。
 
 ```sh
 docker compose pull rabbitmq

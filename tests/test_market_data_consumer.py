@@ -48,7 +48,7 @@ def test_consumer_acknowledges_fresh_json_and_nacks_handler_failure() -> None:
     assert channel.nacks == [(2, True)]
 
 
-def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> None:
+def test_consumer_routes_each_latest_state_to_its_bounded_shared_queue() -> None:
     now = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
     stale = {
         "schema_version": 1,
@@ -76,19 +76,26 @@ def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> N
 
     class SetupChannel:
         def __init__(self) -> None:
-            self.declared: list[tuple[str, bool]] = []
-            self.bindings: list[str] = []
+            self.declared: list[tuple[str, bool, dict[str, int | str] | None]] = []
+            self.bindings: list[tuple[str, str]] = []
             self.qos = 0
+
         def exchange_declare(self, **kwargs: object) -> None:
             pass
 
-        def queue_declare(self, *, queue: str, durable: bool) -> None:
-            self.declared.append((queue, durable))
+        def queue_declare(
+            self,
+            *,
+            queue: str,
+            durable: bool,
+            arguments: dict[str, int | str] | None = None,
+        ) -> None:
+            self.declared.append((queue, durable, arguments))
 
         def queue_bind(
             self, *, queue: str, exchange: str, routing_key: str
         ) -> None:
-            self.bindings.append(queue)
+            self.bindings.append((queue, routing_key))
 
         def basic_qos(self, *, prefetch_count: int) -> None:
             self.qos = prefetch_count
@@ -97,12 +104,31 @@ def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> N
             pass
 
     setup = SetupChannel()
-    rabbit = RabbitMQConsumer("signals", observed.append, channel=setup)
-    replica = RabbitMQConsumer("signals", observed.append, channel=setup)
-    assert replica.queue == rabbit.queue
+    symbols = ("563360", "510300")
+    rabbit = RabbitMQConsumer(
+        "signals", observed.append, channel=setup, symbols=symbols
+    )
+    replica = RabbitMQConsumer(
+        "signals", observed.append, channel=setup, symbols=symbols
+    )
+    assert replica.queues == rabbit.queues
     rabbit.configure()
-    assert setup.declared == [("market.consumer.signals", True)]
-    assert setup.bindings == ["market.consumer.signals"]
+
+    state_args = {"x-max-length": 1, "x-overflow": "drop-head"}
+    expected_state_queues = [
+        (f"market.consumer.signals.{event_type}.{symbol}", True, state_args)
+        for event_type in ("snapshot", "minute_bar")
+        for symbol in symbols
+    ]
+    expected_trade_queue = ("market.consumer.signals.trade", True, None)
+    assert setup.declared == [*expected_state_queues, expected_trade_queue]
+    assert setup.bindings == [
+        (f"market.consumer.signals.{event_type}.{symbol}", f"{event_type}.{symbol}")
+        for event_type in ("snapshot", "minute_bar")
+        for symbol in symbols
+    ] + [("market.consumer.signals.trade", "trade.*")]
     assert setup.qos == 1
+    audit = RabbitMQConsumer("audit", observed.append, symbols=symbols, channel=setup)
+    assert set(audit.queues).isdisjoint(rabbit.queues)
 
 
