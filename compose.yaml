@@ -5,6 +5,7 @@ services:
   rabbitmq:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
+    user: "0:0"
     network_mode: ${A500_PODMAN_NETWORK_MODE:-}
     ports:
       - "5672:5672"
