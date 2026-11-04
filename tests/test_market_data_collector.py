@@ -4,12 +4,12 @@ from threading import Event
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar, Snapshot, Trade
-from a500_t_trader.market_data.events import encode_market_event
+from a500_t_trader.market_data.events import MarketEvent, encode_market_event
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def events() -> tuple[Snapshot, MinuteBar, Trade]:
+def events() -> tuple[MarketEvent, ...]:
     timestamp = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
     return (
         Snapshot(
