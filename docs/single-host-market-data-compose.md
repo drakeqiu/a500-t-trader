@@ -1,38 +1,40 @@
 # 单机行情消费者部署
 
-本 Compose 部署在一台主机上运行 RabbitMQ，以及两个用途不同的规范化行情消费者（`signals`、`audit`）。两个用途分别使用 `market.consumer.<purpose>` durable queue；每个队列绑定 `snapshot.*`、`minute_bar.*`、`trade.*`，所以同一条事件会被分别路由到两个用途队列。同一用途的多个副本则竞争消费该用途队列。
+本 Compose 在一台主机运行 RabbitMQ，以及 `signals`、`audit` 两个规范化行情消费者。必须显式设置 `A500_MARKET_DATA_MODE=tgw` 或 `replay`；模式缺失或非法时 Compose/消费者拒绝启动。两个模式分别使用 `market.events.tgw`、`market.events.replay` exchange，以及 `market.consumer.<purpose>.<mode>` durable queues，绝不跨模式混流。
 
 ## 前置条件
 
 - 安装 Docker Engine 与 Docker Compose 插件，并能拉取 `python:3.14-slim`、RabbitMQ 镜像。
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
-- 该部署不包含 TGW collector。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；见 [TGW 运行时验证](tgw-runtime-validation.md)。必须由已验证的外部采集器向 RabbitMQ 发布符合项目契约的规范化事件。
+- TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。
 
-## 启动与维护
-
-```sh
-docker compose up -d --build
-docker compose ps
-docker compose logs -f consumer-signals consumer-audit
-```
-
-消费者从 `A500_RABBITMQ_URL` 读取 AMQP 地址；Compose 内部地址为 `amqp://guest:guest@rabbitmq:5672/%2F`。若需替换 RabbitMQ 凭据或对外暴露服务，应在部署环境中配置并妥善管理凭据；默认端口仅发布到主机用于本机生产者连接。
-
-### 从旧队列拓扑升级
-
-旧版本按用途、事件类型和证券代码声明队列；新版本改为每个用途一个共享 durable queue。升级时先停止所有旧版消费者，再启动新版，避免同一用途的新旧消费者同时处理重复投递。RabbitMQ 不会自动删除旧队列；确认没有旧消费者且无需保留其中积压消息后，再通过 RabbitMQ 管理端清理旧队列。
+## TGW 模式
 
 ```sh
-docker compose pull rabbitmq
-docker compose up -d --build
-docker compose down
+A500_MARKET_DATA_MODE=tgw docker compose up -d --build
+A500_MARKET_DATA_MODE=tgw docker compose ps
+A500_MARKET_DATA_MODE=tgw docker compose logs -f consumer-signals consumer-audit
 ```
 
-RabbitMQ 数据保存于 `rabbitmq-data` named volume。`docker compose down --volumes` 会删除队列和持久化数据，仅用于明确接受数据丢失的清理或 E2E 测试。
+外部生产者需发布至 `market.events.tgw`。`a500-market-data-collector` 同样要求 `A500_MARKET_DATA_MODE=tgw`；Compose 只运行消费者。
+
+## 历史回放模式
+
+```sh
+A500_MARKET_DATA_MODE=replay docker compose --profile replay up -d --build consumer-signals consumer-audit
+A500_MARKET_DATA_MODE=replay docker compose run --rm replay \
+  a500-market-data-replay \
+  --file data/market-history/563360_1m_20261102.json \
+  --symbol 563360 --start-time 2026-11-02T10:00:00+08:00 --speed 10
+```
+
+历史文件以只读方式挂载到 replay 容器。只回放已完成的 1 分钟 bar；起始时间之前的 bar 作为 `warmup: true` 即时送出，之后按时间间隔除以 `--speed` 播放。默认速度 1，文件到末尾停止。事件保留历史 `event_time` 并附带回放时钟；回放消费者用它进行 30 秒新鲜度检查，不会因当前系统时间与历史日期不同而丢弃。切回 TGW 必须以 `A500_MARKET_DATA_MODE=tgw` 启动消费者，避免消费者仍绑定 replay queue。
+
+消费者从 `A500_RABBITMQ_URL` 读取 AMQP 地址；Compose 内部地址为 `amqp://guest:guest@rabbitmq:5672/%2F`。若需替换 RabbitMQ 凭据或对外暴露服务，应在部署环境中配置并妥善管理凭据。
 
 ## 边界与验证
 
-这是单主机 Compose 部署，不提供高可用、跨主机调度或 broker 故障切换保证。RabbitMQ durable queue 与持久化消息不等于 exactly-once；消费者语义为至少一次。离线期间逐笔事件的完整恢复不作保证。
+这是单主机 Compose 部署，不提供高可用、跨主机调度或 broker 故障切换保证。RabbitMQ durable queue 与持久化消息不等于 exactly-once；消费者语义为至少一次。离线期间逐笔事件的完整恢复不作保证。AmazingData 查询 API 不受模式开关影响。
 
 在支持 Docker Compose 的环境运行真实端到端验证：
 
@@ -41,20 +43,4 @@ uv sync --frozen --no-dev
 uv run --no-sync python scripts/compose-market-data-e2e.py
 ```
 
-Podman 用户可指定 Compose 命令：
-
-```sh
-A500_COMPOSE_COMMAND="podman compose" uv run --no-sync python scripts/compose-market-data-e2e.py
-```
-
-rootless Podman 首次启动 RabbitMQ 若报告 `.erlang.cookie: eacces`，先按 RabbitMQ 镜像的 UID/GID 修正该 Compose 项目卷权限，再重跑 E2E：
-
-```sh
-volume="<compose-project>_rabbitmq-data"
-mountpoint="$(podman volume inspect --format '{{.Mountpoint}}' "$volume")"
-podman unshare chown -R 100:101 "$mountpoint"
-```
-
-将 `<compose-project>` 替换为 Compose 项目名（通常是仓库目录名）。
-
-该脚本构建并启动 Compose 服务，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，并检查两个不同用途的消费者输出均收到该事件；清理时会移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 默认使用 `docker compose`，仍在 Docker runner 上运行同一脚本。
+该脚本以 TGW 模式启动 Compose，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，检查两种用途消费者均收到事件，并在清理时移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 使用同一脚本。

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -43,8 +44,14 @@ class RabbitMQPublisher:
         if callable(confirm_delivery):
             confirm_delivery()
 
-    def publish(self, event: MarketEvent) -> None:
+    def publish(
+        self, event: MarketEvent, *, replay: bool = False, warmup: bool = False
+    ) -> None:
         encoded = encode_market_event(event)
+        encoded["source"] = "replay" if replay else getattr(event, "source", None)
+        if replay:
+            encoded["replay_time"] = datetime.now().astimezone().isoformat()
+            encoded["warmup"] = warmup
         self._channel.basic_publish(
             exchange=self._exchange,
             routing_key=(
