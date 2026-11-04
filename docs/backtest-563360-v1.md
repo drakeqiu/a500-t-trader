@@ -144,26 +144,27 @@ uv run python -m a500_t_trader intraday-compare-563360 \
 2. The corrected replay completed 23,580 decision bars (2024-10-18 14:00 through 2026-10-28 14:55) after 180 warm-up bars, starting with ¥500,000 cash and 0 holdings. Data SHA-256: `2c37f69cb258699b62b5613b9513915ac4b104c116c987db6d9a48f58c5d6a25`; strategy source SHA-256: `769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6`; replay source SHA-256 at replay execution: `780df2d08578b0bf9b991db9e22d7db4ea66036a67170b552d53e6b41334d87c`; account simulator SHA-256: `4226f2b6503e31c3810cb0853e458f40d61cc53cce1d3b0098067a664513f81a`. Assumptions: next-bar open, 0 bps slippage, 0.5 bps commission, ¥0.1 per-fill minimum commission, 2 bps modeled impact cost, 2% OHLCV participation, and one-bar order lifetime.
 3. Result: final cash/NAV ¥499,931.904750, 0 holdings, net P&L -¥68.095250 (-0.01361905%), and maximum bar-close drawdown 0.2688617%. Net-return gate fails; drawdown gate passes. There are zero closed pairs, so paired average P&L and PF are undefined; the ≥100 pair requirement fails.
 
-Risk exits now have a separate `closed_exit_trades` / `realized_exit_net_pnl` / `average_exit_net_pnl` / `exit_profit_factor` ledger, FIFO-matched to simulator inventory and net of fill fees. This is deliberately excluded from strategy `closed_pairs` and their certification PF: forced liquidation is not a completed sell-and-buyback pair. The 0-pair result is therefore not evidence of missing account-level P&L; it means no qualifying strategy pairs closed. The new exit ledger makes risk-exit realization visible but does not change the 0-pair certification result or establish why BUYBACK was absent.
 4. The registered chronological 70/30 split now runs on trading-day boundaries with fresh accounts and 180-bar warmup: training 344 days (2024-10-18–2026-03-19; 16,476 decision bars), test 148 days (2026-03-20–2026-10-28; 7,104 bars). Both segments have zero closed pairs; both PF gates are undefined and fail to demonstrate a pass. This meets the split-computation criterion, not the registered sample/PF gates.
 5. The five expanding walk-forward test windows remain: 2025-10-23–2025-12-30, 2025-12-31–2026-03-19, 2026-03-20–2026-06-02, 2026-06-03–2026-08-11, and 2026-08-12–2026-10-28. Each has zero closed pairs; PF is undefined, not a pass. Exact fold metrics are in `data/backtests/563360_issue85_replay.json.gz`.
 
-   | Full-data stress                   | Threshold |   Net P&L (¥) | Closed pairs | Gate result        |
-   | ---------------------------------- | --------: | ------------: | -----------: | ------------------ |
-   | 1.5× modeled execution-cost stress |         — |  -103.7230525 |            0 | Fail; PF undefined |
-   | Buy −10%                           |        65 | -3,868.844970 |            0 | Fail; PF undefined |
-   | Buy +10%                           |        79 |   -276.150720 |            0 | Fail; PF undefined |
-   | Sell −10%                          |        61 |    -68.095250 |            0 | Fail; PF undefined |
-   | Sell +10%                          |        75 |    -68.095250 |            0 | Fail; PF undefined |
-   | Take-profit −10%                   |        54 |     79.386375 |            0 | Fail; PF undefined |
-   | Take-profit +10%                   |        66 |    777.449410 |            0 | Fail; PF undefined |
-   | Buyback −10%                       |        61 |    -68.095250 |            0 | Fail; PF undefined |
-   | Buyback +10%                       |        75 |    -68.095250 |            0 | Fail; PF undefined |
-   | Direction delta −10%               |        11 |    -68.095250 |            0 | Fail; PF undefined |
-   | Direction delta +10%               |        13 |    -68.095250 |            0 | Fail; PF undefined |
+| Full-data stress                   | Threshold |   Net P&L (¥) | Closed pairs | Gate result        |
+| ---------------------------------- | --------: | ------------: | -----------: | ------------------ |
+| 1.5× modeled execution-cost stress |         — |  -103.7230525 |            0 | Fail; PF undefined |
+| Buy −10%                           |        65 | -3,868.844970 |            0 | Fail; PF undefined |
+| Buy +10%                           |        79 |   -276.150720 |            0 | Fail; PF undefined |
+| Sell −10%                          |        61 |    -68.095250 |            0 | Fail; PF undefined |
+| Sell +10%                          |        75 |    -68.095250 |            0 | Fail; PF undefined |
+| Take-profit −10%                   |        54 |     79.386375 |            0 | Fail; PF undefined |
+| Take-profit +10%                   |        66 |    777.449410 |            0 | Fail; PF undefined |
+| Buyback −10%                       |        61 |    -68.095250 |            0 | Fail; PF undefined |
+| Buyback +10%                       |        75 |    -68.095250 |            0 | Fail; PF undefined |
+| Direction delta −10%               |        11 |    -68.095250 |            0 | Fail; PF undefined |
+| Direction delta +10%               |        13 |    -68.095250 |            0 | Fail; PF undefined |
 
 The 1.5× stress scales commission, minimum commission, modeled impact and the slippage input (which remains zero). The 0.02% per-side impact is a cost-grid assumption only; it is not applied again to simulated fill prices and is not empirical impact evidence. Threshold perturbations are not tuned post hoc; even the two positive-net runs have zero closed pairs and fail the registered sample/PF criteria. 6. **Not certified.** The user waived the complete corporate-action ledger/treatment audit and broker-authenticated realized execution/impact evidence as prerequisites because the official systems are inaccessible; this is a scope decision, not evidence that the risks do not exist. The previously missing 2026-04-20 limit band is independently derived from SSE's 2026-04-17 close and the published 10% limit/¥0.001 tick rules, documented below. The modeled spread-eligibility blocker is resolved using the user-approved OHLCV proxy, not bid/ask evidence. Certification remains blocked by unproven source-exact V1 parity, negative net return, zero closed pairs, and zero-pair sample/PF gates; Issue #85 remains open.
 Historical 5-minute bars contain OHLCV, not quote-level bid/ask. AmazingData documents historical snapshot and K-line queries but does not enumerate bid1/ask1 fields or guarantee 563360-specific historical quote coverage. The unauthenticated provider attempts for 2026-04-20 failed during initialization and returned no rows. By the user's decision, the replay instead uses a declared OHLCV spread proxy; this resolves the modeled-replay eligibility gap only and does not provide quote or execution evidence.
+
+Risk exits now have a separate `closed_exit_trades` / `realized_exit_net_pnl` / `average_exit_net_pnl` / `exit_profit_factor` ledger, FIFO-matched to simulator inventory and net of fill fees. This is deliberately excluded from strategy `closed_pairs` and their certification PF: forced liquidation is not a completed sell-and-buyback pair. The 0-pair result is therefore not evidence of missing account-level P&L; it means no qualifying strategy pairs closed. The new exit ledger makes risk-exit realization visible but does not change the 0-pair certification result or establish why BUYBACK was absent.
 
 V1 account sizing is constrained per order to the minimum of risk quantity, 8% NAV notional, position headroom up to 65% NAV, trading-sleeve headroom up to 25% NAV, 2% of last completed bar volume, available cash above the 35% NAV reserve, and any pair-specific buyback remainder, then floored to 100-share lots. Pending buys and reserved cash consume capacity. Fees are reserved in affordability checks; fills recheck position/trading capacity and affordability. The ordinary sell floor remains 30% NAV and the initial protected holding remains 70% of the starting inventory, subject to T+1 sellability.
 
