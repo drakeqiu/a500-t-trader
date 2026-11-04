@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,7 +21,12 @@ URL = "amqp://guest:guest@localhost:5672/%2F"
 
 def main() -> None:
     environment = {**os.environ, "A500_RABBITMQ_URL": URL}
-    subprocess.run([*COMPOSE, "up", "-d", "--build", "--wait"], cwd=ROOT, env=environment, check=True)
+    subprocess.run(
+        [*COMPOSE, "up", "-d", "--build", "--wait"],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
     try:
         connection = None
         for _ in range(60):
@@ -46,11 +51,22 @@ def main() -> None:
                         break
                     except pika.exceptions.ChannelClosedByBroker:
                         if time.monotonic() >= deadline:
-                            raise RuntimeError(f"consumer queue {queue} was not declared")
+                            raise RuntimeError(
+                                f"consumer queue {queue} was not declared"
+                            ) from None
                         time.sleep(1)
         publisher = RabbitMQPublisher(url=URL)
         try:
-            publisher.publish(Trade("563360", datetime.now(timezone.utc), price=Decimal("1.25"), quantity=100, amount=Decimal("125"), source="compose-e2e"))
+            publisher.publish(
+                Trade(
+                    "563360",
+                    datetime.now(timezone.UTC),
+                    price=Decimal("1.25"),
+                    quantity=100,
+                    amount=Decimal("125"),
+                    source="compose-e2e",
+                )
+            )
         finally:
             publisher.close()
         _verify_latest_state_backlog(connection)
@@ -59,7 +75,20 @@ def main() -> None:
             output = ""
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
-                result = subprocess.run([*COMPOSE, "logs", "--no-log-prefix", "--since=1m", f"consumer-{purpose}"], cwd=ROOT, env=environment, text=True, capture_output=True, check=True)
+                result = subprocess.run(
+                    [
+                        *COMPOSE,
+                        "logs",
+                        "--no-log-prefix",
+                        "--since=1m",
+                        f"consumer-{purpose}",
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
                 output = result.stdout
                 events = []
                 for line in output.splitlines():
@@ -72,10 +101,22 @@ def main() -> None:
                 if events:
                     break
                 time.sleep(1)
-            if not any(item.get("event_type") == "trade" and item.get("symbol") == "563360" and item.get("data", {}).get("quantity") == 100 for item in events):
-                raise AssertionError(f"schema-valid event was not routed to {purpose}: {output}")
+            if not any(
+                item.get("event_type") == "trade"
+                and item.get("symbol") == "563360"
+                and item.get("data", {}).get("quantity") == 100
+                for item in events
+            ):
+                raise AssertionError(
+                    f"schema-valid event was not routed to {purpose}: {output}"
+                )
     finally:
-        subprocess.run([*COMPOSE, "down", "--volumes", "--remove-orphans"], cwd=ROOT, env=environment, check=True)
+        subprocess.run(
+            [*COMPOSE, "down", "--volumes", "--remove-orphans"],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
 
 
 
@@ -90,7 +131,7 @@ def _verify_latest_state_backlog(connection: pika.BlockingConnection) -> None:
     consumer.configure()
     publisher = RabbitMQPublisher(url=URL)
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(datetime.UTC)
         publisher.publish(
             Snapshot(
                 "563360", now, now, last_price=Decimal("1.10"), source="old-snapshot"
