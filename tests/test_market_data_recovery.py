@@ -3,6 +3,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar, Snapshot, Trade
+from a500_t_trader.market_data.events import MarketEvent
 from a500_t_trader.market_data.recovery import LatestStatePublisher
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -56,9 +57,9 @@ def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> Non
 
     class Broker:
         available = False
-        messages = []
+        messages: list[MarketEvent] = []
 
-        def publish(self, event):
+        def publish(self, event: MarketEvent) -> None:
             if not self.available:
                 raise ConnectionError("broker unavailable")
             self.messages.append(event)
@@ -84,7 +85,7 @@ def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> Non
 def test_recovery_state_is_bounded_by_configured_symbols_and_process_lifetime() -> None:
 
     class Broker:
-        def publish(self, event):
+        def publish(self, event: MarketEvent) -> None:
             raise ConnectionError("broker unavailable")
 
     first_process = LatestStatePublisher(Broker(), symbols=("563360",))

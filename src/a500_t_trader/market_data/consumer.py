@@ -86,7 +86,7 @@ class RabbitMQConsumer:
         self.exchange = exchange
         self._connection: Any | None = None
         if channel is None:
-            import pika
+            import pika  # type: ignore[import-untyped]
 
             rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
             if not rabbit_url:

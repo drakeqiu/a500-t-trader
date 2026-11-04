@@ -4,7 +4,7 @@ from threading import Event
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data import MinuteBar, Snapshot, Trade
-from a500_t_trader.market_data.events import encode_market_event
+from a500_t_trader.market_data.events import MarketEvent, encode_market_event
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -56,15 +56,12 @@ def events() -> tuple[Snapshot, MinuteBar, Trade]:
 
 def test_normalized_events_include_version_event_time_and_nonunique_source_id() -> None:
     timestamp = events()[0].timestamp
-    expected_types = ("snapshot", "minute_bar", "trade")
-    expected_prices = ("1.2345", "1.25", "1.25")
-    for event, event_type, price_field, price in zip(
-        events(),
-        expected_types,
-        ("last_price", "close", "price"),
-        expected_prices,
-        strict=True,
-    ):
+    cases: tuple[tuple[MarketEvent, str, str, str], ...] = (
+        (events()[0], "snapshot", "last_price", "1.2345"),
+        (events()[1], "minute_bar", "close", "1.25"),
+        (events()[2], "trade", "price", "1.25"),
+    )
+    for event, event_type, price_field, price in cases:
         encoded = encode_market_event(event)
         assert encoded["schema_version"] == 1
         assert encoded["event_type"] == event_type
@@ -116,7 +113,6 @@ def test_collector_retries_factory_and_publishes_events_to_consumer() -> None:
         CollectorConfig,
         MarketDataCollector,
     )
-    from a500_t_trader.market_data.events import MarketEvent
 
     stop = Event()
     attempts = 0
