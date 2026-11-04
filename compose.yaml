@@ -13,6 +13,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
 
   consumer-signals:
+    image: a500-market-data-consumer:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -25,6 +26,7 @@ services:
     restart: unless-stopped
 
   consumer-audit:
+    image: a500-market-data-consumer:local
     build:
       context: .
       dockerfile: Dockerfile

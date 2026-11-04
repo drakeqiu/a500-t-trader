@@ -52,12 +52,19 @@ def main() -> None:
             output = ""
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
-                result = subprocess.run([*COMPOSE, "logs", "--since=1m", f"consumer-{purpose}"], cwd=ROOT, env=environment, text=True, capture_output=True, check=True)
+                result = subprocess.run([*COMPOSE, "logs", "--no-log-prefix", "--since=1m", f"consumer-{purpose}"], cwd=ROOT, env=environment, text=True, capture_output=True, check=True)
                 output = result.stdout
-                if '"source":"compose-e2e"' in output:
+                events = []
+                for line in output.splitlines():
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict) and item.get("source") == "compose-e2e":
+                        events.append(item)
+                if events:
                     break
                 time.sleep(1)
-            events = [json.loads(line) for line in output.splitlines() if '"source":"compose-e2e"' in line]
             if not any(item.get("event_type") == "trade" and item.get("symbol") == "563360" and item.get("data", {}).get("quantity") == 100 for item in events):
                 raise AssertionError(f"schema-valid event was not routed to {purpose}: {output}")
     finally:
