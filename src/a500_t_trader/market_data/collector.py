@@ -10,7 +10,10 @@ from typing import Any, Literal, Protocol
 from .events import MarketEvent
 
 ConnectionState = Literal["disconnected", "connected", "stopped"]
-SubscriptionState = Literal["idle", "subscribed", "failed", "stopped"]
+
+SubscriptionState = Literal[
+    "idle", "awaiting_data", "subscribed", "failed", "stopped"
+]
 
 StatusCallback = Callable[[ConnectionState, SubscriptionState], None]
 
@@ -70,6 +73,7 @@ class MarketDataCollector:
         self._on_status = on_status
         self.connection_state: ConnectionState = "disconnected"
         self.subscription_state: SubscriptionState = "idle"
+        self._received_market_event = False
         self.last_error: str | None = None
 
     def run(self, stop: Event) -> None:
@@ -84,6 +88,7 @@ class MarketDataCollector:
                     raise ConnectionError(
                         "connection factory returned without confirmed connection"
                     )
+                self._received_market_event = False
                 self._set_status("connected", "idle")
                 self.last_error = None
                 for symbol in self._config.symbols:
@@ -95,7 +100,10 @@ class MarketDataCollector:
                                 self._publish,
                             )
                         )
-                self._set_status("connected", "subscribed")
+                self._set_status(
+                    "connected",
+                    "subscribed" if self._received_market_event else "awaiting_data",
+                )
                 while not stop.is_set():
                     if not _is_connected(connection):
                         self._set_status("disconnected", "failed")
@@ -150,6 +158,9 @@ class MarketDataCollector:
 
     def _publish(self, event: MarketEvent) -> None:
         self._publisher.publish(event)
+        self._received_market_event = True
+        if self.subscription_state == "awaiting_data":
+            self._set_status(self.connection_state, "subscribed")
 
 
 def _is_connected(connection: PushConnection) -> bool:

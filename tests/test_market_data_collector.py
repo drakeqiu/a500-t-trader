@@ -160,3 +160,66 @@ def test_collector_retries_factory_and_publishes_events_to_consumer() -> None:
     assert ("connected", "idle") in states
     assert ("connected", "subscribed") in states
     assert collector.subscription_state == "stopped"
+
+
+def test_collector_reports_stream_recovered_only_after_first_market_callback() -> None:
+    from collections.abc import Callable
+
+    from a500_t_trader.market_data.collector import (
+        CollectorConfig,
+        MarketDataCollector,
+    )
+    from a500_t_trader.market_data.events import MarketEvent
+
+    stop = Event()
+    states: list[tuple[str, str]] = []
+    callbacks: list[Callable[[MarketEvent], None]] = []
+    status_when_published: list[str] = []
+
+    class Subscription:
+        error = None
+
+    class Connection:
+        connected = True
+
+        def subscribe(
+            self,
+            symbol: str,
+            event_type: str,
+            callback: Callable[[MarketEvent], None],
+        ) -> Subscription:
+            callbacks.append(callback)
+            return Subscription()
+
+        def close(self) -> None:
+            self.connected = False
+
+    class Broker:
+        def publish(self, event: MarketEvent) -> None:
+            status_when_published.append(collector.subscription_state)
+            stop.set()
+
+    def wait(event: Event, seconds: float) -> bool:
+        if callbacks:
+            callbacks[0](events()[0])
+        return event.wait(0)
+
+    collector = MarketDataCollector(
+        lambda config: Connection(),
+        CollectorConfig(
+            ("563360",),
+            retry_initial_seconds=0.1,
+            retry_max_seconds=0.2,
+            poll_interval_seconds=0.01,
+        ),
+        Broker(),
+        wait=wait,
+        on_status=lambda connection, subscription: states.append(
+            (connection, subscription)
+        ),
+    )
+    collector.run(stop)
+
+    assert ("connected", "awaiting_data") in states
+    assert status_when_published == ["awaiting_data"]
+    assert ("connected", "subscribed") in states

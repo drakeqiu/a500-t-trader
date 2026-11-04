@@ -63,14 +63,14 @@ def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> N
     consumer = MarketEventConsumer(
         "trades", observed.append, max_age=timedelta(seconds=5), clock=lambda: now
     )
-    channel = type(
-        "Channel",
-        (),
-        {
-            "basic_ack": lambda self, tag: None,
-            "basic_nack": lambda self, tag, requeue: None,
-        },
-    )()
+    class Channel:
+        def basic_ack(self, *, delivery_tag: int) -> None:
+            pass
+
+        def basic_nack(self, *, delivery_tag: int, requeue: bool) -> None:
+            pass
+
+    channel = Channel()
     consumer.handle_delivery(channel, 3, stale)
     assert observed == []
 
