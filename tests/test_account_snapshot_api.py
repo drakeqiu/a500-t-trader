@@ -4,8 +4,8 @@ import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from a500_t_trader.account_snapshot_api import AccountSnapshotStore, create_app
 

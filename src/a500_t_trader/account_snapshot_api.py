@@ -9,6 +9,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
@@ -32,7 +33,6 @@ from .market_data import (
     MarketDataService,
     normalize_symbol,
 )
-
 
 CLASSIFICATION = "user-entered; not broker-verified"
 
