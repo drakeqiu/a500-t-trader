@@ -223,6 +223,139 @@ def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
         assert client.post(f"{url}/confirm", headers=alice).status_code == 404
 
 
+def test_account_nav_requires_auth_and_returns_unavailable_without_snapshot(
+    tmp_path: Path,
+) -> None:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
+        assert client.get("/v1/account-nav").status_code == 401
+        response = client.get(
+            "/v1/account-nav?subject=bob",
+            headers={"Authorization": "Bearer alice-token"},
+        )
+    assert response.status_code == 404
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["nav"] is None
+
+
+def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+
+    database = tmp_path / "accounts.sqlite3"
+    with TestClient(
+        create_app(database, TestAuthenticator())
+    ) as client:
+        store = client.app.state.account_snapshot_store
+        store.save_snapshot(
+            "alice",
+            {
+                "as_of": datetime.now(UTC).isoformat(),
+                "holdings": {"510300": 0},
+                "protected_floor": {"510300": 0},
+                "sellable": {"510300": 0},
+                "cost_basis": {},
+                "available_cash": "125.5000",
+            },
+        )
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "available"
+    assert response.json()["nav"] == "125.5000"
+    assert response.json()["classification"] == "user-entered; not broker-verified"
+    assert response.json()["holdings"] == []
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_account_nav_marks_stale_or_future_snapshot_unavailable(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    store = AccountSnapshotStore(database)
+    with TestClient(
+        create_app(database, TestAuthenticator())
+    ) as client:
+        for as_of in (
+            "2026-11-05T11:00:00+08:00",
+            "2026-11-05T12:01:00+08:00",
+        ):
+            store.save_snapshot(
+                "alice",
+                {
+                    "as_of": as_of,
+                    "holdings": {},
+                    "protected_floor": {},
+                    "sellable": {},
+                    "cost_basis": {},
+                    "available_cash": "8.25",
+                },
+            )
+            response = client.get(
+                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+            )
+            assert response.status_code == 200
+            assert response.json()["status"] == "unavailable"
+            assert response.json()["nav"] is None
+
+
+def test_account_nav_read_does_not_change_snapshot_or_history(tmp_path: Path) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    store = AccountSnapshotStore(database)
+    snapshot = {
+        "as_of": "2026-11-05T11:59:00+08:00",
+        "holdings": {},
+        "protected_floor": {},
+        "sellable": {},
+        "cost_basis": {},
+        "available_cash": "42.00",
+    }
+    store.save_snapshot("alice", snapshot)
+    before = store.get_snapshot("alice"), store.history_for_subject("alice")
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+    assert (store.get_snapshot("alice"), store.history_for_subject("alice")) == before
+
+
+def test_account_nav_zero_holdings_requires_no_quotes(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from a500_t_trader.market_data import MarketDataService
+
+    class NoQuotes:
+        def get_snapshot(self, symbol: str) -> None:
+            raise AssertionError(f"quote requested for zero holding: {symbol}")
+
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": datetime.now(UTC).isoformat(),
+            "holdings": {"510300": 0},
+            "protected_floor": {"510300": 0},
+            "sellable": {"510300": 0},
+            "cost_basis": {},
+            "available_cash": "125.5000",
+        },
+    )
+    with TestClient(
+        create_app(
+            database,
+            TestAuthenticator(),
+            market_data=MarketDataService(NoQuotes()),
+        )
+    ) as client:
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+    assert response.json()["nav"] == "125.5000"
+
+
 def test_trade_import_expired_confirmed_batch_retains_result_without_records(
     tmp_path: Path,
 ) -> None:

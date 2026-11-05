@@ -9,8 +9,7 @@ import re
 import sqlite3
 import time
 import uuid
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Protocol, cast
@@ -28,10 +27,10 @@ from .account_ledger import (
     _same_trade,
     preview_galaxy_fills,
 )
-from .market_data import normalize_symbol
+from .market_data import MarketDataService, normalize_symbol
+
 
 CLASSIFICATION = "user-entered; not broker-verified"
-
 
 class Authenticator(Protocol):
     def __call__(self, token: str) -> str: ...
@@ -455,6 +454,8 @@ TRADE_IMPORT_BATCH_TTL_SECONDS = 15 * 60
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
+    *,
+    market_data: MarketDataService | None = None,
 ) -> FastAPI:
     """Create the account read API with replaceable auth and isolated storage."""
     path = database or os.environ.get("A500_ACCOUNT_DATABASE", "accounts.sqlite3")
@@ -464,6 +465,7 @@ def create_app(
     app = FastAPI(title="A500 account snapshot API")
     app.state.account_snapshot_store = store
     app.state.account_ledger = ledger
+    app.state.market_data = market_data
     with sqlite3.connect(str(path)) as db:
         db.execute(
             """CREATE TABLE IF NOT EXISTS trade_import_batches (
@@ -605,6 +607,61 @@ def create_app(
                 (json.dumps(result), batch_id),
             )
         return JSONResponse(result)
+
+    @app.get("/v1/account-nav")
+    def get_account_nav(
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        now = datetime.now(UTC)
+        snapshot = store.get_snapshot(subject)
+        if snapshot is None:
+            return JSONResponse(
+                {
+                    "status": "unavailable",
+                    "nav": None,
+                    "reason": "account_snapshot_missing",
+                },
+                status_code=404,
+                headers={"Cache-Control": "no-store"},
+            )
+        as_of = datetime.fromisoformat(
+            str(snapshot["as_of"]).replace("Z", "+00:00")
+        ).astimezone(UTC)
+        unavailable: str | None = None
+        if as_of > now:
+            unavailable = "account_snapshot_future"
+        elif now - as_of > timedelta(minutes=30):
+            unavailable = "account_snapshot_stale"
+        elif any(
+            int(quantity) != 0
+            for quantity in cast(dict[str, int], snapshot["holdings"]).values()
+        ):
+            unavailable = "nonzero_holdings_not_valued"
+        if unavailable is not None:
+            result = {
+                "status": "unavailable",
+                "currency": "CNY",
+                "nav": None,
+                "available_cash": snapshot["available_cash"],
+                "account_snapshot_as_of": snapshot["as_of"],
+                "calculated_at": now.isoformat(),
+                "holdings": [],
+                "classification": CLASSIFICATION,
+                "reason": unavailable,
+            }
+        else:
+            result = {
+                "status": "available",
+                "currency": "CNY",
+                "nav": str(Decimal(str(snapshot["available_cash"]))),
+                "available_cash": snapshot["available_cash"],
+                "account_snapshot_as_of": snapshot["as_of"],
+                "calculated_at": now.isoformat(),
+                "holdings": [],
+                "classification": CLASSIFICATION,
+            }
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(
