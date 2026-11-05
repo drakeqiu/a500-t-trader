@@ -116,13 +116,18 @@ class AccountSnapshotStore:
         ]
 
     def save_snapshot(
-        self, subject: str, snapshot: dict[str, object], *, updated_at: str | None = None
+        self,
+        subject: str,
+        snapshot: dict[str, object],
+        *,
+        updated_at: str | None = None,
     ) -> None:
         """Persist a snapshot for service integration and test setup."""
         written_at = updated_at or datetime.now(UTC).isoformat()
         with sqlite3.connect(self.path) as db:
             db.execute(
-                "INSERT INTO account_snapshot_current(subject,snapshot_json,updated_at) "
+                "INSERT INTO account_snapshot_current("
+                "subject,snapshot_json,updated_at) "
                 "VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET "
                 "snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at",
                 (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
@@ -137,12 +142,13 @@ class AccountSnapshotStore:
         if_none_match: str | None,
         updated_at: str | None = None,
     ) -> tuple[bool, dict[str, object], str]:
-        """Conditionally replace current state and append its audit record atomically."""
+        """Conditionally replace the current snapshot and append its audit record."""
         written_at = updated_at or datetime.now(UTC).isoformat()
         with sqlite3.connect(self.path, timeout=30) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                "SELECT snapshot_json,updated_at FROM account_snapshot_current WHERE subject=?",
+                "SELECT snapshot_json,updated_at "
+                "FROM account_snapshot_current WHERE subject=?",
                 (subject,),
             ).fetchone()
             current = None
@@ -158,22 +164,35 @@ class AccountSnapshotStore:
                     raise HTTPException(status_code=412, detail="ETag does not match")
             else:
                 if if_match is not None:
-                    raise HTTPException(status_code=412, detail="Account snapshot does not exist")
+                    raise HTTPException(
+                        status_code=412, detail="Account snapshot does not exist"
+                    )
                 if if_none_match is None:
-                    raise HTTPException(status_code=428, detail="If-None-Match: * required")
+                    raise HTTPException(
+                        status_code=428, detail="If-None-Match: * required"
+                    )
                 if if_none_match != "*":
-                    raise HTTPException(status_code=412, detail="If-None-Match must be *")
+                    raise HTTPException(
+                        status_code=412, detail="If-None-Match must be *"
+                    )
             db.execute(
-                "INSERT INTO account_snapshot_current(subject,snapshot_json,updated_at) "
+                "INSERT INTO account_snapshot_current("
+                "subject,snapshot_json,updated_at) "
                 "VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET "
                 "snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at",
                 (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
             )
             db.execute(
-                "INSERT INTO account_snapshot_history(subject,snapshot_json,as_of,updated_at,"
-                "classification) VALUES(?,?,?,?,?)",
-                (subject, json.dumps(snapshot, separators=(",", ":")), str(snapshot["as_of"]),
-                 written_at, CLASSIFICATION),
+                "INSERT INTO account_snapshot_history("
+                "subject,snapshot_json,as_of,updated_at,classification) "
+                "VALUES(?,?,?,?,?)",
+                (
+                    subject,
+                    json.dumps(snapshot, separators=(",", ":")),
+                    str(snapshot["as_of"]),
+                    written_at,
+                    CLASSIFICATION,
+                ),
             )
             result = dict(snapshot)
             result["updated_at"] = written_at
@@ -182,7 +201,12 @@ class AccountSnapshotStore:
 
 
 _SNAPSHOT_FIELDS = {
-    "as_of", "holdings", "protected_floor", "sellable", "cost_basis", "available_cash"
+    "as_of",
+    "holdings",
+    "protected_floor",
+    "sellable",
+    "cost_basis",
+    "available_cash",
 }
 _RFC3339 = re.compile(
     r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:(?P<second>\d{2})(?:\.\d+)?"
@@ -190,13 +214,33 @@ _RFC3339 = re.compile(
 )
 _LEAP_SECOND_DATES = frozenset(
     {
-        "1972-06-30", "1972-12-31", "1973-12-31", "1974-12-31",
-        "1975-12-31", "1976-12-31", "1977-12-31", "1978-12-31",
-        "1979-12-31", "1981-06-30", "1982-06-30", "1983-06-30",
-        "1985-06-30", "1987-12-31", "1989-12-31", "1990-12-31",
-        "1992-06-30", "1993-06-30", "1994-06-30", "1995-12-31",
-        "1997-06-30", "1998-12-31", "2005-12-31", "2008-12-31",
-        "2012-06-30", "2015-06-30", "2016-12-31",
+        "1972-06-30",
+        "1972-12-31",
+        "1973-12-31",
+        "1974-12-31",
+        "1975-12-31",
+        "1976-12-31",
+        "1977-12-31",
+        "1978-12-31",
+        "1979-12-31",
+        "1981-06-30",
+        "1982-06-30",
+        "1983-06-30",
+        "1985-06-30",
+        "1987-12-31",
+        "1989-12-31",
+        "1990-12-31",
+        "1992-06-30",
+        "1993-06-30",
+        "1994-06-30",
+        "1995-12-31",
+        "1997-06-30",
+        "1998-12-31",
+        "2005-12-31",
+        "2008-12-31",
+        "2012-06-30",
+        "2015-06-30",
+        "2016-12-31",
     }
 )
 
@@ -209,7 +253,9 @@ def _valid_rfc3339_timestamp(value: str) -> bool:
     if leap_second:
         value = value.replace(":60", ":59", 1)
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00").replace("z", "+00:00"))
+        parsed = datetime.fromisoformat(
+            value.replace("Z", "+00:00").replace("z", "+00:00")
+        )
         if parsed.utcoffset() is None:
             return False
         if not leap_second:
@@ -221,8 +267,10 @@ def _valid_rfc3339_timestamp(value: str) -> bool:
             and utc_next_second.second == 59
             and utc_next_second.date().isoformat() in _LEAP_SECOND_DATES
         )
-    except (ValueError, OverflowError):
+    except ValueError, OverflowError:
         return False
+
+
 _DECIMAL = re.compile(r"^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
@@ -301,7 +349,11 @@ def _validate_snapshot(value: object) -> dict[str, object]:
                 ) from exc
             if code in normalized:
                 raise _SnapshotValidationError(f"{name}.{symbol}", "symbol_collision")
-            if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
+            if (
+                not isinstance(quantity, int)
+                or isinstance(quantity, bool)
+                or quantity < 0
+            ):
                 raise _SnapshotValidationError(f"{name}.{symbol}", "invalid_quantity")
             normalized[code] = quantity
         return normalized
@@ -375,6 +427,8 @@ def _authenticated_subject(auth: Authenticator, authorization: str | None) -> st
             detail="Invalid bearer credentials",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
@@ -422,6 +476,8 @@ def create_app(
         created, saved, etag = store.put_snapshot(
             subject, validated, if_match=if_match, if_none_match=if_none_match
         )
-        return JSONResponse(saved, status_code=201 if created else 200, headers={"ETag": etag})
+        return JSONResponse(
+            saved, status_code=201 if created else 200, headers={"ETag": etag}
+        )
 
     return app
