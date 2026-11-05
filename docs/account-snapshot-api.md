@@ -19,19 +19,19 @@ A500_OIDC_JWKS_URI=https://identity.example.internal/.well-known/jwks.json
 A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
 
-未提供有效 OIDC 配置时应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；测试可通过 `create_app(database, authenticator)` 使用临时数据库与确定性身份验证替身。
+未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
 
-## 当前净资产（设计契约）
+## 当前净资产
 
-`GET /v1/account-nav` 根据当前认证主体的账户快照和行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`。
+`GET /v1/account-nav` 根据当前认证主体的账户快照与行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`，响应标记 `status: unavailable` 且 `nav: null`。
 
-计算公式为 `available_cash + Σ(持仓数量 × 有效行情价)`，货币为 CNY。保护底仓、可卖数量和成本基础不参与估值。使用 `Decimal` 等价的十进制定点运算，金额作为十进制字符串返回，不逐项舍入或强制保留两位小数。零数量持仓估值为零，不要求行情。
+计算公式为 `available_cash + Σ(持仓数量 × 有效行情价)`，货币为 CNY。保护底仓、可卖数量和成本基础不参与估值。零数量持仓估值为零，不要求行情。所有金额使用精确十进制运算并以十进制字符串返回；不逐项舍入或强制保留两位小数。
 
-行情通过现有请求/响应 `MarketDataService.get_snapshot(symbol)` 按持仓标的查询；不依赖推送行情的共享缓存。账户快照 `as_of` 及每只非零持仓的行情 `timestamp` 必须不晚于计算时刻且不超过 30 分钟；未来或过期时点、缺失/非正报价或行情源不可用，均使完整 NAV 不可用。收盘后的报价超过时效上限后不可用于当前 NAV。
+行情通过注入的请求/响应 `MarketDataService.get_snapshot(symbol)` 按每项非零持仓标的查询；不依赖推送行情的共享缓存。账户快照 `as_of` 及每项必需行情的 `timestamp` 必须不晚于计算时刻且不超过 30 分钟；恰好 30 分钟有效。未来或过期时点、缺失报价、报价能力不可用，均使完整 NAV 不可用。收盘后的报价超过时效上限后不可用于当前 NAV。
 
-若存在账户快照但无法完整估值，返回 `200`，`status` 为 `unavailable`、`nav` 为 `null`，并返回可用的逐标的估值明细及缺失/过期原因；不得将部分估值合计作为 NAV。完整估值时 `status` 为 `available`，`nav` 为完整合计。响应包含 `currency`、`available_cash`、账户 `as_of`、服务器 `calculated_at`、逐标的数量/价格/市值及行情 `timestamp`（可用时含 `received_at`），并标记 `user-entered; not broker-verified`。响应设置 `Cache-Control: no-store`。
+若存在账户快照但无法完整估值，返回 `200`，`status` 为 `unavailable`、`nav` 为 `null`，并以 `reason` 标示原因；`holdings` 为空，不暴露部分估值明细或部分合计。完整估值时 `status` 为 `available`，`nav` 为现金与全部非零持仓市值的合计。响应包含 `currency`、`available_cash`、账户 `as_of`、服务器 `calculated_at`、每项持仓的 `symbol`、`quantity`、`last_price`、`market_value` 和行情 `as_of`，并标记 `user-entered; not broker-verified`。响应设置 `Cache-Control: no-store`。
 
-此路由是已确认的 API 设计，尚未由现有实现提供。
+可用响应示例：
 
 ```json
 {
@@ -40,22 +40,35 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
   "nav": "1234.567",
   "available_cash": "500.00",
   "account_snapshot_as_of": "2026-11-05T10:00:00+08:00",
-  "calculated_at": "2026-11-05T10:05:00+08:00",
+  "calculated_at": "2026-11-05T10:05:00+00:00",
   "holdings": [
     {
       "symbol": "510300",
       "quantity": 100,
-      "price": "7.34567",
-      "market_value": "734.567",
-      "quote_timestamp": "2026-11-05T10:04:58+08:00",
-      "quote_received_at": "2026-11-05T10:04:59+08:00"
+      "last_price": "7.34567",
+      "market_value": "734.56700",
+      "as_of": "2026-11-05T10:04:58+08:00"
     }
   ],
   "classification": "user-entered; not broker-verified"
 }
 ```
 
-行情不可用时保持相同响应结构，将 `nav` 设为 `null`、`status` 设为 `unavailable`；无法估值的持仓明细使用 `null` 价格/市值并包含原因。账户快照不存在仍返回 `404`。
+不可用响应示例：
+
+```json
+{
+  "status": "unavailable",
+  "currency": "CNY",
+  "nav": null,
+  "available_cash": "500.00",
+  "account_snapshot_as_of": "2026-11-05T10:00:00+08:00",
+  "calculated_at": "2026-11-05T10:35:01+00:00",
+  "holdings": [],
+  "classification": "user-entered; not broker-verified",
+  "reason": "quote_stale"
+}
+```
 
 ---
 

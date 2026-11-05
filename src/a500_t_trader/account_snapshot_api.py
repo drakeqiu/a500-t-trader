@@ -10,8 +10,8 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Annotated, Protocol, cast
 
@@ -28,7 +28,11 @@ from .account_ledger import (
     _same_trade,
     preview_galaxy_fills,
 )
-from .market_data import normalize_symbol
+from .market_data import (
+    CapabilityUnavailableError,
+    MarketDataService,
+    normalize_symbol,
+)
 
 CLASSIFICATION = "user-entered; not broker-verified"
 
@@ -455,6 +459,8 @@ TRADE_IMPORT_BATCH_TTL_SECONDS = 15 * 60
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
+    *,
+    market_data: MarketDataService | None = None,
 ) -> FastAPI:
     """Create the account read API with replaceable auth and isolated storage."""
     path = database or os.environ.get("A500_ACCOUNT_DATABASE", "accounts.sqlite3")
@@ -464,6 +470,7 @@ def create_app(
     app = FastAPI(title="A500 account snapshot API")
     app.state.account_snapshot_store = store
     app.state.account_ledger = ledger
+    app.state.market_data = market_data
     with sqlite3.connect(str(path)) as db:
         db.execute(
             """CREATE TABLE IF NOT EXISTS trade_import_batches (
@@ -605,6 +612,115 @@ def create_app(
                 (json.dumps(result), batch_id),
             )
         return JSONResponse(result)
+
+    @app.get("/v1/account-nav")
+    def get_account_nav(
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        now = datetime.now(UTC)
+        snapshot = store.get_snapshot(subject)
+        if snapshot is None:
+            return JSONResponse(
+                {
+                    "status": "unavailable",
+                    "nav": None,
+                    "reason": "account_snapshot_missing",
+                },
+                status_code=404,
+                headers={"Cache-Control": "no-store"},
+            )
+        as_of = datetime.fromisoformat(
+            str(snapshot["as_of"]).replace("Z", "+00:00")
+        ).astimezone(UTC)
+        unavailable: str | None = None
+        if as_of > now:
+            unavailable = "account_snapshot_future"
+        elif now - as_of > timedelta(minutes=30):
+            unavailable = "account_snapshot_stale"
+
+        valued_holdings: list[dict[str, object]] = []
+        cash = Decimal(str(snapshot["available_cash"]))
+        total = cash
+        market_values: list[Decimal] = []
+        if unavailable is None:
+            for symbol, raw_quantity in sorted(
+                cast(dict[str, int], snapshot["holdings"]).items()
+            ):
+                quantity = int(raw_quantity)
+                if quantity == 0:
+                    continue
+                if market_data is None:
+                    unavailable = "market_data_unavailable"
+                    break
+                try:
+                    quote = market_data.get_snapshot(symbol)
+                except CapabilityUnavailableError:
+                    unavailable = "market_data_unavailable"
+                    break
+                if quote is None or quote.last_price is None:
+                    unavailable = "quote_missing"
+                    break
+                if not quote.last_price.is_finite() or quote.last_price <= 0:
+                    unavailable = "quote_invalid_price"
+                    break
+                quote_as_of = quote.timestamp.astimezone(UTC)
+                if quote_as_of > now:
+                    unavailable = "quote_future"
+                    break
+                if now - quote_as_of > timedelta(minutes=30):
+                    unavailable = "quote_stale"
+                    break
+                with localcontext() as context:
+                    context.prec = (
+                        len(quote.last_price.as_tuple().digits) + len(str(quantity)) + 1
+                    )
+                    market_value = Decimal(quantity) * quote.last_price
+                market_values.append(market_value)
+                valued_holdings.append(
+                    {
+                        "symbol": symbol,
+                        "quantity": quantity,
+                        "last_price": str(quote.last_price),
+                        "market_value": str(market_value),
+                        "as_of": quote.timestamp.isoformat(),
+                    }
+                )
+
+        if unavailable is None:
+            amounts = [cash, *market_values]
+            min_exponent = min(
+                cast(int, amount.as_tuple().exponent) for amount in amounts
+            )
+            max_adjusted = max(amount.adjusted() for amount in amounts)
+            with localcontext() as context:
+                context.prec = max_adjusted - min_exponent + len(str(len(amounts))) + 2
+                total = sum(amounts, Decimal(0))
+
+        if unavailable is not None:
+            result = {
+                "status": "unavailable",
+                "currency": "CNY",
+                "nav": None,
+                "available_cash": snapshot["available_cash"],
+                "account_snapshot_as_of": snapshot["as_of"],
+                "calculated_at": now.isoformat(),
+                "holdings": [],
+                "classification": CLASSIFICATION,
+                "reason": unavailable,
+            }
+        else:
+            result = {
+                "status": "available",
+                "currency": "CNY",
+                "nav": str(total),
+                "available_cash": snapshot["available_cash"],
+                "account_snapshot_as_of": snapshot["as_of"],
+                "calculated_at": now.isoformat(),
+                "holdings": valued_holdings,
+                "classification": CLASSIFICATION,
+            }
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(
