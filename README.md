@@ -14,7 +14,7 @@
 
 ## 使用
 
-详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。盘前计划与历史回测是独立能力；实时信号命令、YAML 配置及 V1 参数决策见 [ADR-0009](docs/adr/0009-live-signals-and-configurable-v1-parameters.md)。
+详细的安装、认证配置和依赖准备步骤见[项目依赖说明](docs/dependencies.md)与[使用指南](docs/user-guide.md)。盘前计划与历史回测是独立能力；实时信号命令、YAML 配置及 V1 参数决策见 [ADR-0009](docs/adr/0009-live-signals-and-configurable-v1-parameters.md)。异步信号监控 API 的部署边界和 HTTP/SSE 契约见[信号监控 API 指南](docs/signal-monitoring-api.md)。
 
 项目要求 Python 3.14。所有信号及数量建议均为参考信息，不是订单、成交或收益承诺。
 
