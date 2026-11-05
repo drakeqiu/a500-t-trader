@@ -1,0 +1,3 @@
+# Expose authenticated current account NAV
+
+Expose `GET /v1/account-nav` as a read-only projection of the authenticated user's account snapshot and current quote data. Calculate NAV from available cash and nonzero ETF holdings using the existing request/response market-data service, rather than introducing a push-fed shared quote cache; reject the complete valuation when the account snapshot or any required quote is future-dated or older than 30 minutes. Return an explicit unavailable representation instead of presenting a partial sum as NAV, and preserve exact decimal values to avoid hiding valuation or rounding assumptions.

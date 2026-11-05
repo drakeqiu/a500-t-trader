@@ -21,6 +21,44 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 
 未提供有效 OIDC 配置时应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；测试可通过 `create_app(database, authenticator)` 使用临时数据库与确定性身份验证替身。
 
+## 当前净资产（设计契约）
+
+`GET /v1/account-nav` 根据当前认证主体的账户快照和行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`。
+
+计算公式为 `available_cash + Σ(持仓数量 × 有效行情价)`，货币为 CNY。保护底仓、可卖数量和成本基础不参与估值。使用 `Decimal` 等价的十进制定点运算，金额作为十进制字符串返回，不逐项舍入或强制保留两位小数。零数量持仓估值为零，不要求行情。
+
+行情通过现有请求/响应 `MarketDataService.get_snapshot(symbol)` 按持仓标的查询；不依赖推送行情的共享缓存。账户快照 `as_of` 及每只非零持仓的行情 `timestamp` 必须不晚于计算时刻且不超过 30 分钟；未来或过期时点、缺失/非正报价或行情源不可用，均使完整 NAV 不可用。收盘后的报价超过时效上限后不可用于当前 NAV。
+
+若存在账户快照但无法完整估值，返回 `200`，`status` 为 `unavailable`、`nav` 为 `null`，并返回可用的逐标的估值明细及缺失/过期原因；不得将部分估值合计作为 NAV。完整估值时 `status` 为 `available`，`nav` 为完整合计。响应包含 `currency`、`available_cash`、账户 `as_of`、服务器 `calculated_at`、逐标的数量/价格/市值及行情 `timestamp`（可用时含 `received_at`），并标记 `user-entered; not broker-verified`。响应设置 `Cache-Control: no-store`。
+
+此路由是已确认的 API 设计，尚未由现有实现提供。
+
+```json
+{
+  "status": "available",
+  "currency": "CNY",
+  "nav": "1234.567",
+  "available_cash": "500.00",
+  "account_snapshot_as_of": "2026-11-05T10:00:00+08:00",
+  "calculated_at": "2026-11-05T10:05:00+08:00",
+  "holdings": [
+    {
+      "symbol": "510300",
+      "quantity": 100,
+      "price": "7.34567",
+      "market_value": "734.567",
+      "quote_timestamp": "2026-11-05T10:04:58+08:00",
+      "quote_received_at": "2026-11-05T10:04:59+08:00"
+    }
+  ],
+  "classification": "user-entered; not broker-verified"
+}
+```
+
+行情不可用时保持相同响应结构，将 `nav` 设为 `null`、`status` 设为 `unavailable`；无法估值的持仓明细使用 `null` 价格/市值并包含原因。账户快照不存在仍返回 `404`。
+
+---
+
 ## 成交文件预览
 
 `POST /v1/trade-imports/previews` 接受 multipart 字段 `file`，只支持现有银河证券 GB18030 CSV 表头。请求必须使用与账户快照相同的 Bearer 认证；所有权仅来自验证后的 OIDC `sub`。上传上限为 5 MiB、10,000 条记录，超限返回 `413`，不支持的格式返回 `422`。
