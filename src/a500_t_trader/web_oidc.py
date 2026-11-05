@@ -40,7 +40,9 @@ def create_web_router() -> APIRouter:
         client_id = os.environ.get("A500_OIDC_CLIENT_ID")
         audience = os.environ.get("A500_OIDC_AUDIENCE")
         if not issuer or not client_id or not audience:
-            raise HTTPException(status_code=503, detail="OIDC web client is not configured")
+            raise HTTPException(
+                status_code=503, detail="OIDC web client is not configured"
+            )
         return {
             "issuer": issuer.rstrip("/"),
             "clientId": client_id,

@@ -105,9 +105,7 @@ def test_account_snapshot_ownership_uses_verified_subject(
             headers={**alice, "If-None-Match": "*"},
         )
         assert created.status_code == 201
-        assert client.get(
-            "/v1/account-snapshot", headers=bob
-        ).status_code == 404
+        assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
         alice_snapshot = client.get("/v1/account-snapshot", headers=alice).json()
         assert alice_snapshot["holdings"] == {"510300": 100}
 
@@ -148,9 +146,7 @@ def test_account_api_rejects_invalid_signature(
     with _client(tmp_path, monkeypatch, trusted_public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
-            headers={
-                "Authorization": f"Bearer {_token(untrusted_private_key)}"
-            },
+            headers={"Authorization": f"Bearer {_token(untrusted_private_key)}"},
         )
     assert response.status_code == 401
 
@@ -196,6 +192,8 @@ def test_account_api_uses_shared_audience_configuration(
     monkeypatch.setenv("A500_OIDC_AUDIENCE", SHARED_AUDIENCE)
     monkeypatch.setenv("A500_OIDC_JWKS_URI", "https://jwks.test")
     assert OIDCAuthenticator.from_environment().audience == SHARED_AUDIENCE
+
+
 @pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
 def test_account_api_documentation_requires_valid_bearer_credentials(
     path: str,

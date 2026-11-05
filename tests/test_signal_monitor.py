@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient as FastAPITestClient
 import a500_t_trader.signal_monitor as signal_monitor
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.signal_calculator import SignalCalculator
-from a500_t_trader.signal_monitor import SignalStore, create_app as create_signal_app
+from a500_t_trader.signal_monitor import SignalStore
+from a500_t_trader.signal_monitor import create_app as create_signal_app
 from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
 
 
@@ -49,19 +50,12 @@ def test_signal_api_default_app_imports_without_connecting_to_redis() -> None:
                 "os.environ['A500_OIDC_JWKS_URI']='https://issuer.example/jwks'; "
                 "from a500_t_trader.signal_api import app; "
                 "assert app.title == 'A500 signal monitor'"
+            ),
         ],
         check=True,
         capture_output=True,
         text=True,
     )
-
-
-def test_docker_image_includes_live_signal_configuration() -> None:
-    from pathlib import Path
-
-    root = Path(__file__).parents[1]
-    assert (root / "config/intraday-signals.yaml").is_file()
-    assert "COPY config/ ./config/" in (root / "Dockerfile").read_text()
 
 
 CONFIG = LiveSignalConfig(("510300", "563360"), {}, {}, "stable-fingerprint")

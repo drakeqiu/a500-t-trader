@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,8 +13,9 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-
-def test_web_config_exposes_only_public_oidc_client_configuration(monkeypatch) -> None:
+def test_web_config_exposes_only_public_oidc_client_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("A500_OIDC_ISSUER", "https://identity.example.test/")
     monkeypatch.setenv("A500_OIDC_CLIENT_ID", "a500-web")
     monkeypatch.setenv("A500_OIDC_AUDIENCE", "a500-api")
@@ -32,7 +34,9 @@ def test_web_config_exposes_only_public_oidc_client_configuration(monkeypatch) -
     assert "never-return-this" not in response.text
 
 
-def test_web_config_fails_closed_when_oidc_client_is_not_configured(monkeypatch) -> None:
+def test_web_config_fails_closed_when_oidc_client_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     for key in ("A500_OIDC_ISSUER", "A500_OIDC_CLIENT_ID", "A500_OIDC_AUDIENCE"):
         monkeypatch.delenv(key, raising=False)
 

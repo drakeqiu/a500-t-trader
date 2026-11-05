@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from a500_t_trader.signal_monitor import SignalStore, create_app
 from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
 
-
 CONFIG = LiveSignalConfig(("510300",), {}, {}, "stable-fingerprint")
 
 
@@ -34,7 +33,6 @@ def _state() -> dict[str, object]:
     }
 
 
-
 def test_app_constructs_and_serves_authenticated_signal_route() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
@@ -44,6 +42,7 @@ def test_app_constructs_and_serves_authenticated_signal_route() -> None:
             headers={"Authorization": "Bearer alice-token"},
         )
         assert response.status_code == 200
+        assert client.portal is not None
         client.portal.call(lambda: redis.aclose())
 
 
@@ -56,10 +55,8 @@ def test_signal_query_and_sse_require_valid_shared_audience_bearer() -> None:
 
         for path in ("/v1/signals", "/v1/signals/stream?symbols=510300"):
             assert client.get(path).status_code == 401
-            assert (
-                client.get(path, headers={"Authorization": "Bearer invalid"}).status_code
-                == 401
-            )
+            invalid_headers = {"Authorization": "Bearer invalid"}
+            assert client.get(path, headers=invalid_headers).status_code == 401
 
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
@@ -86,10 +83,8 @@ def test_api_documentation_and_openapi_require_auth_but_health_does_not() -> Non
         assert client.portal is not None
         for path in ("/docs", "/redoc", "/openapi.json"):
             assert client.get(path).status_code == 401
-            assert (
-                client.get(path, headers={"Authorization": "Bearer invalid"}).status_code
-                == 401
-            )
+            invalid_headers = {"Authorization": "Bearer invalid"}
+            assert client.get(path, headers=invalid_headers).status_code == 401
 
         headers = {"Authorization": "Bearer alice-token"}
         assert client.get("/docs", headers=headers).status_code == 200

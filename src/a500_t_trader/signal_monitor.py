@@ -15,6 +15,7 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 
 from .account_snapshot_api import Authenticator, OIDCAuthenticator
 from .strategy.intraday_v1_config import (
@@ -161,7 +162,7 @@ def create_app(
     app.include_router(create_web_router())
 
     async def require_auth(
-        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008
     ) -> None:
         if credentials is None:
             raise HTTPException(
