@@ -251,7 +251,8 @@ def _classify_galaxy_fills(
                         stamp_duty,other_charges,occurrence_amount,source,
                         trade_number,contract_number,classification
                     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (owner,) + tuple(
+                    (owner,)
+                    + tuple(
                         record[key]
                         for key in (
                             "timestamp",
@@ -282,7 +283,8 @@ def _classify_galaxy_fills(
                     preview_existing = {
                         str(row["trade_number"]): dict(row)
                         for row in db.execute(
-                            "SELECT * FROM imported_fills WHERE source=? AND owner IS ?",
+                            "SELECT * FROM imported_fills "
+                            "WHERE source=? AND owner IS ?",
                             (GALAXY_SOURCE, owner),
                         )
                     }
@@ -527,6 +529,7 @@ def _create_imported_fills_table(db: sqlite3.Connection) -> None:
             UNIQUE(owner, source, trade_number)
         )"""
     )
+
 
 def _table_exists(db: sqlite3.Connection, name: str) -> bool:
     return (

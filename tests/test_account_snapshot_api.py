@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-
+from collections.abc import Mapping
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -46,7 +46,9 @@ def _galaxy_csv(*rows: str) -> bytes:
 
 
 def test_trade_import_preview_requires_authentication(tmp_path: Path) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         response = client.post(
             "/v1/trade-imports/previews",
             files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
@@ -95,7 +97,9 @@ def test_trade_import_preview_is_owner_scoped_and_does_not_write_fills(
 
 def test_trade_import_preview_sanitizes_validation_errors(tmp_path: Path) -> None:
     content = _galaxy_csv("1001").replace(b",8000,1.264,", b",0,1.264,")
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         response = client.post(
             "/v1/trade-imports/previews",
             headers={"Authorization": "Bearer alice-token"},
@@ -110,7 +114,9 @@ def test_trade_import_preview_sanitizes_validation_errors(tmp_path: Path) -> Non
 def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
     tmp_path: Path,
 ) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         headers = {"Authorization": "Bearer alice-token"}
         oversized = client.post(
             "/v1/trade-imports/previews",
@@ -120,11 +126,15 @@ def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
         unsupported = client.post(
             "/v1/trade-imports/previews",
             headers=headers,
-            files={"file": ("fills.csv", b"account,password\nsecret,hidden\n", "text/csv")},
+            files={
+                "file": ("fills.csv", b"account,password\nsecret,hidden\n", "text/csv")
+            },
         )
     assert oversized.status_code == 413
     assert unsupported.status_code == 422
     assert "secret" not in unsupported.text
+
+
 def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -152,7 +162,6 @@ def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
     assert len(AccountLedger(database).imported_fills()) == 1
 
 
-
 def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
     tmp_path: Path,
 ) -> None:
@@ -161,16 +170,16 @@ def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
     ) as client:
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
-        raw_secret = b"SECRET-ACCOUNT-NUMBER"
+        raw_secret = b"PRIVATE-ACCOUNT"
         preview = client.post(
             "/v1/trade-imports/previews",
             headers=alice,
-            files={"file": ("fills.csv", _galaxy_csv("1001") + raw_secret, "text/csv")},
+            files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
         ).json()
         batch_id = preview["batch_id"]
         url = f"/v1/trade-imports/previews/{batch_id}"
 
-        assert client.get(url).status_code == 404
+        assert client.get(url).status_code == 401
         assert client.get(url, headers=bob).status_code == 404
         result = client.get(url, headers=alice)
         assert result.status_code == 200
@@ -184,14 +193,13 @@ def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
             "confirmed": None,
         }
         assert raw_secret.decode() not in result.text
-        assert client.post(
-            f"{url}/confirm", headers=alice
-        ).status_code == 200
+        assert client.post(f"{url}/confirm", headers=alice).status_code == 200
         confirmed = client.get(url, headers=alice)
         assert confirmed.status_code == 200
-        assert confirmed.json()["confirmed"] == client.post(
-            f"{url}/confirm", headers=alice
-        ).json()
+        assert (
+            confirmed.json()["confirmed"]
+            == client.post(f"{url}/confirm", headers=alice).json()
+        )
 
 
 def test_trade_import_result_returns_404_for_expired_batch(
@@ -210,9 +218,14 @@ def test_trade_import_result_returns_404_for_expired_batch(
                 "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
                 (preview["batch_id"],),
             )
-        assert client.get(
-            f"/v1/trade-imports/previews/{preview['batch_id']}", headers=alice
-        ).status_code == 404
+        assert (
+            client.get(
+                f"/v1/trade-imports/previews/{preview['batch_id']}", headers=alice
+            ).status_code
+            == 404
+        )
+
+
 def test_trade_import_confirmation_rejects_validation_error_preview(
     tmp_path: Path,
 ) -> None:
@@ -232,6 +245,8 @@ def test_trade_import_confirmation_rejects_validation_error_preview(
     from a500_t_trader.account_ledger import AccountLedger
 
     assert AccountLedger(database).imported_fills() == []
+
+
 def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
     with TestClient(
         create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())

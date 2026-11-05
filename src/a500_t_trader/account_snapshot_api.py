@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Annotated, Protocol, cast
 
 import jwt
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
@@ -21,13 +21,14 @@ from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
 from .account_ledger import (
-    AccountLedger,
     GALAXY_CLASSIFICATION,
     GALAXY_SOURCE,
+    AccountLedger,
     _create_imported_fills,
     _same_trade,
     preview_galaxy_fills,
 )
+from .market_data import normalize_symbol
 
 CLASSIFICATION = "user-entered; not broker-verified"
 
@@ -415,11 +416,12 @@ def _validate_snapshot(value: object) -> dict[str, object]:
     }
 
 
-
 def _json_default(value: object) -> str:
     if isinstance(value, (datetime, Decimal)):
         return value.isoformat() if isinstance(value, datetime) else str(value)
     raise TypeError(f"unsupported JSON value: {type(value).__name__}")
+
+
 def _authenticated_subject(auth: Authenticator, authorization: str | None) -> str:
     if authorization is None:
         raise HTTPException(
@@ -475,8 +477,7 @@ def create_app(
             )"""
         )
         columns = {
-            row[1]
-            for row in db.execute("PRAGMA table_info(trade_import_batches)")
+            row[1] for row in db.execute("PRAGMA table_info(trade_import_batches)")
         }
         if "confirmed_json" not in columns:
             db.execute(
@@ -485,7 +486,7 @@ def create_app(
 
     @app.post("/v1/trade-imports/previews")
     async def preview_trade_import(
-        file: UploadFile = File(...),
+        file: Annotated[UploadFile, File()],
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
@@ -534,6 +535,7 @@ def create_app(
                 "error_details": result["error_details"],
             }
         )
+
     @app.get("/v1/trade-imports/previews/{batch_id}")
     def get_trade_import_result(
         batch_id: str,
@@ -594,7 +596,6 @@ def create_app(
             )
         return JSONResponse(result)
 
-
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(
         authorization: str | None = Header(default=None),
@@ -637,6 +638,7 @@ def create_app(
 
     return app
 
+
 def _confirm_trade_import_records(
     db: sqlite3.Connection, records: list[dict[str, object]], owner: str
 ) -> dict[str, object]:
@@ -671,15 +673,26 @@ def _confirm_trade_import_records(
                 stamp_duty,other_charges,occurrence_amount,source,trade_number,
                 contract_number,classification
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (owner,) + tuple(
+            (owner,)
+            + tuple(
                 record[key]
                 for key in (
-                    "timestamp", "symbol", "side", "quantity", "price",
-                    "trade_amount", "fees", "stamp_duty", "other_charges",
-                    "occurrence_amount", "source", "trade_number",
+                    "timestamp",
+                    "symbol",
+                    "side",
+                    "quantity",
+                    "price",
+                    "trade_amount",
+                    "fees",
+                    "stamp_duty",
+                    "other_charges",
+                    "occurrence_amount",
+                    "source",
+                    "trade_number",
                     "contract_number",
                 )
-            ) + (GALAXY_CLASSIFICATION,),
+            )
+            + (GALAXY_CLASSIFICATION,),
         )
         ids.append(int(cursor.lastrowid))
     return {
