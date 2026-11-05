@@ -35,7 +35,7 @@ class JwksHandler(BaseHTTPRequestHandler):
         if self.path != "/register":
             self.send_error(404)
             return
-        self.keys = [json.loads(self.rfile.read(int(self.headers["Content-Length"]))) ]
+        type(self).keys = [json.loads(self.rfile.read(int(self.headers["Content-Length"])))]
         self.send_response(204)
         self.end_headers()
 
@@ -63,7 +63,7 @@ def main() -> None:
     identity_host = (
         "host.docker.internal" if compose[0] == "docker" else "host.containers.internal"
     )
-    issuer = "http://identity.example.test"
+    issuer = "https://identity.example.test"
     environment = {
         **os.environ,
         "A500_OIDC_ISSUER": issuer,

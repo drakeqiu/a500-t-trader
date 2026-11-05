@@ -1,5 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { expect, test } from "@playwright/test";
+test.use({ ignoreHTTPSErrors: true });
 
 const ISSUER = process.env.A500_E2E_ISSUER;
 const BASE_URL = process.env.A500_E2E_GATEWAY_URL;
@@ -39,6 +40,12 @@ test("deployed browser login calls protected account and shared signal APIs", as
   });
   expect(registered.status).toBe(204);
 
+  const identityRequests = [];
+  const failedRequests = [];
+  page.on("request", (request) => {
+    if (request.url().startsWith(ISSUER)) identityRequests.push(request.url());
+  });
+  page.on("requestfailed", (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`));
   await page.route(`${ISSUER}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -84,7 +91,11 @@ test("deployed browser login calls protected account and shared signal APIs", as
 
   await page.goto(BASE_URL);
   await page.getByRole("button", { name: "使用工作账户登录" }).click();
-  await expect(page.getByText("已登录")).toBeVisible();
+  await expect(page.getByText("已登录")).toBeVisible({ timeout: 10000 }).catch(async (error) => {
+    throw new Error(
+      `${error.message}; url=${page.url()}; identity=${JSON.stringify(identityRequests)}; failed=${JSON.stringify(failedRequests)}; body=${await page.locator("body").textContent()}`,
+    );
+  });
   expect(await page.evaluate(() => ({ localStorage: Object.keys(localStorage), sessionStorage: Object.keys(sessionStorage), cookies: document.cookie })))
     .toEqual({ localStorage: [], sessionStorage: [], cookies: "" });
 
