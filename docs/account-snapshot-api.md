@@ -10,11 +10,11 @@
 
 身份只来自 OIDC Bearer JWT 的已验证 `sub`；不接受客户端用户或账户标识作为 ownership。
 
-配置 OIDC 身份提供方的 issuer、受众及可信 JWKS 地址：
+账户 API 与其他受保护 API 共用 OIDC 配置，并在应用内验证 JWT 签名、issuer、audience、有效期及必需的 `exp`、`iat`、`iss`、`aud`、`sub` 声明。共享 audience 固定为 `a500-api`；旧 `a500-account-api` audience 不被接受。缺少任何 OIDC 配置时生产应用拒绝启动，不会降级为匿名访问：
 
 ```sh
 A500_OIDC_ISSUER=https://identity.example.internal/
-A500_OIDC_AUDIENCE=a500-account-api
+A500_OIDC_AUDIENCE=a500-api
 A500_OIDC_JWKS_URI=https://identity.example.internal/.well-known/jwks.json
 A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
