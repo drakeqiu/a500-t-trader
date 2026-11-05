@@ -33,6 +33,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_read_timeout 1h;
     }
@@ -50,3 +51,15 @@ server {
 未认证请求以及令牌验证失败的业务请求和 API 文档/schema 请求返回 `401`。成功认证只证明持有获准 API access token；策略信号及行情仍是所有获准用户共享的数据，不按 `sub` 隔离。
 
 所有信号均为参考信息而非交易执行指令。浏览器必须按 `stale`/`status` 展示数据，不得把不可用状态渲染成可执行方向。
+
+## 浏览器登录
+
+`signal-api` 同时在 `/` 提供同源浏览器界面；没有独立前端部署。Compose 使用 `A500_OIDC_ISSUER`、`A500_OIDC_CLIENT_ID` 和共享 API `A500_OIDC_AUDIENCE` 配置浏览器公开客户端，`/web-config` 只返回这些公开值及当前请求 origin 的回调地址，不会返回客户端密钥。身份提供方必须将该客户端配置为 public client，允许 `https://monitor.example.internal/`（替换为实际部署根 URL）为精确回调地址，并启用 Authorization Code + PKCE（S256）。浏览器读取 issuer discovery、token endpoint 与 JWKS；身份提供方需允许部署 origin 对 discovery、JWKS 和 token endpoint 的跨源读取。
+
+获准用户范围由身份提供方的应用授权/用户分配策略控制。只允许组织授权用户使用此客户端；不要启用身份提供方自助注册或添加应用注册入口。登录回调验证 state、nonce、ID 令牌签名、issuer、client audience 和有效期；API access token 只保存在当前页面 JavaScript 内存并通过同源受保护 API 的 Bearer header 发送。access/ID/refresh token 不写入 localStorage、sessionStorage 或 cookie；仅 PKCE verifier/state/nonce 在跳转期间暂存在 sessionStorage，回调完成即删除。退出或 API 返回 `401`/`403` 时清除内存令牌、待处理 PKCE 状态和信号显示；退出只结束本地会话，不代替身份提供方的单点注销。
+
+TLS 在反向代理终止时，代理必须覆盖转发协议头，保证 OIDC 回调是外部 HTTPS origin：
+
+```nginx
+proxy_set_header X-Forwarded-Proto $scheme;
+```
