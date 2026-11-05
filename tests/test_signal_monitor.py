@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+import fakeredis
+import fakeredis.aioredis
+import pytest
+from fastapi.testclient import TestClient
+
+import a500_t_trader.signal_monitor as signal_monitor
+
+from a500_t_trader.signal_calculator import SignalCalculator
+from a500_t_trader.signal_monitor import SignalStore, create_app
+from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
+
+
+CONFIG = LiveSignalConfig(("510300", "563360"), {}, {}, "stable-fingerprint")
+
+
+def state(symbol: str, status: str, timestamp: datetime) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "bar_timestamp": timestamp.isoformat(),
+        "strategy_identity": "intraday-etf-t-v1-rsi:stable-fingerprint",
+        "rule_version": "V1.0",
+        "parameters": {},
+        "parameter_fingerprint": "stable-fingerprint",
+        "status": status,
+        "direction": status if status in {"BUY", "SELL", "BUYBACK", "TAKE_PROFIT"} else None,
+        "execution_eligible": True,
+        "reasons": ["test market condition"],
+    }
+
+
+def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_selection() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        all_result = client.get("/v1/signals")
+        assert all_result.status_code == 200
+        assert [item["symbol"] for item in all_result.json()["signals"]] == ["510300", "563360"]
+
+        filtered = client.get("/v1/signals", params={"symbols": "563360"})
+        assert filtered.status_code == 200
+        assert [item["symbol"] for item in filtered.json()["signals"]] == ["563360"]
+        client.portal.call(redis.aclose())
+
+
+
+def test_http_rejects_unconfigured_symbols_and_reports_strategy_metadata() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        response = client.get("/v1/signals", params={"symbols": "510999"})
+        assert response.status_code == 422
+        unavailable = client.get("/v1/signals", params={"symbols": "510300"})
+        signal = unavailable.json()["signals"][0]
+        assert signal["strategy_identity"] == "intraday-etf-t-v1-rsi:stable-fingerprint"
+        assert signal["parameter_fingerprint"] == CONFIG.fingerprint
+        assert signal["status"] == "UNAVAILABLE"
+        client.portal.call(redis.aclose())
+
+
+def test_stream_requires_explicit_symbols() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        assert client.get("/v1/signals/stream").status_code == 422
+        client.portal.call(redis.aclose())
+
+
+
+def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        current = state("510300", "BUY", datetime.now(timezone.utc))
+        client.portal.call(SignalStore(redis).publish(current, "BUY"))
+        response = client.get("/v1/signals", params={"symbols": "510300"})
+        signal = response.json()["signals"][0]
+        assert signal["direction"] == "BUY"
+        assert signal["execution_eligible"] is True
+        client.portal.call(redis.aclose())
+def test_http_status_marks_stale_signal_unavailable_without_direction() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    timestamp = datetime.now(timezone.utc) - timedelta(minutes=30)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        client.portal.call(SignalStore(redis).publish(state("510300", "BUY", timestamp), "BUY"))
+        response = client.get("/v1/signals", params={"symbols": "510300"})
+        signal = response.json()["signals"][0]
+        assert response.status_code == 200
+        assert signal["status"] == "UNAVAILABLE"
+        assert signal["direction"] is None
+        assert signal["quantity"] is None
+        client.portal.call(redis.aclose())
+        assert signal["execution_eligible"] is False
+
+
+def test_directional_history_replays_in_order_while_wait_status_is_coalesced() -> None:
+    async def scenario() -> tuple[
+        list[tuple[str, dict[str, object]]],
+        dict[str, object] | None,
+        dict[str, object] | None,
+    ]:
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        store = SignalStore(redis)
+        now = datetime.now(timezone.utc)
+        first = await store.publish(state("510300", "BUY", now), "BUY")
+        await store.publish(state("510300", "WAIT", now + timedelta(minutes=1)), "WAIT")
+        second = await store.publish(state("510300", "SELL", now + timedelta(minutes=2)), "SELL")
+        replay = await store.replay(first or "")
+        current = await store.get("510300")
+        restored = await SignalStore(redis).get("510300")
+        assert second is not None
+        await redis.aclose()
+        return replay, current, restored
+
+    replay, current, restored = asyncio.run(scenario())
+    assert [row[1]["status"] for row in replay] == ["SELL"]
+    assert current is not None and current["status"] == "SELL"
+    assert restored is not None and restored["status"] == "SELL"
+
+
+def test_directional_history_retains_only_the_24_hour_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> tuple[bool, list[tuple[str, dict[str, object]]]]:
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        store = SignalStore(redis)
+        now = datetime.now(timezone.utc)
+        first = await store.publish(state("510300", "BUY", now), "BUY")
+        await asyncio.sleep(0.01)
+        second = await store.publish(
+            state("510300", "SELL", now + timedelta(minutes=1)),
+            "SELL",
+        )
+        assert first is not None and second is not None
+        try:
+            await store.replay(first)
+        except ValueError:
+            first_expired = True
+        else:
+            first_expired = False
+        latest = await store.replay(second)
+        await redis.aclose()
+        return first_expired, latest
+
+    assert signal_monitor.RETENTION == timedelta(hours=24)
+    monkeypatch.setattr(signal_monitor, "RETENTION", timedelta(milliseconds=1))
+    first_expired, latest = asyncio.run(scenario())
+    assert first_expired
+    assert latest == []
+
+
+def test_health_reports_redis_unavailability() -> None:
+    server = fakeredis.FakeServer()
+    server.connected = False
+    redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        assert client.get("/healthz").status_code == 503
+        client.portal.call(redis.aclose())
+
+
+def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        now = datetime.now(timezone.utc)
+        store = SignalStore(redis)
+        first = client.portal.call(store.publish(state("510300", "BUY", now), "BUY"))
+        client.portal.call(store.publish(state("510300", "SELL", now + timedelta(minutes=1)), "SELL"))
+
+        with client.stream("GET", "/v1/signals/stream?symbols=510300") as response:
+            lines = iter(response.iter_lines())
+            assert response.status_code == 200
+            assert next(lines) == "event: snapshot"
+        with client.stream(
+            "GET",
+            "/v1/signals/stream?symbols=510300",
+            headers={"Last-Event-ID": first or ""},
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines).startswith("id: ")
+            assert next(lines) == "event: sell"
+        with client.stream(
+            "GET",
+            "/v1/signals/stream?symbols=510300",
+            headers={"Last-Event-ID": "0-0"},
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines) == "event: reset"
+            assert next(lines) == "data: {\"reason\":\"cursor unavailable\"}"
+            assert next(lines) == ""
+            assert next(lines) == "event: snapshot"
+        client.portal.call(redis.aclose())
+
+
+def test_calculator_consumes_duplicate_market_event_once() -> None:
+    server = fakeredis.FakeServer()
+    redis = fakeredis.FakeRedis(server=server, decode_responses=True)
+    api_redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    now = datetime.now(timezone.utc)
+    calls: list[str] = []
+
+    def evaluate(symbol, bar, history, config, as_of):
+        calls.append(bar.timestamp.isoformat())
+        return state(symbol, "BUY", bar.timestamp)
+
+    calculator = SignalCalculator(redis, CONFIG, evaluate)
+    event = {
+        "event_type": "minute_bar",
+        "symbol": "510300",
+        "data": {
+            "symbol": "510300",
+            "timestamp": now.isoformat(),
+            "interval_minutes": 5,
+            "open": "1.0",
+            "high": "1.1",
+            "low": "0.9",
+            "close": "1.05",
+            "volume": 100,
+            "amount": "100.0",
+            "is_completed": True,
+            "source": "replay",
+        },
+    }
+    calculator.handle(event)
+    calculator.handle(event)
+
+    assert len(calls) == 1
+    with TestClient(create_app(api_redis, CONFIG)) as client:
+        response = client.get("/v1/signals", params={"symbols": "510300"})
+        assert response.status_code == 200
+        assert response.json()["signals"][0]["status"] == "BUY"
+        assert response.json()["signals"][0]["schema_version"] == 1
+        client.portal.call(api_redis.aclose())
+    redis.close()
