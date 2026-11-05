@@ -178,6 +178,17 @@ def create_app(
     return app
 
 
+def _unavailable_state(symbol: str) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "status": "UNAVAILABLE",
+        "direction": None,
+        "quantity": None,
+        "execution_eligible": False,
+        "stale": True,
+        "reasons": ["signal store unavailable"],
+    }
+
 async def _current(
     store: SignalStore,
     symbol: str,
@@ -274,15 +285,7 @@ async def _events(
             try:
                 snapshot = await _current(store, symbol, freshness, config)
             except Exception:
-                snapshot = {
-                    "symbol": symbol,
-                    "status": "UNAVAILABLE",
-                    "direction": None,
-                    "quantity": None,
-                    "execution_eligible": False,
-                    "stale": True,
-                    "reasons": ["signal store unavailable"],
-                }
+                snapshot = _unavailable_state(symbol)
             last_status[symbol] = snapshot
             yield _sse("snapshot", snapshot)
     last_status_check = 0.0
@@ -306,15 +309,7 @@ async def _events(
                                 store, str(symbol), freshness, config
                             )
                         except Exception:
-                            state = {
-                                "symbol": symbol,
-                                "status": "UNAVAILABLE",
-                                "direction": None,
-                                "quantity": None,
-                                "execution_eligible": False,
-                                "stale": True,
-                                "reasons": ["signal store unavailable"],
-                            }
+                            state = _unavailable_state(str(symbol))
                         received_update = True
                         if state != last_status.get(str(symbol)):
                             last_status[str(symbol)] = state
@@ -329,15 +324,7 @@ async def _events(
                             store, symbol, freshness, config
                         )
                     except Exception:
-                        state = {
-                            "symbol": symbol,
-                            "status": "UNAVAILABLE",
-                            "direction": None,
-                            "quantity": None,
-                            "execution_eligible": False,
-                            "stale": True,
-                            "reasons": ["signal store unavailable"],
-                        }
+                        state = _unavailable_state(symbol)
                     previous = last_status.get(symbol)
                     last_status[symbol] = state
                     if previous is not None and state != previous:

@@ -13,7 +13,7 @@ A500_MARKET_DATA_MODE=tgw docker compose up -d --build redis signal-calculator s
 A500_MARKET_DATA_MODE=tgw docker compose ps
 ```
 
-`A500_MARKET_DATA_MODE` 选择既有 RabbitMQ exchange/queue 模式；消费者应接收规范化行情事件。`signal-calculator` 使用 `A500_REDIS_URL` 写入状态；所有 API 实例和消费者必须使用同一个 Redis。修改全局 ETF 范围或 V1 参数需同时更新配置并重启计算消费者。API 默认读取仓库内 `config/intraday-signals.yaml`。Redis 是状态查询、健康检查和 SSE 的必要依赖；Redis 故障时健康检查/查询返回 503，流发出不可用事件且不伪造方向。
+`A500_MARKET_DATA_MODE` 选择既有 RabbitMQ exchange/queue 模式；消费者应接收规范化行情事件。`signal-calculator` 使用 `A500_REDIS_URL` 写入状态；所有 API 实例和消费者必须使用同一个 Redis。修改全局 ETF 范围或 V1 参数需同时更新配置并重启计算消费者。API 默认读取镜像内随应用构建打包的 `config/intraday-signals.yaml`（Compose 从仓库配置目录复制该文件）；Redis 是状态查询、健康检查和 SSE 的必要依赖；Redis 故障时健康检查/查询返回 503，流发出不可用事件且不伪造方向。
 
 如需以 Nginx 部署私有反向代理，可在该私有网络中的代理服务配置类似以下访问策略；`monitor.example.internal` 必须仅解析到内部地址，`10.20.0.0/16` 应替换为实际受控网段：
 
