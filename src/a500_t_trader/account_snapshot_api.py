@@ -36,6 +36,7 @@ from .market_data import (
 
 CLASSIFICATION = "user-entered; not broker-verified"
 
+
 class Authenticator(Protocol):
     def __call__(self, token: str) -> str: ...
 
@@ -672,9 +673,7 @@ def create_app(
                     break
                 with localcontext() as context:
                     context.prec = (
-                        len(quote.last_price.as_tuple().digits)
-                        + len(str(quantity))
-                        + 1
+                        len(quote.last_price.as_tuple().digits) + len(str(quantity)) + 1
                     )
                     market_value = Decimal(quantity) * quote.last_price
                 market_values.append(market_value)
@@ -693,12 +692,7 @@ def create_app(
             min_exponent = min(amount.as_tuple().exponent for amount in amounts)
             max_adjusted = max(amount.adjusted() for amount in amounts)
             with localcontext() as context:
-                context.prec = (
-                    max_adjusted
-                    - min_exponent
-                    + len(str(len(amounts)))
-                    + 2
-                )
+                context.prec = max_adjusted - min_exponent + len(str(len(amounts))) + 2
                 total = sum(amounts, Decimal(0))
 
         if unavailable is not None:

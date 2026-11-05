@@ -246,9 +246,7 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
     from datetime import UTC, datetime
 
     database = tmp_path / "accounts.sqlite3"
-    with TestClient(
-        create_app(database, TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(database, TestAuthenticator())) as client:
         store = client.app.state.account_snapshot_store
         store.save_snapshot(
             "alice",
@@ -270,6 +268,7 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
     assert response.json()["classification"] == "user-entered; not broker-verified"
     assert response.json()["holdings"] == []
     assert response.headers["cache-control"] == "no-store"
+
 
 def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
     tmp_path: Path,
@@ -392,9 +391,7 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
                 symbol=symbol,
                 timestamp=timestamp,
                 received_at=now,
-                last_price=(
-                    None if self.failure == "no_price" else Decimal("2.00")
-                ),
+                last_price=(None if self.failure == "no_price" else Decimal("2.00")),
             )
 
     for failure in ("missing", "no_price", "unavailable", "stale", "future"):
@@ -468,6 +465,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
     assert response.json()["holdings"] == []
     assert response.json()["reason"] == "quote_invalid_price"
 
+
 def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
     tmp_path: Path,
 ) -> None:
@@ -524,6 +522,8 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["nav"] == "7.50"
+
+
 def test_account_nav_preserves_decimal_precision_beyond_default_context(
     tmp_path: Path,
 ) -> None:
@@ -570,17 +570,12 @@ def test_account_nav_preserves_decimal_precision_beyond_default_context(
     assert response.json()["nav"] == "1.234567890123456789012345678901231"
 
 
-
-
-
 def test_account_nav_marks_stale_or_future_snapshot_unavailable(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "accounts.sqlite3"
     store = AccountSnapshotStore(database)
-    with TestClient(
-        create_app(database, TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(database, TestAuthenticator())) as client:
         for as_of in (
             "2026-11-05T11:00:00+08:00",
             "2026-11-05T12:01:00+08:00",
@@ -618,9 +613,7 @@ def test_account_nav_read_does_not_change_snapshot_or_history(tmp_path: Path) ->
     store.save_snapshot("alice", snapshot)
     before = store.get_snapshot("alice"), store.history_for_subject("alice")
     with TestClient(create_app(database, TestAuthenticator())) as client:
-        client.get(
-            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
-        )
+        client.get("/v1/account-nav", headers={"Authorization": "Bearer alice-token"})
     assert (store.get_snapshot("alice"), store.history_for_subject("alice")) == before
 
 
