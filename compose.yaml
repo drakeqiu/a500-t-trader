@@ -2,7 +2,6 @@ x-podman:
   in_pod: false
 
 services:
-
   rabbitmq:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
