@@ -15,6 +15,48 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - signal-data:/data
+
+  signal-calculator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["a500-signal-calculator", "--purpose", "signal-calculator"]
+    environment:
+      A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
+      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      A500_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  signal-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["a500-signal-api"]
+    environment:
+      A500_REDIS_URL: redis://redis:6379/0
+      A500_SIGNAL_API_HOST: 0.0.0.0
+    expose:
+      - "8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   consumer-signals:
     build:
       context: .
@@ -56,3 +98,4 @@ services:
 
 volumes:
   rabbitmq-data:
+  signal-data:
