@@ -6,18 +6,26 @@
 
 ## Compose 部署
 
-需在已限制访问的私有网络主机部署；不得把 API 直接发布到公共互联网。仓库 Compose 不为 Redis 或 API 发布主机端口，API 仅在内部网络 `expose` 8000。反向代理应当部署在同一受控网络，限制代理监听地址和来源网段（例如只允许 VPN/办公网），并在代理防火墙/访问策略中拒绝其他来源；代理的网络访问限制与应用 OIDC 认证是独立边界。不要给 API 添加公共端口映射，也不要将 Redis、RabbitMQ 管理端口暴露给 API 用户。
+Compose 会要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`、`A500_OIDC_CLIENT_ID`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享；Web 客户端使用同一 issuer/audience 及公开 client ID。缺少必需值时 Compose 配置失败，不启动匿名 API。为避免身份服务的 issuer 校验与发现文档不一致，issuer 应填写 IdP 声明的规范地址。
 
-signal-api 必须配置统一 OIDC issuer、audience 与 JWKS URI。通过 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI` 环境变量提供 API 验证配置；Web OIDC 登录还需配置公开客户端 ID `A500_OIDC_CLIENT_ID`。`A500_OIDC_AUDIENCE` 必须与账户 API 使用相同的专用 API audience（例如 `a500-api`），不可使用旧账户专属 audience。
-
-Compose 会在启动前要求上述四个变量均已设置（可由部署环境或未提交的 `.env` 文件提供）。
+在部署主机提供环境变量或未提交的 `.env` 文件后启动内部网关与 API：
 
 ```sh
-A500_MARKET_DATA_MODE=tgw docker compose up -d --build redis signal-calculator signal-api
-A500_MARKET_DATA_MODE=tgw docker compose ps
+A500_MARKET_DATA_MODE=tgw docker compose up -d --build redis signal-api account-api gateway
+docker compose ps
 ```
 
-`A500_MARKET_DATA_MODE` 选择既有 RabbitMQ exchange/queue 模式；`signal-calculator` 使用 `A500_REDIS_URL` 写入状态，所有 API 实例和消费者必须使用同一个 Redis。API 默认读取镜像内的 `config/intraday-signals.yaml`；Redis 是状态查询、健康检查和 SSE 的必要依赖，Redis 故障时健康检查/查询返回 `503`，流发出不可用事件且不伪造方向。
+`gateway` 在容器网络内部监听 8080，供同一受限部署网络中的 TLS 反向代理访问；不得将 Compose API 或 gateway 端口发布到公共主机接口。默认 Compose 不含 host `ports`。`deploy/oidc-gateway.conf` 将账户快照、NAV、交易导入路由送至账户 API，其余同源 UI 与信号 API 路由送至信号 API，并对 gateway 的 `/healthz` 返回 404。账户数据库持久化在 `account-data` 卷中。`signal-api` 容器健康探针仅从容器内部访问 `127.0.0.1:8000/healthz`；该路由无需用户认证，必须只用于内部探针，不得转发给外部用户。账户 API 需要实际可用的 AmazingData 凭据与服务，以启动其行情服务。
+
+完整部署验收使用本地受限 override、临时 OIDC/JWKS 与 Chromium，执行真实 Compose 服务和浏览器登录/API 流程：
+
+```sh
+npm ci
+npx playwright install chromium
+python3 scripts/compose-oidc-e2e.py
+```
+
+此验收通过一次性 override 令账户 API 在无外部行情供应商的测试部署中启动同一 `create_app()`；它不更改生产入口或生产 OIDC 行为。验收中的 OIDC issuer/token/JWKS 由临时本地测试身份服务模拟，不代表真实 IdP 已验证；生产上线仍需 IdP 管理员配置 public client、精确 HTTPS 回调地址、Authorization Code + PKCE、发行 `a500-api` access token，并提供可达的 JWKS/discovery/token endpoints。生产 Compose 实际启动账户 API 仍要求真实 AmazingData 凭据与可达服务；这两类外部前提不由本地部署验收替代。
 
 如需以 Nginx 部署私有反向代理，可在该私有网络中的代理服务配置类似以下访问策略；`monitor.example.internal` 必须仅解析到内部地址，`10.20.0.0/16` 应替换为实际受控网段：
 
@@ -29,7 +37,7 @@ server {
     location / {
         allow 10.20.0.0/16;
         deny all;
-        proxy_pass http://signal-api:8000;
+        proxy_pass http://gateway:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -40,11 +48,11 @@ server {
 }
 ```
 
-所有信号查询和 SSE 订阅均由应用验证 Bearer access token 的签名、issuer、audience 与有效期；反向代理认证不得替代此应用层边界。`/docs`、`/redoc` 与 `/openapi.json` 也要求有效 Bearer token。有效共享 audience 的获准用户读取相同的行情与信号，不按 token 主体隔离。`/healthz` 保持未认证的健康检查用途，部署必须限制其外部可达性；外部访问边界由部署集成验收。未认证或无效令牌返回 `401`，并附 `WWW-Authenticate: Bearer`。
+所有信号查询和 SSE 订阅均由应用验证 Bearer access token 的签名、issuer、audience 与有效期；反向代理认证不得替代此应用层边界。`/docs`、`/redoc` 与 `/openapi.json` 也要求有效 Bearer token。有效共享 audience 的获准用户读取相同的行情与信号，不按 token 主体隔离。`/healthz` 仅供 Compose 内部健康探针使用，Nginx gateway 对此路径返回 `404`，不得将探针地址作为外部服务路由。未认证或无效令牌返回 `401`，并附 `WWW-Authenticate: Bearer`。
 
 ## HTTP 与 SSE 契约
 
-- `GET /healthz`：无需 Bearer 令牌；Redis 可达时返回 `200 {"status":"ok"}`，不可达时返回 `503`。部署需限制此健康检查路由的外部可达性。
+- `GET /healthz`：无需 Bearer 令牌；Redis 可达时返回 `200 {"status":"ok"}`，不可达时返回 `503`。此路由不得经 gateway 暴露给用户，只由 Compose 容器内部探针访问。
 - `GET /v1/signals`：必须提供有效共享 audience Bearer access token。省略 `symbols` 返回全部已配置标的；可重复传递 `symbols=510300&symbols=563360`。未配置代码返回 `422`。每个条目包含 `schema_version`、标的、事件时间、策略身份、规则版本、完整参数、稳定参数指纹、状态、方向、数量和理由；尚无状态的标的也会返回带有当前策略元数据的 `UNAVAILABLE` 状态。过期、未来时间或无效事件时间均将状态标记为 `UNAVAILABLE`，清除方向/数量并标记 `stale`、`execution_eligible=false`；新鲜状态保留 V1 评估结果中的参考执行资格和数量，均不表示已下单。
 - `GET /v1/signals/stream?symbols=510300&symbols=563360`：必须提供有效共享 audience Bearer access token，并显式指定已配置标的；此筛选仅影响 SSE 交付范围。没有 `Last-Event-ID` 时每个标的先接收 `snapshot`。有效游标仅重放游标之后的方向事件，不发送初始快照；游标无效、超出保留边界或历史不可用时先发送 `reset`，再发送当前快照。每条方向事件的 `id` 是 Redis Stream ID，可放入 `Last-Event-ID` 恢复。方向事件单独保留；WAIT、不可用和行情/连接状态仅更新该标的 Redis 当前状态，不重复堆积历史事件。连接期间 API 定期检查当前状态以发现新鲜度过期，并只推送每标的最新状态变化。方向事件历史按 24 小时窗口修剪。
 
