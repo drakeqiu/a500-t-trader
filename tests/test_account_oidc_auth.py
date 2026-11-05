@@ -196,3 +196,23 @@ def test_account_api_uses_shared_audience_configuration(
     monkeypatch.setenv("A500_OIDC_AUDIENCE", SHARED_AUDIENCE)
     monkeypatch.setenv("A500_OIDC_JWKS_URI", "https://jwks.test")
     assert OIDCAuthenticator.from_environment().audience == SHARED_AUDIENCE
+@pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
+def test_account_api_documentation_requires_valid_bearer_credentials(
+    path: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    client = _client(tmp_path, monkeypatch, public_key)
+    with client:
+        unauthenticated = client.get(path)
+        assert unauthenticated.status_code == 401
+        assert unauthenticated.headers["www-authenticate"] == "Bearer"
+
+        authenticated = client.get(
+            path, headers={"Authorization": f"Bearer {_token(private_key)}"}
+        )
+        assert authenticated.status_code == 200
+        if path == "/openapi.json":
+            assert authenticated.json()["info"]["title"] == "A500 account snapshot API"
