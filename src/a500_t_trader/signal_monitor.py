@@ -10,11 +10,13 @@ from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
-from redis.asyncio.client import PubSub
 
+from .account_snapshot_api import Authenticator, OIDCAuthenticator
 from .strategy.intraday_v1_config import (
     STRATEGY_ID,
     LiveSignalConfig,
@@ -128,6 +130,7 @@ def create_app(
     config: LiveSignalConfig | None = None,
     *,
     freshness: timedelta = timedelta(minutes=15),
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
     """Construct read-only web service; it never connects to a market/broker source."""
     if redis is None:
@@ -137,11 +140,42 @@ def create_app(
         )
     if config is None:
         config = load_live_signal_config()
-    app = FastAPI(title="A500 signal monitor")
+    auth = (
+        authenticator
+        if authenticator is not None
+        else OIDCAuthenticator.from_environment()
+    )
+    app = FastAPI(
+        title="A500 signal monitor",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.config = config
     store = SignalStore(redis)
     app.state.signal_store = store
     app.state.redis = redis
+    from .web_oidc import create_web_router
+
+    app.include_router(create_web_router())
+
+    async def require_auth(
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    ) -> None:
+        if credentials is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Bearer credentials required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            auth(credentials.credentials)
+        except Exception as error:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid bearer credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from error
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:
@@ -153,7 +187,29 @@ def create_app(
             ) from error
         return {"status": "ok"}
 
-    @app.get("/v1/signals")
+    @app.get(
+        "/openapi.json",
+        include_in_schema=False,
+        dependencies=[Depends(require_auth)],
+    )
+    async def openapi_schema() -> JSONResponse:
+        return JSONResponse(app.openapi())
+
+    @app.get("/docs", include_in_schema=False, dependencies=[Depends(require_auth)])
+    async def swagger_ui() -> HTMLResponse:
+        return get_swagger_ui_html(
+            openapi_url="/openapi.json",
+            title=f"{app.title} - Swagger UI",
+        )
+
+    @app.get("/redoc", include_in_schema=False, dependencies=[Depends(require_auth)])
+    async def redoc() -> HTMLResponse:
+        return get_redoc_html(
+            openapi_url="/openapi.json",
+            title=f"{app.title} - ReDoc",
+        )
+
+    @app.get("/v1/signals", dependencies=[Depends(require_auth)])
     async def signals(
         symbols: list[str] | None = Query(default=None),  # noqa: B008
     ) -> dict[str, Any]:
@@ -173,7 +229,7 @@ def create_app(
             "parameter_fingerprint": config.fingerprint,
         }
 
-    @app.get("/v1/signals/stream")
+    @app.get("/v1/signals/stream", dependencies=[Depends(require_auth)])
     async def stream(
         request: Request,
         symbols: list[str] = Query(...),  # noqa: B008

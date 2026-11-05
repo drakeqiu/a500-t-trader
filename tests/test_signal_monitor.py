@@ -8,13 +8,33 @@ from datetime import UTC, datetime, timedelta
 
 import fakeredis.aioredis
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import FastAPI
+from fastapi.testclient import TestClient as FastAPITestClient
 
 import a500_t_trader.signal_monitor as signal_monitor
 from a500_t_trader.market_data import MinuteBar
 from a500_t_trader.signal_calculator import SignalCalculator
-from a500_t_trader.signal_monitor import SignalStore, create_app
+from a500_t_trader.signal_monitor import SignalStore, create_app as create_signal_app
 from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
+
+
+class _TestAuthenticator:
+    def __call__(self, token: str) -> str:
+        if token != "test-token":
+            raise ValueError("invalid token")
+        return "test-subject"
+
+
+class AuthenticatedTestClient(FastAPITestClient):
+    def __init__(self, app: FastAPI) -> None:
+        super().__init__(app, headers={"Authorization": "Bearer test-token"})
+
+
+def create_app(
+    redis: fakeredis.aioredis.FakeRedis,
+    config: LiveSignalConfig,
+) -> FastAPI:
+    return create_signal_app(redis, config, authenticator=_TestAuthenticator())
 
 
 def test_signal_api_default_app_imports_without_connecting_to_redis() -> None:
@@ -23,9 +43,12 @@ def test_signal_api_default_app_imports_without_connecting_to_redis() -> None:
             sys.executable,
             "-c",
             (
+                "import os; "
+                "os.environ['A500_OIDC_ISSUER']='https://issuer.example'; "
+                "os.environ['A500_OIDC_AUDIENCE']='a500-api'; "
+                "os.environ['A500_OIDC_JWKS_URI']='https://issuer.example/jwks'; "
                 "from a500_t_trader.signal_api import app; "
                 "assert app.title == 'A500 signal monitor'"
-            ),
         ],
         check=True,
         capture_output=True,
@@ -63,7 +86,7 @@ def state(symbol: str, status: str, timestamp: datetime) -> dict[str, object]:
 
 def test_http_status_configured_symbols_and_selection() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         all_result = client.get("/v1/signals")
         assert all_result.status_code == 200
@@ -80,7 +103,7 @@ def test_http_status_configured_symbols_and_selection() -> None:
 
 def test_http_rejects_unconfigured_symbols_and_reports_strategy_metadata() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         response = client.get("/v1/signals", params={"symbols": "510999"})
         assert response.status_code == 422
@@ -94,7 +117,7 @@ def test_http_rejects_unconfigured_symbols_and_reports_strategy_metadata() -> No
 
 def test_stream_requires_explicit_symbols() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         assert client.get("/v1/signals/stream").status_code == 422
         client.portal.call(lambda: redis.aclose())
@@ -102,7 +125,7 @@ def test_stream_requires_explicit_symbols() -> None:
 
 def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         current = state("510300", "BUY", datetime.now(UTC))
         client.portal.call(lambda: SignalStore(redis).publish(current, "BUY"))
@@ -116,7 +139,7 @@ def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
 def test_http_status_marks_stale_signal_unavailable_without_direction() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     timestamp = datetime.now(UTC) - timedelta(minutes=30)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         client.portal.call(
             lambda: SignalStore(redis).publish(state("510300", "BUY", timestamp), "BUY")
@@ -193,7 +216,7 @@ def test_health_reports_redis_unavailability() -> None:
     server = fakeredis.FakeServer()
     server.connected = False
     redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         assert client.get("/healthz").status_code == 503
         client.portal.call(lambda: redis.aclose())
@@ -203,7 +226,7 @@ def test_signal_query_reports_redis_unavailability_without_signal_data() -> None
     server = fakeredis.FakeServer()
     server.connected = False
     redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         response = client.get("/v1/signals")
         assert response.status_code == 503
@@ -213,7 +236,7 @@ def test_signal_query_reports_redis_unavailability_without_signal_data() -> None
 
 def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
         now = datetime.now(UTC)
         store = SignalStore(redis)
@@ -256,7 +279,7 @@ def test_sse_filters_delivery_without_changing_global_event_order() -> None:
         ("510300", "563360", "000001"), {}, {}, "stable-fingerprint"
     )
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with TestClient(create_app(redis, config)) as client:
+    with AuthenticatedTestClient(create_app(redis, config)) as client:
         assert client.portal is not None
         now = datetime.now(UTC)
         store = SignalStore(redis)
@@ -346,7 +369,7 @@ def test_calculator_consumes_duplicate_market_event_once() -> None:
     calculator.handle(event)
 
     assert len(calls) == 1
-    with TestClient(create_app(api_redis, CONFIG)) as client:
+    with AuthenticatedTestClient(create_app(api_redis, CONFIG)) as client:
         assert client.portal is not None
         response = client.get("/v1/signals", params={"symbols": "510300"})
         assert response.status_code == 200
