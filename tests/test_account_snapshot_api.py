@@ -270,6 +270,253 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
     assert response.json()["holdings"] == []
     assert response.headers["cache-control"] == "no-store"
 
+def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    from decimal import Decimal
+    from zoneinfo import ZoneInfo
+
+    from a500_t_trader.market_data import MarketDataService, Snapshot
+
+    now = datetime.now(UTC)
+
+    class Quotes:
+        def __init__(self) -> None:
+            self.requested: list[str] = []
+
+        def get_snapshot(self, symbol: str) -> Snapshot:
+            self.requested.append(symbol)
+            prices = {"510300": Decimal("4.1250"), "159915": Decimal("2.375")}
+            return Snapshot(
+                symbol=symbol,
+                timestamp=now,
+                received_at=now,
+                last_price=prices[symbol],
+            )
+
+    quotes = Quotes()
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": now.isoformat(),
+            "holdings": {"510300": 3, "159915": 4, "510500": 0},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {"510300": "1.0000", "159915": "0.5000"},
+            "available_cash": "10.000",
+        },
+    )
+    with TestClient(
+        create_app(
+            database,
+            TestAuthenticator(),
+            market_data=MarketDataService(quotes),
+        )
+    ) as client:
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "available"
+    assert body["nav"] == "31.8750"
+    assert body["available_cash"] == "10.000"
+    assert body["holdings"] == [
+        {
+            "symbol": "159915",
+            "quantity": 4,
+            "last_price": "2.375",
+            "market_value": "9.500",
+            "as_of": now.astimezone(ZoneInfo("Asia/Shanghai")).isoformat(),
+        },
+        {
+            "symbol": "510300",
+            "quantity": 3,
+            "last_price": "4.1250",
+            "market_value": "12.3750",
+            "as_of": now.astimezone(ZoneInfo("Asia/Shanghai")).isoformat(),
+        },
+    ]
+    assert quotes.requested == ["159915", "510300"]
+
+
+def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from a500_t_trader.market_data import (
+        CapabilityUnavailableError,
+        MarketDataService,
+        Snapshot,
+    )
+
+    now = datetime.now(UTC)
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": now.isoformat(),
+            "holdings": {"510300": 2, "159915": 3},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {},
+            "available_cash": "10.00",
+        },
+    )
+
+    class Quotes:
+        def __init__(self, broken_symbol: str, failure: str) -> None:
+            self.broken_symbol = broken_symbol
+            self.failure = failure
+
+        def get_snapshot(self, symbol: str) -> Snapshot | None:
+            if symbol == self.broken_symbol:
+                if self.failure == "unavailable":
+                    raise CapabilityUnavailableError("not available")
+                if self.failure == "missing":
+                    return None
+                timestamp = (
+                    now - timedelta(minutes=30, seconds=1)
+                    if self.failure == "stale"
+                    else now + timedelta(minutes=1)
+                )
+            else:
+                timestamp = now
+            return Snapshot(
+                symbol=symbol,
+                timestamp=timestamp,
+                received_at=now,
+                last_price=(
+                    None if self.failure == "no_price" else Decimal("2.00")
+                ),
+            )
+
+    for failure in ("missing", "no_price", "unavailable", "stale", "future"):
+        with TestClient(
+            create_app(
+                database,
+                TestAuthenticator(),
+                market_data=MarketDataService(Quotes("510300", failure)),
+            )
+        ) as client:
+            response = client.get(
+                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+            )
+        assert response.status_code == 200
+        assert response.json()["status"] == "unavailable"
+        assert response.json()["nav"] is None
+        assert response.json()["holdings"] == []
+
+
+def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    import a500_t_trader.account_snapshot_api as account_api
+    from a500_t_trader.market_data import MarketDataService, Snapshot
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is not None else now.replace(tzinfo=None)
+
+    class Quotes:
+        def get_snapshot(self, symbol: str) -> Snapshot:
+            return Snapshot(
+                symbol=symbol,
+                timestamp=now - timedelta(minutes=30),
+                received_at=now,
+                last_price=Decimal("3.25"),
+            )
+
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": (now - timedelta(minutes=30)).isoformat(),
+            "holdings": {"510300": 2},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {},
+            "available_cash": "1",
+        },
+    )
+    original_datetime = account_api.datetime
+    account_api.datetime = FixedDateTime
+    try:
+        with TestClient(
+            create_app(
+                database,
+                TestAuthenticator(),
+                market_data=MarketDataService(Quotes()),
+            )
+        ) as client:
+            response = client.get(
+                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+            )
+    finally:
+        account_api.datetime = original_datetime
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "available"
+    assert response.json()["nav"] == "7.50"
+def test_account_nav_preserves_decimal_precision_beyond_default_context(
+    tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from a500_t_trader.market_data import MarketDataService, Snapshot
+
+    now = datetime.now(UTC)
+    price = Decimal("0.123456789012345678901234567890123")
+
+    class Quotes:
+        def get_snapshot(self, symbol: str) -> Snapshot:
+            return Snapshot(
+                symbol=symbol,
+                timestamp=now,
+                received_at=now,
+                last_price=price,
+            )
+
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": now.isoformat(),
+            "holdings": {"510300": 10},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {},
+            "available_cash": "0.000000000000000000000000000000001",
+        },
+    )
+    with TestClient(
+        create_app(
+            database,
+            TestAuthenticator(),
+            market_data=MarketDataService(Quotes()),
+        )
+    ) as client:
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+
+    assert response.json()["nav"] == "1.234567890123456789012345678901231"
+
+
+
+
 
 def test_account_nav_marks_stale_or_future_snapshot_unavailable(
     tmp_path: Path,

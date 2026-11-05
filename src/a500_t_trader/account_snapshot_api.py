@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Annotated, Protocol, cast
 
@@ -27,7 +27,11 @@ from .account_ledger import (
     _same_trade,
     preview_galaxy_fills,
 )
-from .market_data import MarketDataService, normalize_symbol
+from .market_data import (
+    CapabilityUnavailableError,
+    MarketDataService,
+    normalize_symbol,
+)
 
 
 CLASSIFICATION = "user-entered; not broker-verified"
@@ -633,11 +637,67 @@ def create_app(
             unavailable = "account_snapshot_future"
         elif now - as_of > timedelta(minutes=30):
             unavailable = "account_snapshot_stale"
-        elif any(
-            int(quantity) != 0
-            for quantity in cast(dict[str, int], snapshot["holdings"]).values()
-        ):
-            unavailable = "nonzero_holdings_not_valued"
+
+        valued_holdings: list[dict[str, object]] = []
+        cash = Decimal(str(snapshot["available_cash"]))
+        total = cash
+        market_values: list[Decimal] = []
+        if unavailable is None:
+            for symbol, raw_quantity in sorted(
+                cast(dict[str, int], snapshot["holdings"]).items()
+            ):
+                quantity = int(raw_quantity)
+                if quantity == 0:
+                    continue
+                if market_data is None:
+                    unavailable = "market_data_unavailable"
+                    break
+                try:
+                    quote = market_data.get_snapshot(symbol)
+                except CapabilityUnavailableError:
+                    unavailable = "market_data_unavailable"
+                    break
+                if quote is None or quote.last_price is None:
+                    unavailable = "quote_missing"
+                    break
+                quote_as_of = quote.timestamp.astimezone(UTC)
+                if quote_as_of > now:
+                    unavailable = "quote_future"
+                    break
+                if now - quote_as_of > timedelta(minutes=30):
+                    unavailable = "quote_stale"
+                    break
+                with localcontext() as context:
+                    context.prec = (
+                        len(quote.last_price.as_tuple().digits)
+                        + len(str(quantity))
+                        + 1
+                    )
+                    market_value = Decimal(quantity) * quote.last_price
+                market_values.append(market_value)
+                valued_holdings.append(
+                    {
+                        "symbol": symbol,
+                        "quantity": quantity,
+                        "last_price": str(quote.last_price),
+                        "market_value": str(market_value),
+                        "as_of": quote.timestamp.isoformat(),
+                    }
+                )
+
+        if unavailable is None:
+            amounts = [cash, *market_values]
+            min_exponent = min(amount.as_tuple().exponent for amount in amounts)
+            max_adjusted = max(amount.adjusted() for amount in amounts)
+            with localcontext() as context:
+                context.prec = (
+                    max_adjusted
+                    - min_exponent
+                    + len(str(len(amounts)))
+                    + 2
+                )
+                total = sum(amounts, Decimal(0))
+
         if unavailable is not None:
             result = {
                 "status": "unavailable",
@@ -654,11 +714,11 @@ def create_app(
             result = {
                 "status": "available",
                 "currency": "CNY",
-                "nav": str(Decimal(str(snapshot["available_cash"]))),
+                "nav": str(total),
                 "available_cash": snapshot["available_cash"],
                 "account_snapshot_as_of": snapshot["as_of"],
                 "calculated_at": now.isoformat(),
-                "holdings": [],
+                "holdings": valued_holdings,
                 "classification": CLASSIFICATION,
             }
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
