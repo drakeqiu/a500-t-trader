@@ -25,15 +25,23 @@ SNAPSHOT = {
 
 
 def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         assert client.get("/v1/account-snapshot").status_code == 401
-        assert client.get(
-            "/v1/account-snapshot", headers={"Authorization": "Bearer invalid"}
-        ).status_code == 401
-        assert client.get(
-            "/v1/account-snapshot",
-            headers={"Authorization": "bearer alice-token"},
-        ).status_code == 404
+        assert (
+            client.get(
+                "/v1/account-snapshot", headers={"Authorization": "Bearer invalid"}
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/v1/account-snapshot",
+                headers={"Authorization": "bearer alice-token"},
+            ).status_code
+            == 404
+        )
 
 
 def test_account_snapshot_is_private_and_reports_user_entered_status(
@@ -83,14 +91,25 @@ def test_account_snapshot_storage_is_isolated_by_database_file(tmp_path: Path) -
     with TestClient(
         create_app(tmp_path / "second.sqlite3", TestAuthenticator())
     ) as client:
-        assert client.get(
-            "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
-        ).status_code == 404
+        assert (
+            client.get(
+                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+            ).status_code
+            == 404
+        )
+
 
 def test_put_requires_create_precondition_and_returns_etag(tmp_path: Path) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         headers = {"Authorization": "Bearer alice-token"}
-        assert client.put("/v1/account-snapshot", json=SNAPSHOT, headers=headers).status_code == 428
+        assert (
+            client.put(
+                "/v1/account-snapshot", json=SNAPSHOT, headers=headers
+            ).status_code
+            == 428
+        )
         created = client.put(
             "/v1/account-snapshot",
             json=SNAPSHOT,
@@ -106,7 +125,9 @@ def test_put_requires_create_precondition_and_returns_etag(tmp_path: Path) -> No
         assert created.headers["ETag"]
 
 
-def test_put_requires_matching_etag_and_keeps_successful_history(tmp_path: Path) -> None:
+def test_put_requires_matching_etag_and_keeps_successful_history(
+    tmp_path: Path,
+) -> None:
     database = tmp_path / "accounts.sqlite3"
     with TestClient(create_app(database, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
@@ -116,11 +137,18 @@ def test_put_requires_matching_etag_and_keeps_successful_history(tmp_path: Path)
             headers={**headers, "If-None-Match": "*"},
         )
         assert first.status_code == 201
-        assert client.put(
-            "/v1/account-snapshot", json=SNAPSHOT, headers=headers
-        ).status_code == 428
-        changed = {**SNAPSHOT, "holdings": {"510300": 200},
-                   "protected_floor": {"510300": 20}, "sellable": {"510300": 180}}
+        assert (
+            client.put(
+                "/v1/account-snapshot", json=SNAPSHOT, headers=headers
+            ).status_code
+            == 428
+        )
+        changed = {
+            **SNAPSHOT,
+            "holdings": {"510300": 200},
+            "protected_floor": {"510300": 20},
+            "sellable": {"510300": 180},
+        }
         replacement = client.put(
             "/v1/account-snapshot",
             json=changed,
@@ -128,14 +156,17 @@ def test_put_requires_matching_etag_and_keeps_successful_history(tmp_path: Path)
         )
         assert replacement.status_code == 200
         assert replacement.headers["ETag"] != first.headers["ETag"]
-        assert client.get("/v1/account-snapshot", headers=headers).json()["holdings"] == {
-            "510300": 200
-        }
-        assert client.put(
-            "/v1/account-snapshot",
-            json=SNAPSHOT,
-            headers={**headers, "If-Match": first.headers["ETag"]},
-        ).status_code == 412
+        assert client.get("/v1/account-snapshot", headers=headers).json()[
+            "holdings"
+        ] == {"510300": 200}
+        assert (
+            client.put(
+                "/v1/account-snapshot",
+                json=SNAPSHOT,
+                headers={**headers, "If-Match": first.headers["ETag"]},
+            ).status_code
+            == 412
+        )
         history = client.app.state.account_snapshot_store.history_for_subject("alice")
         assert [record["snapshot"] for record in history] == [SNAPSHOT, changed]
         assert all(
@@ -148,13 +179,18 @@ def test_put_requires_matching_etag_and_keeps_successful_history(tmp_path: Path)
 def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
     tmp_path: Path,
 ) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         headers = {"Authorization": "Bearer alice-token"}
-        assert client.put(
-            "/v1/account-snapshot",
-            json=SNAPSHOT,
-            headers={**headers, "If-Match": '"stale"'},
-        ).status_code == 412
+        assert (
+            client.put(
+                "/v1/account-snapshot",
+                json=SNAPSHOT,
+                headers={**headers, "If-Match": '"stale"'},
+            ).status_code
+            == 412
+        )
         empty = {
             "as_of": SNAPSHOT["as_of"],
             "holdings": {},
@@ -172,8 +208,11 @@ def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
         assert created.json()["holdings"] == {}
         assert client.delete("/v1/account-snapshot", headers=headers).status_code == 405
 
+
 def test_put_rejects_invalid_json_with_problem_400(tmp_path: Path) -> None:
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         for content in ('{"broken":', "NaN"):
             response = client.put(
                 "/v1/account-snapshot",
@@ -185,7 +224,9 @@ def test_put_rejects_invalid_json_with_problem_400(tmp_path: Path) -> None:
                 },
             )
             assert response.status_code == 400
-            assert response.headers["content-type"].startswith("application/problem+json")
+            assert response.headers["content-type"].startswith(
+                "application/problem+json"
+            )
             assert response.json()["status"] == 400
             assert response.json()["errors"][0]["code"] == "invalid_json"
 
@@ -198,40 +239,77 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             "If-None-Match": "*",
         }
         invalid_snapshots = [
-            ({**SNAPSHOT, "as_of": "2026-02-30T23:59:59Z"},
-             "as_of", "invalid_timestamp"),
+            (
+                {**SNAPSHOT, "as_of": "2026-02-30T23:59:59Z"},
+                "as_of",
+                "invalid_timestamp",
+            ),
             ({**SNAPSHOT, "extra": 1}, "extra", "unknown_field"),
-            ({key: item for key, item in SNAPSHOT.items() if key != "available_cash"},
-             "available_cash", "missing_field"),
+            (
+                {
+                    key: item
+                    for key, item in SNAPSHOT.items()
+                    if key != "available_cash"
+                },
+                "available_cash",
+                "missing_field",
+            ),
             ({**SNAPSHOT, "available_cash": None}, "available_cash", "invalid_type"),
-            ({**SNAPSHOT, "as_of": "2026-11-04 09:30:00+08:00"},
-             "as_of", "invalid_timestamp"),
-            ({**SNAPSHOT, "as_of": "2026-11-04T09:30:00"},
-             "as_of", "invalid_timestamp"),
+            (
+                {**SNAPSHOT, "as_of": "2026-11-04 09:30:00+08:00"},
+                "as_of",
+                "invalid_timestamp",
+            ),
+            (
+                {**SNAPSHOT, "as_of": "2026-11-04T09:30:00"},
+                "as_of",
+                "invalid_timestamp",
+            ),
             ({**SNAPSHOT, "holdings": None}, "holdings", "invalid_type"),
-            ({**SNAPSHOT, "holdings": {"510300": True}},
-             "holdings.510300", "invalid_quantity"),
-            ({**SNAPSHOT, "holdings": {"510300": 1.5}},
-             "holdings.510300", "invalid_quantity"),
-            ({**SNAPSHOT, "holdings": {"510300": -1}},
-             "holdings.510300", "invalid_quantity"),
-            ({**SNAPSHOT, "protected_floor": {"510300": 101}},
-             "protected_floor.510300", "quantity_inconsistent"),
-            ({**SNAPSHOT, "sellable": {"510300": 81}},
-             "sellable.510300", "quantity_inconsistent"),
-            ({**SNAPSHOT, "sellable": {}},
-             "sellable.510300", "quantity_key_mismatch"),
+            (
+                {**SNAPSHOT, "holdings": {"510300": True}},
+                "holdings.510300",
+                "invalid_quantity",
+            ),
+            (
+                {**SNAPSHOT, "holdings": {"510300": 1.5}},
+                "holdings.510300",
+                "invalid_quantity",
+            ),
+            (
+                {**SNAPSHOT, "holdings": {"510300": -1}},
+                "holdings.510300",
+                "invalid_quantity",
+            ),
+            (
+                {**SNAPSHOT, "protected_floor": {"510300": 101}},
+                "protected_floor.510300",
+                "quantity_inconsistent",
+            ),
+            (
+                {**SNAPSHOT, "sellable": {"510300": 81}},
+                "sellable.510300",
+                "quantity_inconsistent",
+            ),
+            ({**SNAPSHOT, "sellable": {}}, "sellable.510300", "quantity_key_mismatch"),
             ({**SNAPSHOT, "cost_basis": []}, "cost_basis", "invalid_type"),
-            ({**SNAPSHOT, "cost_basis": {"510300": None}},
-             "cost_basis.510300", "invalid_type"),
-            ({**SNAPSHOT, "cost_basis": {"510300": "NaN"}},
-             "cost_basis.510300", "invalid_decimal"),
-            ({**SNAPSHOT, "available_cash": "-1"},
-             "available_cash", "invalid_decimal"),
-            ({**SNAPSHOT, "available_cash": " 1"},
-             "available_cash", "invalid_decimal"),
-            ({**SNAPSHOT, "cost_basis": {"510301": "3.85"}},
-             "cost_basis.510301", "invalid_cost_basis_key"),
+            (
+                {**SNAPSHOT, "cost_basis": {"510300": None}},
+                "cost_basis.510300",
+                "invalid_type",
+            ),
+            (
+                {**SNAPSHOT, "cost_basis": {"510300": "NaN"}},
+                "cost_basis.510300",
+                "invalid_decimal",
+            ),
+            ({**SNAPSHOT, "available_cash": "-1"}, "available_cash", "invalid_decimal"),
+            ({**SNAPSHOT, "available_cash": " 1"}, "available_cash", "invalid_decimal"),
+            (
+                {**SNAPSHOT, "cost_basis": {"510301": "3.85"}},
+                "cost_basis.510301",
+                "invalid_cost_basis_key",
+            ),
             (
                 {**SNAPSHOT, "holdings": {"510300": 100, "SH.510300": 2}},
                 "holdings.SH.510300",
@@ -244,15 +322,24 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             ),
         ]
         for snapshot, path, code in invalid_snapshots:
-            response = client.put("/v1/account-snapshot", json=snapshot, headers=headers)
+            response = client.put(
+                "/v1/account-snapshot", json=snapshot, headers=headers
+            )
             assert response.status_code == 422
-            assert response.headers["content-type"].startswith("application/problem+json")
+            assert response.headers["content-type"].startswith(
+                "application/problem+json"
+            )
             assert response.json()["errors"][0]["path"] == path
             assert response.json()["errors"][0]["code"] == code
-        assert client.get(
-            "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
-        ).status_code == 404
-        assert client.app.state.account_snapshot_store.history_for_subject("alice") == []
+        assert (
+            client.get(
+                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+            ).status_code
+            == 404
+        )
+        assert (
+            client.app.state.account_snapshot_store.history_for_subject("alice") == []
+        )
         created = client.put(
             "/v1/account-snapshot",
             json=SNAPSHOT,
@@ -265,10 +352,16 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             headers={**headers, "If-Match": created.headers["ETag"]},
         )
         assert invalid_update.status_code == 422
-        assert client.get(
-            "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
-        ).json()["holdings"] == SNAPSHOT["holdings"]
-        assert len(client.app.state.account_snapshot_store.history_for_subject("alice")) == 1
+        assert (
+            client.get(
+                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+            ).json()["holdings"]
+            == SNAPSHOT["holdings"]
+        )
+        assert (
+            len(client.app.state.account_snapshot_store.history_for_subject("alice"))
+            == 1
+        )
 
 
 def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) -> None:
@@ -280,7 +373,9 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) ->
         "sellable": {"510300": 80},
         "cost_basis": {"510300": "3.85"},
     }
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,
@@ -294,7 +389,9 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) ->
 
 def test_put_accepts_rfc3339_leap_second_through_api(tmp_path: Path) -> None:
     snapshot = {**SNAPSHOT, "as_of": "2016-12-31T23:59:60Z"}
-    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,

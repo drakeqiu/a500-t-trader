@@ -6,7 +6,6 @@ import uvicorn
 
 from .account_snapshot_api import create_app
 
-
 app = create_app()
 
 
