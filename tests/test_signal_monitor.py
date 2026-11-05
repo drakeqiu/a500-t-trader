@@ -251,6 +251,52 @@ def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> 
         client.portal.call(lambda: redis.aclose())
 
 
+def test_sse_filters_delivery_without_changing_global_event_order() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        assert client.portal is not None
+        now = datetime.now(UTC)
+        store = SignalStore(redis)
+        first = client.portal.call(
+            lambda: store.publish(state("510300", "BUY", now), "BUY")
+        )
+        second = client.portal.call(
+            lambda: store.publish(
+                state("563360", "SELL", now + timedelta(minutes=1)), "SELL"
+            )
+        )
+        third = client.portal.call(
+            lambda: store.publish(
+                state("510300", "BUYBACK", now + timedelta(minutes=2)), "BUYBACK"
+            )
+        )
+
+        with client.stream(
+            "GET", "/v1/signals/stream?symbols=563360&symbols=510300"
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines) == "event: snapshot"
+            assert '"symbol":"563360"' in next(lines)
+            assert next(lines) == ""
+            assert next(lines) == "event: snapshot"
+            assert '"symbol":"510300"' in next(lines)
+
+        with client.stream(
+            "GET",
+            "/v1/signals/stream?symbols=563360&symbols=510300",
+            headers={"Last-Event-ID": first or ""},
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines) == f"id: {second}"
+            assert next(lines) == "event: sell"
+            assert '"symbol":"563360"' in next(lines)
+            assert next(lines) == ""
+            assert next(lines) == f"id: {third}"
+            assert next(lines) == "event: buyback"
+            assert '"symbol":"510300"' in next(lines)
+        client.portal.call(lambda: redis.aclose())
+
+
 def test_calculator_consumes_duplicate_market_event_once() -> None:
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
