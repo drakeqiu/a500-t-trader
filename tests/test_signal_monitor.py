@@ -13,6 +13,13 @@ import a500_t_trader.signal_monitor as signal_monitor
 from a500_t_trader.signal_calculator import SignalCalculator
 from a500_t_trader.signal_monitor import SignalStore, create_app
 from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
+def test_docker_image_includes_live_signal_configuration() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).parents[1]
+    assert (root / "config/intraday-signals.yaml").is_file()
+    assert "COPY config/ ./config/" in (root / "Dockerfile").read_text()
+
 
 
 CONFIG = LiveSignalConfig(("510300", "563360"), {}, {}, "stable-fingerprint")

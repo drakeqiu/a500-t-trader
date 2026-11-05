@@ -7,6 +7,7 @@ COPY pyproject.toml uv.lock README.md ./
 COPY wheels/ ./wheels/
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
+COPY config/ ./config/
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH" \
