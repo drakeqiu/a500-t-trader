@@ -97,6 +97,24 @@ class AccountSnapshotStore:
         snapshot["classification"] = CLASSIFICATION
         return snapshot
 
+    def history_for_subject(self, subject: str) -> list[dict[str, object]]:
+        """Return retained audit records for persistence-boundary consumers."""
+        with sqlite3.connect(self.path) as db:
+            db.row_factory = sqlite3.Row
+            rows = db.execute(
+                "SELECT snapshot_json,updated_at,classification FROM "
+                "account_snapshot_history WHERE subject=? ORDER BY id",
+                (subject,),
+            )
+        return [
+            {
+                "snapshot": json.loads(row["snapshot_json"]),
+                "updated_at": row["updated_at"],
+                "classification": row["classification"],
+            }
+            for row in rows
+        ]
+
     def save_snapshot(
         self, subject: str, snapshot: dict[str, object], *, updated_at: str | None = None
     ) -> None:
@@ -167,9 +185,44 @@ _SNAPSHOT_FIELDS = {
     "as_of", "holdings", "protected_floor", "sellable", "cost_basis", "available_cash"
 }
 _RFC3339 = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:(?P<second>\d{2})(?:\.\d+)?"
     r"(?:[Zz]|[+-]\d{2}:\d{2})$"
 )
+_LEAP_SECOND_DATES = frozenset(
+    {
+        "1972-06-30", "1972-12-31", "1973-12-31", "1974-12-31",
+        "1975-12-31", "1976-12-31", "1977-12-31", "1978-12-31",
+        "1979-12-31", "1981-06-30", "1982-06-30", "1983-06-30",
+        "1985-06-30", "1987-12-31", "1989-12-31", "1990-12-31",
+        "1992-06-30", "1993-06-30", "1994-06-30", "1995-12-31",
+        "1997-06-30", "1998-12-31", "2005-12-31", "2008-12-31",
+        "2012-06-30", "2015-06-30", "2016-12-31",
+    }
+)
+
+
+def _valid_rfc3339_timestamp(value: str) -> bool:
+    match = _RFC3339.fullmatch(value)
+    if match is None:
+        return False
+    leap_second = match["second"] == "60"
+    if leap_second:
+        value = value.replace(":60", ":59", 1)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00").replace("z", "+00:00"))
+        if parsed.utcoffset() is None:
+            return False
+        if not leap_second:
+            return True
+        utc_next_second = parsed.astimezone(UTC).replace(tzinfo=None)
+        return (
+            utc_next_second.hour == 23
+            and utc_next_second.minute == 59
+            and utc_next_second.second == 59
+            and utc_next_second.date().isoformat() in _LEAP_SECOND_DATES
+        )
+    except (ValueError, OverflowError):
+        return False
 _DECIMAL = re.compile(r"^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
@@ -216,14 +269,8 @@ def _validate_snapshot(value: object) -> dict[str, object]:
             raise _SnapshotValidationError(field, "invalid_type")
 
     as_of = value["as_of"]
-    if not isinstance(as_of, str) or not _RFC3339.fullmatch(as_of):
+    if not isinstance(as_of, str) or not _valid_rfc3339_timestamp(as_of):
         raise _SnapshotValidationError("as_of", "invalid_timestamp")
-    try:
-        parsed = datetime.fromisoformat(as_of.replace("Z", "+00:00").replace("z", "+00:00"))
-        if parsed.utcoffset() is None:
-            raise ValueError
-    except (ValueError, OverflowError) as exc:
-        raise _SnapshotValidationError("as_of", "invalid_timestamp") from exc
 
     def decimal_string(name: str, amount: object) -> str:
         if not isinstance(amount, str):
@@ -303,6 +350,31 @@ def _validate_snapshot(value: object) -> dict[str, object]:
         "cost_basis": normalized_cost,
         "available_cash": decimal_string("available_cash", value["available_cash"]),
     }
+
+
+def _authenticated_subject(auth: Authenticator, authorization: str | None) -> str:
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Bearer credentials required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    scheme, separator, token = authorization.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not separator or not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Bearer credentials required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return auth(token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid bearer credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
@@ -318,28 +390,7 @@ def create_app(
     def get_account_snapshot(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        if authorization is None:
-            raise HTTPException(
-                status_code=401,
-                detail="Bearer credentials required",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        scheme, separator, token = authorization.partition(" ")
-        token = token.strip()
-        if scheme.lower() != "bearer" or not separator or not token:
-            raise HTTPException(
-                status_code=401,
-                detail="Bearer credentials required",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        try:
-            subject = auth(token)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid bearer credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
+        subject = _authenticated_subject(auth, authorization)
         snapshot = store.get_snapshot(subject)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="Account snapshot not found")
@@ -352,19 +403,7 @@ def create_app(
         if_match: str | None = Header(default=None, alias="If-Match"),
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
     ) -> JSONResponse:
-        if authorization is None:
-            raise HTTPException(status_code=401, detail="Bearer credentials required",
-                                headers={"WWW-Authenticate": "Bearer"})
-        scheme, separator, token = authorization.partition(" ")
-        token = token.strip()
-        if scheme.lower() != "bearer" or not separator or not token:
-            raise HTTPException(status_code=401, detail="Bearer credentials required",
-                                headers={"WWW-Authenticate": "Bearer"})
-        try:
-            subject = auth(token)
-        except Exception as exc:
-            raise HTTPException(status_code=401, detail="Invalid bearer credentials",
-                                headers={"WWW-Authenticate": "Bearer"}) from exc
+        subject = _authenticated_subject(auth, authorization)
         try:
             snapshot = json.loads(
                 await request.body(), parse_constant=_reject_json_constant
