@@ -34,6 +34,19 @@ def _state() -> dict[str, object]:
     }
 
 
+
+def test_app_constructs_and_serves_authenticated_signal_route() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/signals",
+            headers={"Authorization": "Bearer alice-token"},
+        )
+        assert response.status_code == 200
+        client.portal.call(lambda: redis.aclose())
+
+
 def test_signal_query_and_sse_require_valid_shared_audience_bearer() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
