@@ -17,6 +17,7 @@ from typing import Annotated, Protocol, cast
 
 import jwt
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
@@ -472,10 +473,43 @@ def create_app(
     auth = authenticator or OIDCAuthenticator.from_environment()
     store = AccountSnapshotStore(path)
     ledger = AccountLedger(path)
-    app = FastAPI(title="A500 account snapshot API")
+    app = FastAPI(
+        title="A500 account snapshot API",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.account_snapshot_store = store
     app.state.account_ledger = ledger
     app.state.market_data = market_data
+
+    @app.get("/openapi.json", include_in_schema=False)
+    async def openapi_schema(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        _authenticated_subject(auth, authorization)
+        return app.openapi()
+
+    @app.get("/docs", include_in_schema=False)
+    async def swagger_docs(
+        authorization: str | None = Header(default=None),
+    ) -> object:
+        _authenticated_subject(auth, authorization)
+        return get_swagger_ui_html(
+            openapi_url="/openapi.json",
+            title=f"{app.title} - Swagger UI",
+        )
+
+    @app.get("/redoc", include_in_schema=False)
+    async def redoc_docs(
+        authorization: str | None = Header(default=None),
+    ) -> object:
+        _authenticated_subject(auth, authorization)
+        return get_redoc_html(
+            openapi_url="/openapi.json",
+            title=f"{app.title} - ReDoc",
+        )
+
     with sqlite3.connect(str(path)) as db:
         db.execute(
             """CREATE TABLE IF NOT EXISTS trade_import_batches (

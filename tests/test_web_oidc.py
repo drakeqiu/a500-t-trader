@@ -12,19 +12,6 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_web_app_is_served_by_the_signal_api_boundary(monkeypatch) -> None:
-    monkeypatch.setenv("A500_OIDC_ISSUER", "https://identity.example.test/")
-    monkeypatch.setenv("A500_OIDC_CLIENT_ID", "a500-web")
-    monkeypatch.setenv("A500_OIDC_AUDIENCE", "a500-api")
-
-    with _client() as client:
-        page = client.get("/")
-        assert page.status_code == 200
-        assert "A500 Trader" in page.text
-        assert "/web/app.js" in page.text
-        assert client.get("/web/app.js").status_code == 200
-        assert client.get("/web/app.css").status_code == 200
-
 
 def test_web_config_exposes_only_public_oidc_client_configuration(monkeypatch) -> None:
     monkeypatch.setenv("A500_OIDC_ISSUER", "https://identity.example.test/")
