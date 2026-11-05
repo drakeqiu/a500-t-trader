@@ -7,17 +7,27 @@ import json
 import os
 import re
 import sqlite3
+import time
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Annotated, Protocol, cast
 
 import jwt
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
+from .account_ledger import (
+    GALAXY_CLASSIFICATION,
+    GALAXY_SOURCE,
+    AccountLedger,
+    _create_imported_fills,
+    _same_trade,
+    preview_galaxy_fills,
+)
 from .market_data import normalize_symbol
 
 CLASSIFICATION = "user-entered; not broker-verified"
@@ -406,6 +416,12 @@ def _validate_snapshot(value: object) -> dict[str, object]:
     }
 
 
+def _json_default(value: object) -> str:
+    if isinstance(value, (datetime, Decimal)):
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+    raise TypeError(f"unsupported JSON value: {type(value).__name__}")
+
+
 def _authenticated_subject(auth: Authenticator, authorization: str | None) -> str:
     if authorization is None:
         raise HTTPException(
@@ -431,6 +447,11 @@ def _authenticated_subject(auth: Authenticator, authorization: str | None) -> st
         ) from exc
 
 
+MAX_TRADE_IMPORT_BYTES = 5 * 1024 * 1024
+MAX_TRADE_IMPORT_ROWS = 10_000
+TRADE_IMPORT_BATCH_TTL_SECONDS = 15 * 60
+
+
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
@@ -439,8 +460,151 @@ def create_app(
     path = database or os.environ.get("A500_ACCOUNT_DATABASE", "accounts.sqlite3")
     auth = authenticator or OIDCAuthenticator.from_environment()
     store = AccountSnapshotStore(path)
+    ledger = AccountLedger(path)
     app = FastAPI(title="A500 account snapshot API")
     app.state.account_snapshot_store = store
+    app.state.account_ledger = ledger
+    with sqlite3.connect(str(path)) as db:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS trade_import_batches (
+                batch_id TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                records_json TEXT NOT NULL,
+                errors_json TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL
+            )"""
+        )
+        columns = {
+            row[1] for row in db.execute("PRAGMA table_info(trade_import_batches)")
+        }
+        if "confirmed_json" not in columns:
+            db.execute(
+                "ALTER TABLE trade_import_batches ADD COLUMN confirmed_json TEXT"
+            )
+
+    @app.post("/v1/trade-imports/previews")
+    async def preview_trade_import(
+        file: Annotated[UploadFile, File()],
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        content = await file.read(MAX_TRADE_IMPORT_BYTES + 1)
+        if len(content) > MAX_TRADE_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="Upload exceeds 5 MiB limit")
+        result = preview_galaxy_fills(
+            path, content, owner=subject, max_rows=MAX_TRADE_IMPORT_ROWS
+        )
+        error_details = cast(list[dict[str, object]], result["error_details"])
+        if any(error["field"] == "limit" for error in error_details):
+            raise HTTPException(status_code=413, detail="CSV exceeds 10,000 row limit")
+        if any(error["field"] == "header" for error in error_details):
+            raise HTTPException(status_code=422, detail="Unsupported Galaxy CSV format")
+        records = result.pop("_records")
+        batch_id = str(uuid.uuid4())
+        now = time.time()
+        with sqlite3.connect(str(path)) as db:
+            db.execute(
+                """DELETE FROM trade_import_batches
+                   WHERE expires_at<=? AND confirmed_json IS NULL""",
+                (now,),
+            )
+            db.execute(
+                """INSERT INTO trade_import_batches(
+                    batch_id,owner,records_json,errors_json,summary_json,
+                    created_at,expires_at,confirmed_json
+                ) VALUES(?,?,?,?,?,?,?,NULL)""",
+                (
+                    batch_id,
+                    subject,
+                    json.dumps(records, default=_json_default),
+                    json.dumps(result["error_details"]),
+                    json.dumps(
+                        {
+                            key: result[key]
+                            for key in ("valid", "new", "duplicates", "errors")
+                        }
+                    ),
+                    now,
+                    now + TRADE_IMPORT_BATCH_TTL_SECONDS,
+                ),
+            )
+        return JSONResponse(
+            {
+                "batch_id": batch_id,
+                "valid": result["valid"],
+                "new": result["new"],
+                "duplicates": result["duplicates"],
+                "errors": result["errors"],
+                "error_details": result["error_details"],
+            }
+        )
+
+    @app.get("/v1/trade-imports/previews/{batch_id}")
+    def get_trade_import_result(
+        batch_id: str,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        with sqlite3.connect(str(path)) as db:
+            db.row_factory = sqlite3.Row
+            batch = db.execute(
+                """SELECT summary_json,errors_json,confirmed_json,expires_at
+                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                (batch_id, subject),
+            ).fetchone()
+        if batch is None or (
+            batch["confirmed_json"] is None and batch["expires_at"] <= time.time()
+        ):
+            raise HTTPException(status_code=404, detail="Preview not found")
+        summary = json.loads(batch["summary_json"])
+        return JSONResponse(
+            {
+                "batch_id": batch_id,
+                **summary,
+                "error_details": json.loads(batch["errors_json"]),
+                "confirmed": (
+                    json.loads(batch["confirmed_json"])
+                    if batch["confirmed_json"] is not None
+                    else None
+                ),
+            }
+        )
+
+    @app.post("/v1/trade-imports/previews/{batch_id}/confirm")
+    def confirm_trade_import(
+        batch_id: str,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        with sqlite3.connect(str(path)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN IMMEDIATE")
+            batch = db.execute(
+                """SELECT records_json,errors_json,expires_at,confirmed_json
+                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                (batch_id, subject),
+            ).fetchone()
+            if batch is None:
+                raise HTTPException(status_code=404, detail="Preview not found")
+            if batch["confirmed_json"] is not None:
+                return JSONResponse(json.loads(batch["confirmed_json"]))
+            if batch["expires_at"] <= time.time():
+                raise HTTPException(status_code=404, detail="Preview not found")
+            if json.loads(batch["errors_json"]):
+                raise HTTPException(
+                    status_code=409, detail="Preview contains validation errors"
+                )
+            result = _confirm_trade_import_records(
+                db, json.loads(batch["records_json"]), subject
+            )
+            db.execute(
+                """UPDATE trade_import_batches
+                   SET confirmed_json=?,records_json='[]' WHERE batch_id=?""",
+                (json.dumps(result), batch_id),
+            )
+        return JSONResponse(result)
 
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(
@@ -483,3 +647,72 @@ def create_app(
         )
 
     return app
+
+
+def _confirm_trade_import_records(
+    db: sqlite3.Connection, records: list[dict[str, object]], owner: str
+) -> dict[str, object]:
+    _create_imported_fills(db)
+    existing = {
+        str(row["trade_number"]): dict(row)
+        for row in db.execute(
+            "SELECT * FROM imported_fills WHERE source=? AND owner=?",
+            (GALAXY_SOURCE, owner),
+        )
+    }
+    seen: dict[str, dict[str, object]] = {}
+    candidates: list[dict[str, object]] = []
+    duplicates = 0
+    for record in records:
+        number = str(record["trade_number"])
+        previous = seen.get(number) or existing.get(number)
+        if previous is not None:
+            if not _same_trade(previous, record):
+                raise HTTPException(
+                    status_code=409, detail="Preview conflicts with existing trade"
+                )
+            duplicates += 1
+            continue
+        seen[number] = record
+        candidates.append(record)
+    ids: list[int] = []
+    for record in candidates:
+        cursor = db.execute(
+            """INSERT INTO imported_fills(
+                owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
+                stamp_duty,other_charges,occurrence_amount,source,trade_number,
+                contract_number,classification
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (owner,)
+            + tuple(
+                record[key]
+                for key in (
+                    "timestamp",
+                    "symbol",
+                    "side",
+                    "quantity",
+                    "price",
+                    "trade_amount",
+                    "fees",
+                    "stamp_duty",
+                    "other_charges",
+                    "occurrence_amount",
+                    "source",
+                    "trade_number",
+                    "contract_number",
+                )
+            )
+            + (GALAXY_CLASSIFICATION,),
+        )
+        inserted_id = cursor.lastrowid
+        if inserted_id is None:
+            raise RuntimeError("SQLite did not return an imported fill ID")
+        ids.append(inserted_id)
+    return {
+        "valid": len(records),
+        "new": len(ids),
+        "duplicates": duplicates,
+        "errors": 0,
+        "inserted_ids": ids,
+        "confirmed": True,
+    }

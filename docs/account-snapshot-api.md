@@ -20,3 +20,13 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
 
 未提供有效 OIDC 配置时应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；测试可通过 `create_app(database, authenticator)` 使用临时数据库与确定性身份验证替身。
+
+## 成交文件预览
+
+`POST /v1/trade-imports/previews` 接受 multipart 字段 `file`，只支持现有银河证券 GB18030 CSV 表头。请求必须使用与账户快照相同的 Bearer 认证；所有权仅来自验证后的 OIDC `sub`。上传上限为 5 MiB、10,000 条记录，超限返回 `413`，不支持的格式返回 `422`。
+
+预览响应包含 `batch_id`、`valid`、`new`、`duplicates`、`errors` 和脱敏 `error_details`。预览不会写入成交记录或更新账户快照；仅将解析后的成交暂存 15 分钟，不保留原始上传文件。无效行的错误只包含 CSV 行号、字段和固定原因，不包含原始行内容、股东账户号或资金余额。导入成交独立存储，并标记为用户提供、未经系统核实。
+
+通过 `POST /v1/trade-imports/previews/{batch_id}/confirm` 显式确认预览。主体必须与创建预览的已验证 `sub` 相同；其他主体及不存在或已过期的未确认批次返回 `404`。含校验错误的预览返回 `409` 且不写入。成功响应含 `valid`、`new`、`duplicates`、`errors`、`inserted_ids` 和 `confirmed`；同一主体重复确认返回首次确认的相同结果，不会重复插入。确认成功后立即清除暂存的解析记录。
+
+`GET /v1/trade-imports/previews/{batch_id}` 返回当前主体可见批次的持久化预览结果：`batch_id`、预览汇总、脱敏 `error_details`，以及 `confirmed`（未确认时为 `null`，确认后为首次确认响应）。只有创建批次的已验证 `sub` 可读取；其他主体、不存在或已过期的未确认批次统一返回 `404`。已确认批次的结果在解析记录清除后仍可查询及重复确认。响应不包含原始 CSV 或其他主体的记录。

@@ -163,10 +163,41 @@ class AccountLedger:
 
 
 def import_galaxy_fills(
-    database: str | Path, csv_file: str | Path, *, confirm: bool = False
+    database: str | Path,
+    csv_file: str | Path,
+    *,
+    confirm: bool = False,
+    owner: str | None = None,
 ) -> dict[str, object]:
     """Validate a Galaxy export and optionally atomically persist its fills."""
     records, errors = _read_galaxy_fills(csv_file)
+    return _classify_galaxy_fills(
+        database, records, errors, confirm=confirm, owner=owner
+    )
+
+
+def preview_galaxy_fills(
+    database: str | Path,
+    content: bytes,
+    *,
+    owner: str,
+    max_rows: int = 10_000,
+) -> dict[str, object]:
+    """Validate uploaded CSV bytes and classify against one authenticated owner."""
+    records, errors = _parse_galaxy_fills_bytes(content, max_rows=max_rows)
+    result = _classify_galaxy_fills(database, records, errors, owner=owner)
+    result["_records"] = records
+    return result
+
+
+def _classify_galaxy_fills(
+    database: str | Path,
+    records: list[dict[str, object]],
+    errors: list[dict[str, object]],
+    *,
+    confirm: bool = False,
+    owner: str | None = None,
+) -> dict[str, object]:
     inserted_ids: list[int] = []
     candidates: list[dict[str, object]] = []
     duplicates = 0
@@ -208,19 +239,20 @@ def import_galaxy_fills(
             existing = {
                 str(row["trade_number"]): dict(row)
                 for row in db.execute(
-                    "SELECT * FROM imported_fills WHERE source=?",
-                    (GALAXY_SOURCE,),
+                    "SELECT * FROM imported_fills WHERE source=? AND owner IS ?",
+                    (GALAXY_SOURCE, owner),
                 )
             }
             candidates, duplicates = classify(existing)
             for record in candidates:
                 cursor = db.execute(
                     """INSERT INTO imported_fills(
-                        timestamp,symbol,side,quantity,price,trade_amount,fees,
+                        owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
                         stamp_duty,other_charges,occurrence_amount,source,
                         trade_number,contract_number,classification
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    tuple(
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (owner,)
+                    + tuple(
                         record[key]
                         for key in (
                             "timestamp",
@@ -251,8 +283,9 @@ def import_galaxy_fills(
                     preview_existing = {
                         str(row["trade_number"]): dict(row)
                         for row in db.execute(
-                            "SELECT * FROM imported_fills WHERE source=?",
-                            (GALAXY_SOURCE,),
+                            "SELECT * FROM imported_fills "
+                            "WHERE source=? AND owner IS ?",
+                            (GALAXY_SOURCE, owner),
                         )
                     }
         candidates, duplicates = classify(preview_existing)
@@ -272,8 +305,20 @@ def _read_galaxy_fills(
     csv_file: str | Path,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     try:
-        text = Path(csv_file).read_bytes().decode("gb18030", errors="strict")
-    except OSError, UnicodeError:
+        content = Path(csv_file).read_bytes()
+    except OSError:
+        return [], [
+            {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
+        ]
+    return _parse_galaxy_fills_bytes(content)
+
+
+def _parse_galaxy_fills_bytes(
+    content: bytes, *, max_rows: int | None = None
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    try:
+        text = content.decode("gb18030", errors="strict")
+    except UnicodeError:
         return [], [
             {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
         ]
@@ -297,10 +342,20 @@ def _read_galaxy_fills(
 
     parsed: list[dict[str, object]] = []
     errors: list[dict[str, object]] = []
+    record_count = 0
     try:
         for row_number, row in enumerate(rows, 2):
             if not row or all(not value.strip() for value in row):
                 continue
+            record_count += 1
+            if max_rows is not None and record_count > max_rows:
+                return [], [
+                    {
+                        "row": row_number,
+                        "field": "limit",
+                        "reason": "CSV exceeds 10,000 row limit",
+                    }
+                ]
             if len(row) != len(GALAXY_HEADER) or row[-1] != "":
                 errors.append(
                     {
@@ -427,9 +482,36 @@ def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
 
 
 def _create_imported_fills(db: sqlite3.Connection) -> None:
+    if not _table_exists(db, "imported_fills"):
+        _create_imported_fills_table(db)
+    else:
+        columns = {
+            str(row[1]) for row in db.execute("PRAGMA table_info(imported_fills)")
+        }
+        if "owner" not in columns:
+            db.execute("ALTER TABLE imported_fills RENAME TO imported_fills_legacy")
+            _create_imported_fills_table(db)
+            db.execute(
+                """INSERT INTO imported_fills(
+                    id,owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
+                    stamp_duty,other_charges,occurrence_amount,source,trade_number,
+                    contract_number,classification
+                ) SELECT id,NULL,timestamp,symbol,side,quantity,price,trade_amount,fees,
+                    stamp_duty,other_charges,occurrence_amount,source,trade_number,
+                    contract_number,classification FROM imported_fills_legacy"""
+            )
+            db.execute("DROP TABLE imported_fills_legacy")
     db.execute(
-        """CREATE TABLE IF NOT EXISTS imported_fills (
+        "CREATE UNIQUE INDEX IF NOT EXISTS imported_fills_owner_trade "
+        "ON imported_fills(COALESCE(owner,''),source,trade_number)"
+    )
+
+
+def _create_imported_fills_table(db: sqlite3.Connection) -> None:
+    db.execute(
+        """CREATE TABLE imported_fills (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner TEXT,
             timestamp TEXT NOT NULL,
             symbol TEXT NOT NULL,
             side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
@@ -444,7 +526,7 @@ def _create_imported_fills(db: sqlite3.Connection) -> None:
             trade_number TEXT NOT NULL,
             contract_number TEXT NOT NULL,
             classification TEXT NOT NULL,
-            UNIQUE(source, trade_number)
+            UNIQUE(owner, source, trade_number)
         )"""
     )
 
