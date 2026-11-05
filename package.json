@@ -3,11 +3,9 @@
   "private": true,
   "scripts": {
     "format:check": "prettier --plugin prettier-plugin-toml --check '**/*.{json,yaml,yml,toml}'",
-    "format": "prettier --plugin prettier-plugin-toml --write '**/*.{json,yaml,yml,toml}'",
-    "test:web:browser": "playwright test tests/browser"
+    "format": "prettier --plugin prettier-plugin-toml --write '**/*.{json,yaml,yml,toml}'"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
     "prettier": "^3.9.10",
     "prettier-plugin-toml": "^4.1.0"
   }

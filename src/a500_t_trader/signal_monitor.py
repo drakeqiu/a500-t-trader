@@ -157,9 +157,6 @@ def create_app(
     store = SignalStore(redis)
     app.state.signal_store = store
     app.state.redis = redis
-    from .web_oidc import create_web_router
-
-    app.include_router(create_web_router())
 
     async def require_auth(
         credentials: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008

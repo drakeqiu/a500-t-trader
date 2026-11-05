@@ -2,7 +2,7 @@
 
 ## 角色与边界
 
-`signal-api` 是只读 FastAPI 服务，通过异步 Redis 客户端读取共享当前状态并提供 SSE；它不连接 RabbitMQ、TGW、券商，也不计算信号或提交委托。`signal-calculator` 是独立的规范化行情消费者，使用相同的 `config/intraday-signals.yaml` 和 V1 评估逻辑，将状态写入 Redis。网页服务副本数量不会改变行情消费者或策略评估数量。状态及有序方向事件存储在 Redis，Redis 使用 AOF 持久化；不能用 Pub/Sub 替代 Streams。
+`signal-api` 是只读 FastAPI 服务，通过异步 Redis 客户端读取共享当前状态并提供 SSE；它不连接 RabbitMQ、TGW、券商，也不计算信号或提交委托。`signal-calculator` 是独立的规范化行情消费者，使用相同的 `config/intraday-signals.yaml` 和 V1 评估逻辑，将状态写入 Redis。状态及有序方向事件存储在 Redis，Redis 使用 AOF 持久化；不能用 Pub/Sub 替代 Streams。
 
 ## Compose 部署
 
@@ -65,10 +65,9 @@ curl -H "Authorization: Bearer ${ACCESS_TOKEN}" \
 A500_OIDC_ISSUER=https://identity.example.internal/realms/a500
 A500_OIDC_AUDIENCE=a500-api
 A500_OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
-A500_OIDC_CLIENT_ID=a500-device-client
 ```
 
-实际值必须与 IdP 配置一致，issuer 必须与令牌 `iss` 完全匹配，JWKS URI 必须可从 API 容器网络访问。`KEYCLOAK_ADMIN_USERNAME` 和 `KEYCLOAK_ADMIN_PASSWORD` 仅用于本地 Keycloak bootstrap 管理员；生产外部 IdP 的管理员凭据应由运行环境的密钥管理/secret 注入提供，不得写入镜像、仓库、文档或应用 `.env`。Compose 使用 `.env` 时文件必须未提交且限制访问。
+实际值必须与 IdP 配置一致，issuer 必须与令牌 `iss` 完全匹配，JWKS URI 必须可从 API 容器网络访问；`a500-device-client` 的 client ID 只配置在调用方的 OAuth 设备授权客户端中，不是 A500 API 环境变量。`KEYCLOAK_ADMIN_USERNAME` 和 `KEYCLOAK_ADMIN_PASSWORD` 仅用于本地 Keycloak bootstrap 管理员；生产外部 IdP 的管理员凭据应由运行环境的密钥管理/secret 注入提供，不得写入镜像、仓库、文档或应用 `.env`。Compose 使用 `.env` 时文件必须未提交且限制访问。
 
 在部署主机提供环境变量或未提交的 `.env` 文件后启动内部网关与 API：
 
@@ -107,3 +106,4 @@ server {
     }
 }
 ```
+
