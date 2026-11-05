@@ -202,7 +202,7 @@ def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
         )
 
 
-def test_trade_import_result_returns_404_for_expired_batch(
+def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "accounts.sqlite3"
@@ -213,18 +213,112 @@ def test_trade_import_result_returns_404_for_expired_batch(
             headers=alice,
             files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
         ).json()
+        url = f"/v1/trade-imports/previews/{preview['batch_id']}"
         with sqlite3.connect(database) as db:
             db.execute(
                 "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
                 (preview["batch_id"],),
             )
-        assert (
-            client.get(
-                f"/v1/trade-imports/previews/{preview['batch_id']}", headers=alice
-            ).status_code
-            == 404
+        assert client.get(url, headers=alice).status_code == 404
+        assert client.post(f"{url}/confirm", headers=alice).status_code == 404
+
+
+def test_trade_import_expired_confirmed_batch_retains_result_without_records(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        alice = {"Authorization": "Bearer alice-token"}
+        bob = {"Authorization": "Bearer bob-token"}
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers=alice,
+            files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
+        ).json()
+        batch_id = preview["batch_id"]
+        result_url = f"/v1/trade-imports/previews/{batch_id}"
+        confirm_url = f"{result_url}/confirm"
+        confirmed = client.post(confirm_url, headers=alice)
+        with sqlite3.connect(database) as db:
+            records = db.execute(
+                "SELECT records_json FROM trade_import_batches WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            db.execute(
+                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
+                (batch_id,),
+            )
+
+        assert records == ("[]",)
+        assert client.get(result_url, headers=bob).status_code == 404
+        assert client.post(confirm_url, headers=bob).status_code == 404
+        fetched = client.get(result_url, headers=alice)
+        repeated = client.post(confirm_url, headers=alice)
+        assert fetched.status_code == repeated.status_code == 200
+        assert fetched.json()["confirmed"] == confirmed.json()
+        assert repeated.json() == confirmed.json()
+
+
+def test_trade_import_preview_migrates_legacy_imported_fills(tmp_path: Path) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """CREATE TABLE imported_fills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                price TEXT NOT NULL,
+                trade_amount TEXT NOT NULL,
+                fees TEXT NOT NULL,
+                stamp_duty TEXT NOT NULL,
+                other_charges TEXT NOT NULL,
+                occurrence_amount TEXT NOT NULL,
+                source TEXT NOT NULL,
+                trade_number TEXT NOT NULL,
+                contract_number TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                UNIQUE(source, trade_number)
+            )"""
+        )
+        db.execute(
+            """INSERT INTO imported_fills(
+                timestamp,symbol,side,quantity,price,trade_amount,fees,
+                stamp_duty,other_charges,occurrence_amount,source,trade_number,
+                contract_number,classification
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "2026-10-30T10:01:02",
+                "563360",
+                "buy",
+                8000,
+                "1.264",
+                "10112",
+                "0.510",
+                "0.000",
+                "0.000",
+                "-10112.510",
+                "galaxy",
+                "legacy-1001",
+                "legacy-contract",
+                "user-entered; not broker-verified",
+            ),
         )
 
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers={"Authorization": "Bearer alice-token"},
+            files={"file": ("fills.csv", _galaxy_csv("1002"), "text/csv")},
+        )
+
+    assert preview.status_code == 200
+    with sqlite3.connect(database) as db:
+        legacy_row = db.execute(
+            "SELECT owner,trade_number FROM imported_fills WHERE trade_number='legacy-1001'"
+        ).fetchone()
+    assert legacy_row == (None, "legacy-1001")
 
 def test_trade_import_confirmation_rejects_validation_error_preview(
     tmp_path: Path,

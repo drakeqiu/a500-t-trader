@@ -27,6 +27,6 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 
 预览响应包含 `batch_id`、`valid`、`new`、`duplicates`、`errors` 和脱敏 `error_details`。预览不会写入成交记录或更新账户快照；仅将解析后的成交暂存 15 分钟，不保留原始上传文件。无效行的错误只包含 CSV 行号、字段和固定原因，不包含原始行内容、股东账户号或资金余额。导入成交独立存储，并标记为用户提供、未经系统核实。
 
-通过 `POST /v1/trade-imports/previews/{batch_id}/confirm` 显式确认预览。主体必须与创建预览的已验证 `sub` 相同；其他主体及不存在或已过期的批次返回 `404`。含校验错误的预览返回 `409` 且不写入。成功响应含 `valid`、`new`、`duplicates`、`errors`、`inserted_ids` 和 `confirmed`；同一主体重复确认返回首次确认的相同结果，不会重复插入。批次与成交记录在同一事务中提交。
+通过 `POST /v1/trade-imports/previews/{batch_id}/confirm` 显式确认预览。主体必须与创建预览的已验证 `sub` 相同；其他主体及不存在或已过期的未确认批次返回 `404`。含校验错误的预览返回 `409` 且不写入。成功响应含 `valid`、`new`、`duplicates`、`errors`、`inserted_ids` 和 `confirmed`；同一主体重复确认返回首次确认的相同结果，不会重复插入。确认成功后立即清除暂存的解析记录。
 
-`GET /v1/trade-imports/previews/{batch_id}` 返回当前主体可见批次的持久化预览结果：`batch_id`、预览汇总、脱敏 `error_details`，以及 `confirmed`（未确认时为 `null`，确认后为首次确认响应）。只有创建批次的已验证 `sub` 可读取；其他主体、不存在或已过期的批次统一返回 `404`。响应不包含原始 CSV 或其他主体的记录。
+`GET /v1/trade-imports/previews/{batch_id}` 返回当前主体可见批次的持久化预览结果：`batch_id`、预览汇总、脱敏 `error_details`，以及 `confirmed`（未确认时为 `null`，确认后为首次确认响应）。只有创建批次的已验证 `sub` 可读取；其他主体、不存在或已过期的未确认批次统一返回 `404`。已确认批次的结果在解析记录清除后仍可查询及重复确认。响应不包含原始 CSV 或其他主体的记录。

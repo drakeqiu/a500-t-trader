@@ -496,15 +496,20 @@ def create_app(
         result = preview_galaxy_fills(
             path, content, owner=subject, max_rows=MAX_TRADE_IMPORT_ROWS
         )
-        if any(error["field"] == "limit" for error in result["error_details"]):
+        error_details = cast(list[dict[str, object]], result["error_details"])
+        if any(error["field"] == "limit" for error in error_details):
             raise HTTPException(status_code=413, detail="CSV exceeds 10,000 row limit")
-        if any(error["field"] == "header" for error in result["error_details"]):
+        if any(error["field"] == "header" for error in error_details):
             raise HTTPException(status_code=422, detail="Unsupported Galaxy CSV format")
         records = result.pop("_records")
         batch_id = str(uuid.uuid4())
         now = time.time()
         with sqlite3.connect(str(path)) as db:
-            db.execute("DELETE FROM trade_import_batches WHERE expires_at<=?", (now,))
+            db.execute(
+                """DELETE FROM trade_import_batches
+                   WHERE expires_at<=? AND confirmed_json IS NULL""",
+                (now,),
+            )
             db.execute(
                 """INSERT INTO trade_import_batches(
                     batch_id,owner,records_json,errors_json,summary_json,
@@ -549,7 +554,9 @@ def create_app(
                    FROM trade_import_batches WHERE batch_id=? AND owner=?""",
                 (batch_id, subject),
             ).fetchone()
-        if batch is None or batch["expires_at"] <= time.time():
+        if batch is None or (
+            batch["confirmed_json"] is None and batch["expires_at"] <= time.time()
+        ):
             raise HTTPException(status_code=404, detail="Preview not found")
         summary = json.loads(batch["summary_json"])
         return JSONResponse(
@@ -579,10 +586,12 @@ def create_app(
                    FROM trade_import_batches WHERE batch_id=? AND owner=?""",
                 (batch_id, subject),
             ).fetchone()
-            if batch is None or batch["expires_at"] <= time.time():
+            if batch is None:
                 raise HTTPException(status_code=404, detail="Preview not found")
             if batch["confirmed_json"] is not None:
                 return JSONResponse(json.loads(batch["confirmed_json"]))
+            if batch["expires_at"] <= time.time():
+                raise HTTPException(status_code=404, detail="Preview not found")
             if json.loads(batch["errors_json"]):
                 raise HTTPException(
                     status_code=409, detail="Preview contains validation errors"
@@ -591,7 +600,8 @@ def create_app(
                 db, json.loads(batch["records_json"]), subject
             )
             db.execute(
-                "UPDATE trade_import_batches SET confirmed_json=? WHERE batch_id=?",
+                """UPDATE trade_import_batches
+                   SET confirmed_json=?,records_json='[]' WHERE batch_id=?""",
                 (json.dumps(result), batch_id),
             )
         return JSONResponse(result)
@@ -694,7 +704,10 @@ def _confirm_trade_import_records(
             )
             + (GALAXY_CLASSIFICATION,),
         )
-        ids.append(int(cursor.lastrowid))
+        inserted_id = cursor.lastrowid
+        if inserted_id is None:
+            raise RuntimeError("SQLite did not return an imported fill ID")
+        ids.append(inserted_id)
     return {
         "valid": len(records),
         "new": len(ids),
