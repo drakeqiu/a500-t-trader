@@ -61,9 +61,7 @@ def state(symbol: str, status: str, timestamp: datetime) -> dict[str, object]:
     }
 
 
-def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_selection() -> (
-    None
-):
+def test_http_status_configured_symbols_and_selection() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
