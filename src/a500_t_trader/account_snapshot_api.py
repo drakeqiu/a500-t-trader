@@ -689,7 +689,9 @@ def create_app(
 
         if unavailable is None:
             amounts = [cash, *market_values]
-            min_exponent = min(amount.as_tuple().exponent for amount in amounts)
+            min_exponent = min(
+                cast(int, amount.as_tuple().exponent) for amount in amounts
+            )
             max_adjusted = max(amount.adjusted() for amount in amounts)
             with localcontext() as context:
                 context.prec = max_adjusted - min_exponent + len(str(len(amounts))) + 2

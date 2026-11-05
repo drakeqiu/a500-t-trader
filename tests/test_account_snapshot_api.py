@@ -3,11 +3,13 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
 
 from a500_t_trader.account_snapshot_api import AccountSnapshotStore, create_app
+from a500_t_trader.market_data import MarketDataSource
 
 
 class TestAuthenticator:
@@ -246,8 +248,8 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
     from datetime import UTC, datetime
 
     database = tmp_path / "accounts.sqlite3"
+    store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
-        store = client.app.state.account_snapshot_store
         store.save_snapshot(
             "alice",
             {
@@ -312,7 +314,7 @@ def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
         create_app(
             database,
             TestAuthenticator(),
-            market_data=MarketDataService(quotes),
+            market_data=MarketDataService(cast(MarketDataSource, quotes)),
         )
     ) as client:
         response = client.get(
@@ -399,7 +401,9 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
             create_app(
                 database,
                 TestAuthenticator(),
-                market_data=MarketDataService(Quotes("510300", failure)),
+                market_data=MarketDataService(
+                    cast(MarketDataSource, Quotes("510300", failure))
+                ),
             )
         ) as client:
             response = client.get(
@@ -422,7 +426,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
     from datetime import UTC, datetime
     from decimal import Decimal
 
-    price = Decimal(price)
+    decimal_price = Decimal(price)
     from a500_t_trader.market_data import MarketDataService, Snapshot
 
     now = datetime.now(UTC)
@@ -433,7 +437,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
                 symbol=symbol,
                 timestamp=now,
                 received_at=now,
-                last_price=price,
+                last_price=decimal_price,
             )
 
     database = tmp_path / "accounts.sqlite3"
@@ -452,7 +456,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
         create_app(
             database,
             TestAuthenticator(),
-            market_data=MarketDataService(Quotes()),
+            market_data=MarketDataService(cast(MarketDataSource, Quotes())),
         )
     ) as client:
         response = client.get(
@@ -468,8 +472,9 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
 
 def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime, timedelta, tzinfo
     from decimal import Decimal
 
     import a500_t_trader.account_snapshot_api as account_api
@@ -479,8 +484,18 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
 
     class FixedDateTime(datetime):
         @classmethod
-        def now(cls, tz=None):
-            return now if tz is not None else now.replace(tzinfo=None)
+        def now(cls, tz: tzinfo | None = None) -> FixedDateTime:
+            return cls(
+                now.year,
+                now.month,
+                now.day,
+                now.hour,
+                now.minute,
+                now.second,
+                now.microsecond,
+                tzinfo=now.tzinfo if tz is not None else None,
+                fold=now.fold,
+            )
 
     class Quotes:
         def get_snapshot(self, symbol: str) -> Snapshot:
@@ -503,21 +518,17 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
             "available_cash": "1",
         },
     )
-    original_datetime = account_api.datetime
-    account_api.datetime = FixedDateTime
-    try:
-        with TestClient(
-            create_app(
-                database,
-                TestAuthenticator(),
-                market_data=MarketDataService(Quotes()),
-            )
-        ) as client:
-            response = client.get(
-                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
-            )
-    finally:
-        account_api.datetime = original_datetime
+    monkeypatch.setattr(account_api, "datetime", FixedDateTime)
+    with TestClient(
+        create_app(
+            database,
+            TestAuthenticator(),
+            market_data=MarketDataService(cast(MarketDataSource, Quotes())),
+        )
+    ) as client:
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
 
     assert response.status_code == 200
     assert response.json()["status"] == "available"
@@ -560,7 +571,7 @@ def test_account_nav_preserves_decimal_precision_beyond_default_context(
         create_app(
             database,
             TestAuthenticator(),
-            market_data=MarketDataService(Quotes()),
+            market_data=MarketDataService(cast(MarketDataSource, Quotes())),
         )
     ) as client:
         response = client.get(
@@ -642,7 +653,7 @@ def test_account_nav_zero_holdings_requires_no_quotes(tmp_path: Path) -> None:
         create_app(
             database,
             TestAuthenticator(),
-            market_data=MarketDataService(NoQuotes()),
+            market_data=MarketDataService(cast(MarketDataSource, NoQuotes())),
         )
     ) as client:
         response = client.get(
