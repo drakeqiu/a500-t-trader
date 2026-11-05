@@ -2,6 +2,19 @@ x-podman:
   in_pod: false
 
 services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?KEYCLOAK_ADMIN_USERNAME is required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak/realm-a500.json:/opt/keycloak/data/import/realm-a500.json:ro
+    restart: unless-stopped
+
   rabbitmq:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
@@ -147,3 +160,4 @@ volumes:
   rabbitmq-data:
   signal-data:
   account-data:
+  keycloak-data:
