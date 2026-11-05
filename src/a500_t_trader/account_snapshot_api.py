@@ -534,6 +534,35 @@ def create_app(
                 "error_details": result["error_details"],
             }
         )
+    @app.get("/v1/trade-imports/previews/{batch_id}")
+    def get_trade_import_result(
+        batch_id: str,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        with sqlite3.connect(str(path)) as db:
+            db.row_factory = sqlite3.Row
+            batch = db.execute(
+                """SELECT summary_json,errors_json,confirmed_json,expires_at
+                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                (batch_id, subject),
+            ).fetchone()
+        if batch is None or batch["expires_at"] <= time.time():
+            raise HTTPException(status_code=404, detail="Preview not found")
+        summary = json.loads(batch["summary_json"])
+        return JSONResponse(
+            {
+                "batch_id": batch_id,
+                **summary,
+                "error_details": json.loads(batch["errors_json"]),
+                "confirmed": (
+                    json.loads(batch["confirmed_json"])
+                    if batch["confirmed_json"] is not None
+                    else None
+                ),
+            }
+        )
+
     @app.post("/v1/trade-imports/previews/{batch_id}/confirm")
     def confirm_trade_import(
         batch_id: str,

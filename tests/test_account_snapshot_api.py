@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import sqlite3
+
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -151,6 +152,67 @@ def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
     assert len(AccountLedger(database).imported_fills()) == 1
 
 
+
+def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
+    tmp_path: Path,
+) -> None:
+    with TestClient(
+        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
+    ) as client:
+        alice = {"Authorization": "Bearer alice-token"}
+        bob = {"Authorization": "Bearer bob-token"}
+        raw_secret = b"SECRET-ACCOUNT-NUMBER"
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers=alice,
+            files={"file": ("fills.csv", _galaxy_csv("1001") + raw_secret, "text/csv")},
+        ).json()
+        batch_id = preview["batch_id"]
+        url = f"/v1/trade-imports/previews/{batch_id}"
+
+        assert client.get(url).status_code == 404
+        assert client.get(url, headers=bob).status_code == 404
+        result = client.get(url, headers=alice)
+        assert result.status_code == 200
+        assert result.json() == {
+            "batch_id": batch_id,
+            "valid": preview["valid"],
+            "new": preview["new"],
+            "duplicates": preview["duplicates"],
+            "errors": preview["errors"],
+            "error_details": preview["error_details"],
+            "confirmed": None,
+        }
+        assert raw_secret.decode() not in result.text
+        assert client.post(
+            f"{url}/confirm", headers=alice
+        ).status_code == 200
+        confirmed = client.get(url, headers=alice)
+        assert confirmed.status_code == 200
+        assert confirmed.json()["confirmed"] == client.post(
+            f"{url}/confirm", headers=alice
+        ).json()
+
+
+def test_trade_import_result_returns_404_for_expired_batch(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        alice = {"Authorization": "Bearer alice-token"}
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers=alice,
+            files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
+        ).json()
+        with sqlite3.connect(database) as db:
+            db.execute(
+                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
+                (preview["batch_id"],),
+            )
+        assert client.get(
+            f"/v1/trade-imports/previews/{preview['batch_id']}", headers=alice
+        ).status_code == 404
 def test_trade_import_confirmation_rejects_validation_error_preview(
     tmp_path: Path,
 ) -> None:
