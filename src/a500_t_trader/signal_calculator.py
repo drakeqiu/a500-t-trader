@@ -6,7 +6,7 @@ import json
 import os
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -15,7 +15,11 @@ from redis import Redis
 
 from .cli.live_signals import _aggregate_five_minute, _evaluate
 from .market_data import MinuteBar
-from .strategy.intraday_v1_config import LiveSignalConfig, STRATEGY_ID, load_live_signal_config
+from .strategy.intraday_v1_config import (
+    STRATEGY_ID,
+    LiveSignalConfig,
+    load_live_signal_config,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -25,7 +29,7 @@ class SignalCalculator:
 
     def __init__(
         self,
-        redis: Redis[Any],
+        redis: Redis,
         config: LiveSignalConfig,
         evaluator: Callable[
             [str, MinuteBar, list[MinuteBar], LiveSignalConfig, datetime],
@@ -46,7 +50,10 @@ class SignalCalculator:
         if event.get("event_type") != "minute_bar":
             return
         raw = event.get("data")
-        if not isinstance(raw, dict) or raw.get("completed", raw.get("is_completed")) is False:
+        if (
+            not isinstance(raw, dict)
+            or raw.get("completed", raw.get("is_completed")) is False
+        ):
             return
         symbol = str(event.get("symbol", ""))
         if symbol not in self.config.etfs:
@@ -73,7 +80,7 @@ class SignalCalculator:
             bar = _aggregate_five_minute(start, bucket)
             bucket.clear()
         identity = f"{STRATEGY_ID}:{self.config.fingerprint}"
-        event_time = bar.timestamp.astimezone(timezone.utc).isoformat()
+        event_time = bar.timestamp.astimezone(UTC).isoformat()
         dedupe = f"a500:signals:dedupe:{identity}:{symbol}:{event_time}"
         if self.redis.get(dedupe) is not None:
             return
@@ -116,7 +123,11 @@ class SignalCalculator:
                     },
                 )
                 cutoff = int((datetime.now().timestamp() - 24 * 60 * 60) * 1000)
-                pipe.xtrim("a500:signals:events", minid=f"{cutoff}-0", approximate=False)
+                pipe.xtrim(
+                    "a500:signals:events",
+                    minid=f"{cutoff}-0",
+                    approximate=False,
+                )
             pipe.execute()
             self.histories[symbol] = history
             if event_type not in {"BUY", "SELL", "BUYBACK", "TAKE_PROFIT"}:
@@ -130,10 +141,15 @@ class SignalCalculator:
             self.redis.delete(claim)
 
 
-def run_signal_calculator(*, purpose: str = "signal-calculator", max_age: timedelta = timedelta(seconds=30)) -> None:
+def run_signal_calculator(
+    *, purpose: str = "signal-calculator", max_age: timedelta = timedelta(seconds=30)
+) -> None:
     from .market_data.consumer import RabbitMQConsumer
 
-    redis = Redis.from_url(os.environ.get("A500_REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+    redis = Redis.from_url(
+        os.environ.get("A500_REDIS_URL", "redis://localhost:6379/0"),
+        decode_responses=True,
+    )
     config = load_live_signal_config()
     if not config.etfs:
         raise ValueError("signal calculator requires configured ETF symbols")
