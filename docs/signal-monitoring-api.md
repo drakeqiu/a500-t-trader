@@ -13,7 +13,7 @@ Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A5
 ```sh
 export KEYCLOAK_ADMIN_USERNAME='本地管理员用户名'
 export KEYCLOAK_ADMIN_PASSWORD='本地管理员密码'
-docker compose up -d keycloak
+docker compose --profile keycloak up -d keycloak
 ```
 
 Keycloak 管理界面为 `http://127.0.0.1:8081`。Realm `a500` 从 `keycloak/realm-a500.json` 导入，设备授权 public client 为 `a500-device-client`，签发 `a500-api` audience。数据写入命名卷 `keycloak-data`，容器重启后保留；不要用 `docker compose down -v`，该命令会删除卷。Realm 文件负责初次导入；修改 Realm 配置时，应通过 Keycloak 管理界面更新现有 Realm，或在确认可丢弃数据后重建卷再导入。没有内置默认用户，Realm 自助注册关闭。管理员登录管理界面后，在 `a500` Realm 的 Users 页面显式创建并启用获准用户、设置其登录凭据；只向受信任用户发放账号，不开放注册入口。
