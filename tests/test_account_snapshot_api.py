@@ -316,7 +316,8 @@ def test_trade_import_preview_migrates_legacy_imported_fills(tmp_path: Path) -> 
     assert preview.status_code == 200
     with sqlite3.connect(database) as db:
         legacy_row = db.execute(
-            "SELECT owner,trade_number FROM imported_fills WHERE trade_number='legacy-1001'"
+            "SELECT owner,trade_number FROM imported_fills "
+            "WHERE trade_number='legacy-1001'"
         ).fetchone()
     assert legacy_row == (None, "legacy-1001")
 
