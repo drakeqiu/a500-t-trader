@@ -35,6 +35,7 @@ from .market_data import (
 )
 
 CLASSIFICATION = "user-entered; not broker-verified"
+SHARED_OIDC_AUDIENCE = "a500-api"
 
 
 class Authenticator(Protocol):
@@ -45,6 +46,10 @@ class OIDCAuthenticator:
     """Validate OIDC bearer JWT signatures and required identity claims."""
 
     def __init__(self, issuer: str, audience: str, jwks_uri: str) -> None:
+        if audience != SHARED_OIDC_AUDIENCE:
+            raise ValueError(
+                f"OIDC audience must be the shared audience {SHARED_OIDC_AUDIENCE!r}"
+            )
         self.issuer = issuer.rstrip("/")
         self.audience = audience
         self.jwks = PyJWKClient(jwks_uri)
