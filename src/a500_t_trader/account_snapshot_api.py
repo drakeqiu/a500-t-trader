@@ -660,6 +660,9 @@ def create_app(
                 if quote is None or quote.last_price is None:
                     unavailable = "quote_missing"
                     break
+                if not quote.last_price.is_finite() or quote.last_price <= 0:
+                    unavailable = "quote_invalid_price"
+                    break
                 quote_as_of = quote.timestamp.astimezone(UTC)
                 if quote_as_of > now:
                     unavailable = "quote_future"

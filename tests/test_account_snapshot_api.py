@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from a500_t_trader.account_snapshot_api import AccountSnapshotStore, create_app
 
@@ -412,6 +413,60 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
         assert response.json()["nav"] is None
         assert response.json()["holdings"] == []
 
+
+@pytest.mark.parametrize(
+    "price",
+    ["0", "-1", "Infinity", "-Infinity", "NaN"],
+    ids=["zero", "negative", "positive-infinity", "negative-infinity", "nan"],
+)
+def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
+    tmp_path: Path, price: str
+) -> None:
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    price = Decimal(price)
+    from a500_t_trader.market_data import MarketDataService, Snapshot
+
+    now = datetime.now(UTC)
+
+    class Quotes:
+        def get_snapshot(self, symbol: str) -> Snapshot:
+            return Snapshot(
+                symbol=symbol,
+                timestamp=now,
+                received_at=now,
+                last_price=price,
+            )
+
+    database = tmp_path / "accounts.sqlite3"
+    AccountSnapshotStore(database).save_snapshot(
+        "alice",
+        {
+            "as_of": now.isoformat(),
+            "holdings": {"510300": 2, "159915": 3},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {},
+            "available_cash": "10.00",
+        },
+    )
+    with TestClient(
+        create_app(
+            database,
+            TestAuthenticator(),
+            market_data=MarketDataService(Quotes()),
+        )
+    ) as client:
+        response = client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["nav"] is None
+    assert response.json()["holdings"] == []
+    assert response.json()["reason"] == "quote_invalid_price"
 
 def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
     tmp_path: Path,
