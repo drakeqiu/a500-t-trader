@@ -145,6 +145,7 @@ class AccountSnapshotStore:
         """Conditionally replace the current snapshot and append its audit record."""
         written_at = updated_at or datetime.now(UTC).isoformat()
         with sqlite3.connect(self.path, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT snapshot_json,updated_at "
                 "FROM account_snapshot_current WHERE subject=?",
