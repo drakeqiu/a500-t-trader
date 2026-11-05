@@ -199,6 +199,18 @@ def test_health_reports_redis_unavailability() -> None:
         client.portal.call(lambda: redis.aclose())
 
 
+def test_signal_query_reports_redis_unavailability_without_signal_data() -> None:
+    server = fakeredis.FakeServer()
+    server.connected = False
+    redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    with TestClient(create_app(redis, CONFIG)) as client:
+        assert client.portal is not None
+        response = client.get("/v1/signals")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "signal store unavailable"}
+        client.portal.call(lambda: redis.aclose())
+
+
 def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
