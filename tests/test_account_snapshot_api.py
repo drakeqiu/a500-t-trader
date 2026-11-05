@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ class TestAuthenticator:
         return token.removesuffix("-token")
 
 
-SNAPSHOT = {
+SNAPSHOT: Mapping[str, object] = {
     "as_of": "2026-11-04T09:30:00+08:00",
     "holdings": {"510300": 100},
     "protected_floor": {"510300": 20},
@@ -129,6 +130,7 @@ def test_put_requires_matching_etag_and_keeps_successful_history(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "accounts.sqlite3"
+    store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
         first = client.put(
@@ -167,7 +169,7 @@ def test_put_requires_matching_etag_and_keeps_successful_history(
             ).status_code
             == 412
         )
-        history = client.app.state.account_snapshot_store.history_for_subject("alice")
+        history = store.history_for_subject("alice")
         assert [record["snapshot"] for record in history] == [SNAPSHOT, changed]
         assert all(
             record["classification"] == "user-entered; not broker-verified"
@@ -233,6 +235,7 @@ def test_put_rejects_invalid_json_with_problem_400(tmp_path: Path) -> None:
 
 def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
     database = tmp_path / "accounts.sqlite3"
+    store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         headers = {
             "Authorization": "Bearer alice-token",
@@ -338,7 +341,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             == 404
         )
         assert (
-            client.app.state.account_snapshot_store.history_for_subject("alice") == []
+            store.history_for_subject("alice") == []
         )
         created = client.put(
             "/v1/account-snapshot",
@@ -359,7 +362,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             == SNAPSHOT["holdings"]
         )
         assert (
-            len(client.app.state.account_snapshot_store.history_for_subject("alice"))
+            len(store.history_for_subject("alice"))
             == 1
         )
 

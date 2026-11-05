@@ -7,10 +7,11 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -92,7 +93,7 @@ class AccountSnapshotStore:
             ).fetchone()
         if row is None:
             return None
-        snapshot = json.loads(row[0])
+        snapshot = cast(dict[str, object], json.loads(row[0]))
         snapshot["updated_at"] = row[1]
         snapshot["classification"] = CLASSIFICATION
         return snapshot
@@ -118,7 +119,7 @@ class AccountSnapshotStore:
     def save_snapshot(
         self,
         subject: str,
-        snapshot: dict[str, object],
+        snapshot: Mapping[str, object],
         *,
         updated_at: str | None = None,
     ) -> None:
@@ -136,7 +137,7 @@ class AccountSnapshotStore:
     def put_snapshot(
         self,
         subject: str,
-        snapshot: dict[str, object],
+        snapshot: Mapping[str, object],
         *,
         if_match: str | None,
         if_none_match: str | None,
@@ -153,11 +154,12 @@ class AccountSnapshotStore:
             ).fetchone()
             current = None
             if row is not None:
-                current = json.loads(row[0])
+                current = cast(dict[str, object], json.loads(row[0]))
                 current["updated_at"] = row[1]
                 current["classification"] = CLASSIFICATION
             exists = row is not None
             if exists:
+                assert current is not None
                 if if_match is None:
                     raise HTTPException(status_code=428, detail="If-Match required")
                 if if_match != _etag(current):
