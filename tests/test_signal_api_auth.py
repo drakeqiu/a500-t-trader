@@ -93,4 +93,6 @@ def test_api_documentation_and_openapi_require_auth_but_health_does_not() -> Non
         assert schema.status_code == 200
         assert "HTTPBearer" in schema.json()["components"]["securitySchemes"]
         assert client.get("/healthz").status_code == 200
+        for path in ("/", "/web/app.js", "/web/app.css", "/web-config"):
+            assert client.get(path).status_code == 404
         client.portal.call(lambda: redis.aclose())
