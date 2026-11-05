@@ -43,7 +43,7 @@ def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_sele
         filtered = client.get("/v1/signals", params={"symbols": "563360"})
         assert filtered.status_code == 200
         assert [item["symbol"] for item in filtered.json()["signals"]] == ["563360"]
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 
 
 
@@ -57,14 +57,14 @@ def test_http_rejects_unconfigured_symbols_and_reports_strategy_metadata() -> No
         assert signal["strategy_identity"] == "intraday-etf-t-v1-rsi:stable-fingerprint"
         assert signal["parameter_fingerprint"] == CONFIG.fingerprint
         assert signal["status"] == "UNAVAILABLE"
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 
 
 def test_stream_requires_explicit_symbols() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
         assert client.get("/v1/signals/stream").status_code == 422
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 
 
 
@@ -72,24 +72,26 @@ def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
         current = state("510300", "BUY", datetime.now(timezone.utc))
-        client.portal.call(SignalStore(redis).publish(current, "BUY"))
+        client.portal.call(lambda: SignalStore(redis).publish(current, "BUY"))
         response = client.get("/v1/signals", params={"symbols": "510300"})
         signal = response.json()["signals"][0]
         assert signal["direction"] == "BUY"
         assert signal["execution_eligible"] is True
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 def test_http_status_marks_stale_signal_unavailable_without_direction() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     timestamp = datetime.now(timezone.utc) - timedelta(minutes=30)
     with TestClient(create_app(redis, CONFIG)) as client:
-        client.portal.call(SignalStore(redis).publish(state("510300", "BUY", timestamp), "BUY"))
+        client.portal.call(
+            lambda: SignalStore(redis).publish(state("510300", "BUY", timestamp), "BUY")
+        )
         response = client.get("/v1/signals", params={"symbols": "510300"})
         signal = response.json()["signals"][0]
         assert response.status_code == 200
         assert signal["status"] == "UNAVAILABLE"
         assert signal["direction"] is None
         assert signal["quantity"] is None
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
         assert signal["execution_eligible"] is False
 
 
@@ -155,7 +157,7 @@ def test_health_reports_redis_unavailability() -> None:
     redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
         assert client.get("/healthz").status_code == 503
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 
 
 def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> None:
@@ -163,8 +165,10 @@ def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> 
     with TestClient(create_app(redis, CONFIG)) as client:
         now = datetime.now(timezone.utc)
         store = SignalStore(redis)
-        first = client.portal.call(store.publish(state("510300", "BUY", now), "BUY"))
-        client.portal.call(store.publish(state("510300", "SELL", now + timedelta(minutes=1)), "SELL"))
+        first = client.portal.call(lambda: store.publish(state("510300", "BUY", now), "BUY"))
+        client.portal.call(
+            lambda: store.publish(state("510300", "SELL", now + timedelta(minutes=1)), "SELL")
+        )
 
         with client.stream("GET", "/v1/signals/stream?symbols=510300") as response:
             lines = iter(response.iter_lines())
@@ -188,7 +192,7 @@ def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> 
             assert next(lines) == "data: {\"reason\":\"cursor unavailable\"}"
             assert next(lines) == ""
             assert next(lines) == "event: snapshot"
-        client.portal.call(redis.aclose())
+        client.portal.call(lambda: redis.aclose())
 
 
 def test_calculator_consumes_duplicate_market_event_once() -> None:
@@ -229,5 +233,5 @@ def test_calculator_consumes_duplicate_market_event_once() -> None:
         assert response.status_code == 200
         assert response.json()["signals"][0]["status"] == "BUY"
         assert response.json()["signals"][0]["schema_version"] == 1
-        client.portal.call(api_redis.aclose())
+        client.portal.call(lambda: api_redis.aclose())
     redis.close()

@@ -234,6 +234,7 @@ async def _events(
     cursor: str | None,
     freshness: timedelta,
     config: LiveSignalConfig,
+    request: Request,
 ) -> AsyncIterator[str]:
     pubsub = store.redis.pubsub()
     try:
@@ -271,7 +272,7 @@ async def _events(
             next_id = "0-0"
         for symbol in symbols:
             try:
-                snapshot = await _current(store, symbol, freshness, app.state.config)
+                snapshot = await _current(store, symbol, freshness, config)
             except Exception:
                 snapshot = {
                     "symbol": symbol,
