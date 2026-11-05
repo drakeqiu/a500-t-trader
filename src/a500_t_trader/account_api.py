@@ -5,8 +5,10 @@ from __future__ import annotations
 import uvicorn
 
 from .account_snapshot_api import create_app
+from .cli.runtime import create_provider_from_env
+from .market_data import MarketDataService
 
-app = create_app()
+app = create_app(market_data=MarketDataService(create_provider_from_env()))
 
 
 def main() -> None:

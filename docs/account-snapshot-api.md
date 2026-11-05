@@ -19,7 +19,7 @@ A500_OIDC_JWKS_URI=https://identity.example.internal/.well-known/jwks.json
 A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
 
-未提供有效 OIDC 配置时应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
+未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
 
 ## 当前净资产
 
