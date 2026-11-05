@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 import jwt
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
@@ -165,6 +166,35 @@ class AccountSnapshotStore:
 _SNAPSHOT_FIELDS = {
     "as_of", "holdings", "protected_floor", "sellable", "cost_basis", "available_cash"
 }
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+    r"(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
+_DECIMAL = re.compile(r"^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
+def _reject_json_constant(constant: str) -> None:
+    raise ValueError(f"invalid JSON constant: {constant}")
+
+
+class _SnapshotValidationError(ValueError):
+    def __init__(self, path: str, code: str) -> None:
+        super().__init__(code)
+        self.path = path
+        self.code = code
+
+
+def _problem(status: int, title: str, path: str, code: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "type": "about:blank",
+            "title": title,
+            "status": status,
+            "errors": [{"path": path, "code": code}],
+        },
+        status_code=status,
+        media_type="application/problem+json",
+    )
 
 
 def _etag(snapshot: dict[str, object]) -> str:
@@ -173,42 +203,59 @@ def _etag(snapshot: dict[str, object]) -> str:
 
 
 def _validate_snapshot(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != _SNAPSHOT_FIELDS:
-        raise HTTPException(status_code=422, detail="Invalid snapshot fields")
+    if not isinstance(value, dict):
+        raise _SnapshotValidationError("$", "invalid_type")
+    unknown = set(value) - _SNAPSHOT_FIELDS
+    if unknown:
+        raise _SnapshotValidationError(min(unknown), "unknown_field")
+    missing = _SNAPSHOT_FIELDS - set(value)
+    if missing:
+        raise _SnapshotValidationError(min(missing), "missing_field")
+    for field, item in value.items():
+        if item is None:
+            raise _SnapshotValidationError(field, "invalid_type")
+
     as_of = value["as_of"]
-    if not isinstance(as_of, str):
-        raise HTTPException(status_code=422, detail="as_of must be an RFC 3339 timestamp")
+    if not isinstance(as_of, str) or not _RFC3339.fullmatch(as_of):
+        raise _SnapshotValidationError("as_of", "invalid_timestamp")
     try:
-        parsed = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(as_of.replace("Z", "+00:00").replace("z", "+00:00"))
         if parsed.utcoffset() is None:
             raise ValueError
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="as_of must include a timezone offset") from exc
+    except (ValueError, OverflowError) as exc:
+        raise _SnapshotValidationError("as_of", "invalid_timestamp") from exc
 
-    def decimal_string(name: str) -> str:
-        raw = value[name]
-        if not isinstance(raw, str):
-            raise HTTPException(status_code=422, detail=f"{name} must be a decimal string")
+    def decimal_string(name: str, amount: object) -> str:
+        if not isinstance(amount, str):
+            raise _SnapshotValidationError(name, "invalid_type")
+        if not _DECIMAL.fullmatch(amount):
+            raise _SnapshotValidationError(name, "invalid_decimal")
         try:
-            amount = Decimal(raw)
-            if not amount.is_finite() or amount < 0:
+            parsed_amount = Decimal(amount)
+            if not parsed_amount.is_finite() or parsed_amount < 0:
                 raise InvalidOperation
-        except InvalidOperation as exc:
-            raise HTTPException(status_code=422, detail=f"{name} must be finite and non-negative") from exc
-        return raw
+        except (InvalidOperation, ValueError) as exc:
+            raise _SnapshotValidationError(name, "invalid_decimal") from exc
+        return amount
 
     def quantities(name: str) -> dict[str, int]:
         raw = value[name]
         if not isinstance(raw, dict):
-            raise HTTPException(status_code=422, detail=f"{name} must be an object")
+            raise _SnapshotValidationError(name, "invalid_type")
         normalized: dict[str, int] = {}
         for symbol, quantity in raw.items():
+            if not isinstance(symbol, str):
+                raise _SnapshotValidationError(name, "invalid_security")
             try:
                 code = normalize_symbol(symbol)
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=422, detail=f"Invalid security in {name}") from exc
-            if code in normalized or not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
-                raise HTTPException(status_code=422, detail=f"Invalid quantity in {name}")
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise _SnapshotValidationError(
+                    f"{name}.{symbol}", "invalid_security"
+                ) from exc
+            if code in normalized:
+                raise _SnapshotValidationError(f"{name}.{symbol}", "symbol_collision")
+            if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
+                raise _SnapshotValidationError(f"{name}.{symbol}", "invalid_quantity")
             normalized[code] = quantity
         return normalized
 
@@ -217,44 +264,45 @@ def _validate_snapshot(value: object) -> dict[str, object]:
     sellable = quantities("sellable")
     cost_basis = value["cost_basis"]
     if not isinstance(cost_basis, dict):
-        raise HTTPException(status_code=422, detail="cost_basis must be an object")
+        raise _SnapshotValidationError("cost_basis", "invalid_type")
     normalized_cost: dict[str, str] = {}
     for symbol, amount in cost_basis.items():
+        if not isinstance(symbol, str):
+            raise _SnapshotValidationError("cost_basis", "invalid_security")
         try:
             code = normalize_symbol(symbol)
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail="Invalid security in cost_basis") from exc
-        if code in normalized_cost or code not in holdings:
-            raise HTTPException(status_code=422, detail="Invalid cost_basis keys")
-        normalized_cost[code] = amount
-    for code in set(floor) | set(sellable):
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise _SnapshotValidationError(
+                f"cost_basis.{symbol}", "invalid_security"
+            ) from exc
+        if code in normalized_cost:
+            raise _SnapshotValidationError(f"cost_basis.{symbol}", "symbol_collision")
         if code not in holdings:
-            raise HTTPException(status_code=422, detail="Security keys must match holdings")
-        if floor.get(code, 0) > holdings[code] or sellable.get(code, 0) > holdings[code] - floor.get(code, 0):
-            raise HTTPException(status_code=422, detail="Invalid protected_floor or sellable quantity")
-    for code in holdings:
-        if floor.get(code, 0) + sellable.get(code, 0) > holdings[code]:
-            raise HTTPException(status_code=422, detail="Invalid protected_floor or sellable quantity")
-    for amount in normalized_cost.values():
-        if not isinstance(amount, str):
-            raise HTTPException(status_code=422, detail="cost_basis values must be decimal strings")
-        try:
-            parsed_amount = Decimal(amount)
-            if not parsed_amount.is_finite() or parsed_amount < 0:
-                raise InvalidOperation
-        except InvalidOperation as exc:
-            raise HTTPException(status_code=422, detail="Invalid cost_basis amount") from exc
+            raise _SnapshotValidationError(
+                f"cost_basis.{symbol}", "invalid_cost_basis_key"
+            )
+        normalized_cost[code] = decimal_string(f"cost_basis.{symbol}", amount)
+    for name, mapping in (("protected_floor", floor), ("sellable", sellable)):
+        if set(mapping) != set(holdings):
+            missing_code = min(set(holdings) - set(mapping), default=None)
+            extra_code = min(set(mapping) - set(holdings), default=None)
+            symbol = missing_code if missing_code is not None else extra_code
+            raise _SnapshotValidationError(f"{name}.{symbol}", "quantity_key_mismatch")
+    for code, holding in holdings.items():
+        if floor[code] > holding:
+            raise _SnapshotValidationError(
+                f"protected_floor.{code}", "quantity_inconsistent"
+            )
+        if sellable[code] > holding - floor[code]:
+            raise _SnapshotValidationError(f"sellable.{code}", "quantity_inconsistent")
     return {
         "as_of": as_of,
         "holdings": holdings,
         "protected_floor": floor,
         "sellable": sellable,
         "cost_basis": normalized_cost,
-        "available_cash": decimal_string("available_cash"),
+        "available_cash": decimal_string("available_cash", value["available_cash"]),
     }
-
-
-
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
@@ -298,8 +346,8 @@ def create_app(
         return JSONResponse(snapshot, headers={"ETag": _etag(snapshot)})
 
     @app.put("/v1/account-snapshot")
-    def put_account_snapshot(
-        snapshot: object,
+    async def put_account_snapshot(
+        request: Request,
         authorization: str | None = Header(default=None),
         if_match: str | None = Header(default=None, alias="If-Match"),
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
@@ -317,7 +365,21 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=401, detail="Invalid bearer credentials",
                                 headers={"WWW-Authenticate": "Bearer"}) from exc
-        validated = _validate_snapshot(snapshot)
+        try:
+            snapshot = json.loads(
+                await request.body(), parse_constant=_reject_json_constant
+            )
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValueError,
+            RecursionError,
+        ):
+            return _problem(400, "Invalid JSON", "$", "invalid_json")
+        try:
+            validated = _validate_snapshot(snapshot)
+        except _SnapshotValidationError as exc:
+            return _problem(422, "Invalid account snapshot", exc.path, exc.code)
         created, saved, etag = store.put_snapshot(
             subject, validated, if_match=if_match, if_none_match=if_none_match
         )
