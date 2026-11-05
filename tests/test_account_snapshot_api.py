@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -138,16 +136,13 @@ def test_put_requires_matching_etag_and_keeps_successful_history(tmp_path: Path)
             json=SNAPSHOT,
             headers={**headers, "If-Match": first.headers["ETag"]},
         ).status_code == 412
-        with sqlite3.connect(database) as db:
-            assert db.execute("SELECT count(*) FROM account_snapshot_history").fetchone()[0] == 2
-            snapshot_json, as_of, updated_at, classification = db.execute(
-                "SELECT snapshot_json,as_of,updated_at,classification "
-                "FROM account_snapshot_history ORDER BY id"
-            ).fetchall()[0]
-            assert json.loads(snapshot_json) == SNAPSHOT
-            assert as_of == SNAPSHOT["as_of"]
-            assert updated_at
-            assert classification == "user-entered; not broker-verified"
+        history = client.app.state.account_snapshot_store.history_for_subject("alice")
+        assert [record["snapshot"] for record in history] == [SNAPSHOT, changed]
+        assert all(
+            record["classification"] == "user-entered; not broker-verified"
+            for record in history
+        )
+        assert all(record["updated_at"] for record in history)
 
 
 def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
@@ -203,6 +198,8 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             "If-None-Match": "*",
         }
         invalid_snapshots = [
+            ({**SNAPSHOT, "as_of": "2026-02-30T23:59:59Z"},
+             "as_of", "invalid_timestamp"),
             ({**SNAPSHOT, "extra": 1}, "extra", "unknown_field"),
             ({key: item for key, item in SNAPSHOT.items() if key != "available_cash"},
              "available_cash", "missing_field"),
@@ -255,8 +252,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
         assert client.get(
             "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
         ).status_code == 404
-        with sqlite3.connect(database) as db:
-            assert db.execute("SELECT count(*) FROM account_snapshot_history").fetchone()[0] == 0
+        assert client.app.state.account_snapshot_store.history_for_subject("alice") == []
         created = client.put(
             "/v1/account-snapshot",
             json=SNAPSHOT,
@@ -272,8 +268,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
         assert client.get(
             "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
         ).json()["holdings"] == SNAPSHOT["holdings"]
-        with sqlite3.connect(database) as db:
-            assert db.execute("SELECT count(*) FROM account_snapshot_history").fetchone()[0] == 1
+        assert len(client.app.state.account_snapshot_store.history_for_subject("alice")) == 1
 
 
 def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) -> None:
@@ -295,3 +290,15 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) ->
     assert response.json()["as_of"] == snapshot["as_of"]
     assert response.json()["holdings"] == {"510300": 100}
     assert response.json()["classification"] == "user-entered; not broker-verified"
+
+
+def test_put_accepts_rfc3339_leap_second_through_api(tmp_path: Path) -> None:
+    snapshot = {**SNAPSHOT, "as_of": "2016-12-31T23:59:60Z"}
+    with TestClient(create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())) as client:
+        response = client.put(
+            "/v1/account-snapshot",
+            json=snapshot,
+            headers={"Authorization": "Bearer alice-token", "If-None-Match": "*"},
+        )
+    assert response.status_code == 201
+    assert response.json()["as_of"] == snapshot["as_of"]
