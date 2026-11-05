@@ -35,7 +35,8 @@ class JwksHandler(BaseHTTPRequestHandler):
         if self.path != "/register":
             self.send_error(404)
             return
-        type(self).keys = [json.loads(self.rfile.read(int(self.headers["Content-Length"])))]
+        payload = self.rfile.read(int(self.headers["Content-Length"]))
+        type(self).keys = [json.loads(payload)]
         self.send_response(204)
         self.end_headers()
 
@@ -92,12 +93,11 @@ def main() -> None:
         override_text += (
             "  account-api:\n"
             + (
-                "    extra_hosts:\n"
-                "      - 'host.docker.internal:host-gateway'\n"
+                "    extra_hosts:\n      - 'host.docker.internal:host-gateway'\n"
                 if identity_host == "host.docker.internal"
                 else ""
             )
-            + "    command: [python, -c, \"import uvicorn; from "
+            + '    command: [python, -c, "import uvicorn; from '
             "a500_t_trader.account_snapshot_api import create_app; "
             "uvicorn.run(create_app(), host='0.0.0.0', port=8000)\"]\n"
             f"  gateway:\n    ports:\n      - '127.0.0.1:{gateway_port}:8080'\n"
@@ -115,7 +115,16 @@ def main() -> None:
         ]
         try:
             subprocess.run(
-                [*compose_args, "up", "-d", "--build", "redis", "signal-api", "account-api", "gateway"],
+                [
+                    *compose_args,
+                    "up",
+                    "-d",
+                    "--build",
+                    "redis",
+                    "signal-api",
+                    "account-api",
+                    "gateway",
+                ],
                 cwd=ROOT,
                 env=environment,
                 check=True,
@@ -175,7 +184,9 @@ def _wait_for_gateway(
     )
 
 
-def _probe_internal_health(compose_args: list[str], environment: dict[str, str]) -> None:
+def _probe_internal_health(
+    compose_args: list[str], environment: dict[str, str]
+) -> None:
     subprocess.run(
         [
             *compose_args,
@@ -184,7 +195,10 @@ def _probe_internal_health(compose_args: list[str], environment: dict[str, str])
             "signal-api",
             "python",
             "-c",
-            "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8000/healthz').status == 200",
+            (
+                "from urllib.request import urlopen; "
+                "assert urlopen('http://127.0.0.1:8000/healthz').status == 200"
+            ),
         ],
         cwd=ROOT,
         env=environment,
@@ -229,6 +243,8 @@ def _assert_missing_oidc_fails(
     )
     if result.returncode == 0:
         raise AssertionError("Compose must fail when unified OIDC settings are missing")
+
+
 def _probe_external_boundaries(
     compose_args: list[str], environment: dict[str, str]
 ) -> None:

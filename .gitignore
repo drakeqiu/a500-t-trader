@@ -40,4 +40,5 @@ dist/
 # local dependency packages
 wheels/
 
+.worktrees/
 graphify-out/

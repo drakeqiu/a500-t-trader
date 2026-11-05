@@ -28,6 +28,14 @@ def main() -> None:
         **os.environ,
         "A500_RABBITMQ_URL": URL,
         "A500_MARKET_DATA_MODE": "tgw",
+        "A500_OIDC_ISSUER": "https://identity.example.test",
+        "A500_OIDC_AUDIENCE": "a500-api",
+        "A500_OIDC_CLIENT_ID": "a500-market-data-e2e",
+        "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",
+        "AMAZINGDATA_USERNAME": "market-data-e2e",
+        "AMAZINGDATA_PASSWORD": "market-data-e2e",
+        "AMAZINGDATA_HOST": "127.0.0.1",
+        "AMAZINGDATA_PORT": "1",
     }
     try:
         subprocess.run(
