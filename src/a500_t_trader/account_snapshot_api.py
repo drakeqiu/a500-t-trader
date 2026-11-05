@@ -112,14 +112,15 @@ def create_app(
     def get_account_snapshot(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        if authorization is None or not authorization.startswith("Bearer "):
+        if authorization is None:
             raise HTTPException(
                 status_code=401,
                 detail="Bearer credentials required",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        token = authorization.removeprefix("Bearer ").strip()
-        if not token:
+        scheme, separator, token = authorization.partition(" ")
+        token = token.strip()
+        if scheme.lower() != "bearer" or not separator or not token:
             raise HTTPException(
                 status_code=401,
                 detail="Bearer credentials required",

@@ -30,6 +30,10 @@ def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
         assert client.get(
             "/v1/account-snapshot", headers={"Authorization": "Bearer invalid"}
         ).status_code == 401
+        assert client.get(
+            "/v1/account-snapshot",
+            headers={"Authorization": "bearer alice-token"},
+        ).status_code == 404
 
 
 def test_account_snapshot_is_private_and_reports_user_entered_status(
