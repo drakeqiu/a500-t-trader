@@ -124,6 +124,52 @@ def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
     assert oversized.status_code == 413
     assert unsupported.status_code == 422
     assert "secret" not in unsupported.text
+def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "accounts.sqlite3"
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        alice = {"Authorization": "Bearer alice-token"}
+        bob = {"Authorization": "Bearer bob-token"}
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers=alice,
+            files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
+        ).json()
+        batch_id = preview["batch_id"]
+        url = f"/v1/trade-imports/previews/{batch_id}/confirm"
+        assert client.post(url, headers=bob).status_code == 404
+        confirmed = client.post(url, headers=alice)
+        repeated = client.post(url, headers=alice)
+        assert confirmed.status_code == repeated.status_code == 200
+        assert confirmed.json() == repeated.json()
+        assert confirmed.json()["new"] == 1
+        assert len(confirmed.json()["inserted_ids"]) == 1
+
+    from a500_t_trader.account_ledger import AccountLedger
+
+    assert len(AccountLedger(database).imported_fills()) == 1
+
+
+def test_trade_import_confirmation_rejects_validation_error_preview(
+    tmp_path: Path,
+) -> None:
+    content = _galaxy_csv("1001").replace(b",8000,1.264,", b",0,1.264,")
+    database = tmp_path / "accounts.sqlite3"
+    with TestClient(create_app(database, TestAuthenticator())) as client:
+        preview = client.post(
+            "/v1/trade-imports/previews",
+            headers={"Authorization": "Bearer alice-token"},
+            files={"file": ("fills.csv", content, "text/csv")},
+        ).json()
+        response = client.post(
+            f"/v1/trade-imports/previews/{preview['batch_id']}/confirm",
+            headers={"Authorization": "Bearer alice-token"},
+        )
+    assert response.status_code == 409
+    from a500_t_trader.account_ledger import AccountLedger
+
+    assert AccountLedger(database).imported_fills() == []
 def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
     with TestClient(
         create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())

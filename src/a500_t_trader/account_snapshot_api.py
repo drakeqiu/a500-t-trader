@@ -20,8 +20,14 @@ from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
-from .account_ledger import AccountLedger, preview_galaxy_fills
-from .market_data import normalize_symbol
+from .account_ledger import (
+    AccountLedger,
+    GALAXY_CLASSIFICATION,
+    GALAXY_SOURCE,
+    _create_imported_fills,
+    _same_trade,
+    preview_galaxy_fills,
+)
 
 CLASSIFICATION = "user-entered; not broker-verified"
 
@@ -468,6 +474,14 @@ def create_app(
                 expires_at REAL NOT NULL
             )"""
         )
+        columns = {
+            row[1]
+            for row in db.execute("PRAGMA table_info(trade_import_batches)")
+        }
+        if "confirmed_json" not in columns:
+            db.execute(
+                "ALTER TABLE trade_import_batches ADD COLUMN confirmed_json TEXT"
+            )
 
     @app.post("/v1/trade-imports/previews")
     async def preview_trade_import(
@@ -493,8 +507,8 @@ def create_app(
             db.execute(
                 """INSERT INTO trade_import_batches(
                     batch_id,owner,records_json,errors_json,summary_json,
-                    created_at,expires_at
-                ) VALUES(?,?,?,?,?,?,?)""",
+                    created_at,expires_at,confirmed_json
+                ) VALUES(?,?,?,?,?,?,?,NULL)""",
                 (
                     batch_id,
                     subject,
@@ -520,6 +534,37 @@ def create_app(
                 "error_details": result["error_details"],
             }
         )
+    @app.post("/v1/trade-imports/previews/{batch_id}/confirm")
+    def confirm_trade_import(
+        batch_id: str,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        with sqlite3.connect(str(path)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN IMMEDIATE")
+            batch = db.execute(
+                """SELECT records_json,errors_json,expires_at,confirmed_json
+                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                (batch_id, subject),
+            ).fetchone()
+            if batch is None or batch["expires_at"] <= time.time():
+                raise HTTPException(status_code=404, detail="Preview not found")
+            if batch["confirmed_json"] is not None:
+                return JSONResponse(json.loads(batch["confirmed_json"]))
+            if json.loads(batch["errors_json"]):
+                raise HTTPException(
+                    status_code=409, detail="Preview contains validation errors"
+                )
+            result = _confirm_trade_import_records(
+                db, json.loads(batch["records_json"]), subject
+            )
+            db.execute(
+                "UPDATE trade_import_batches SET confirmed_json=? WHERE batch_id=?",
+                (json.dumps(result), batch_id),
+            )
+        return JSONResponse(result)
+
 
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(
@@ -562,3 +607,57 @@ def create_app(
         )
 
     return app
+
+def _confirm_trade_import_records(
+    db: sqlite3.Connection, records: list[dict[str, object]], owner: str
+) -> dict[str, object]:
+    _create_imported_fills(db)
+    existing = {
+        str(row["trade_number"]): dict(row)
+        for row in db.execute(
+            "SELECT * FROM imported_fills WHERE source=? AND owner=?",
+            (GALAXY_SOURCE, owner),
+        )
+    }
+    seen: dict[str, dict[str, object]] = {}
+    candidates: list[dict[str, object]] = []
+    duplicates = 0
+    for record in records:
+        number = str(record["trade_number"])
+        previous = seen.get(number) or existing.get(number)
+        if previous is not None:
+            if not _same_trade(previous, record):
+                raise HTTPException(
+                    status_code=409, detail="Preview conflicts with existing trade"
+                )
+            duplicates += 1
+            continue
+        seen[number] = record
+        candidates.append(record)
+    ids: list[int] = []
+    for record in candidates:
+        cursor = db.execute(
+            """INSERT INTO imported_fills(
+                owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
+                stamp_duty,other_charges,occurrence_amount,source,trade_number,
+                contract_number,classification
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (owner,) + tuple(
+                record[key]
+                for key in (
+                    "timestamp", "symbol", "side", "quantity", "price",
+                    "trade_amount", "fees", "stamp_duty", "other_charges",
+                    "occurrence_amount", "source", "trade_number",
+                    "contract_number",
+                )
+            ) + (GALAXY_CLASSIFICATION,),
+        )
+        ids.append(int(cursor.lastrowid))
+    return {
+        "valid": len(records),
+        "new": len(ids),
+        "duplicates": duplicates,
+        "errors": 0,
+        "inserted_ids": ids,
+        "confirmed": True,
+    }
