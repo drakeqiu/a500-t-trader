@@ -178,6 +178,7 @@ def _bar(data: dict[str, Any]) -> MinuteBar:
         source=str(data.get("source", "normalized")),
     )
 
+
 def _bar_payload(bar: MinuteBar) -> dict[str, Any]:
     return {
         "symbol": bar.symbol,

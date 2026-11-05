@@ -41,7 +41,6 @@ def test_docker_image_includes_live_signal_configuration() -> None:
     assert "COPY config/ ./config/" in (root / "Dockerfile").read_text()
 
 
-
 CONFIG = LiveSignalConfig(("510300", "563360"), {}, {}, "stable-fingerprint")
 
 
@@ -62,8 +61,9 @@ def state(symbol: str, status: str, timestamp: datetime) -> dict[str, object]:
     }
 
 
-def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_selection(
-) -> None:
+def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_selection() -> (
+    None
+):
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
         assert client.portal is not None
@@ -78,7 +78,6 @@ def test_http_status_query_uses_all_configured_symbols_and_filters_explicit_sele
         assert filtered.status_code == 200
         assert [item["symbol"] for item in filtered.json()["signals"]] == ["563360"]
         client.portal.call(lambda: redis.aclose())
-
 
 
 def test_http_rejects_unconfigured_symbols_and_reports_strategy_metadata() -> None:
@@ -103,7 +102,6 @@ def test_stream_requires_explicit_symbols() -> None:
         client.portal.call(lambda: redis.aclose())
 
 
-
 def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with TestClient(create_app(redis, CONFIG)) as client:
@@ -115,6 +113,8 @@ def test_http_preserves_fresh_execution_eligibility_as_reference_data() -> None:
         assert signal["direction"] == "BUY"
         assert signal["execution_eligible"] is True
         client.portal.call(lambda: redis.aclose())
+
+
 def test_http_status_marks_stale_signal_unavailable_without_direction() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     timestamp = datetime.now(UTC) - timedelta(minutes=30)
@@ -235,7 +235,7 @@ def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> 
         ) as response:
             lines = iter(response.iter_lines())
             assert next(lines) == "event: reset"
-            assert next(lines) == "data: {\"reason\":\"cursor unavailable\"}"
+            assert next(lines) == 'data: {"reason":"cursor unavailable"}'
             assert next(lines) == ""
             assert next(lines) == "event: snapshot"
         client.portal.call(lambda: redis.aclose())

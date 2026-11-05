@@ -161,8 +161,7 @@ def create_app(
         _validate_symbols(selected, config)
         try:
             states = [
-                await _current(store, symbol, freshness, config)
-                for symbol in selected
+                await _current(store, symbol, freshness, config) for symbol in selected
             ]
         except Exception as error:
             raise HTTPException(
@@ -203,6 +202,7 @@ def _unavailable_state(symbol: str) -> dict[str, Any]:
         "reasons": ["signal store unavailable"],
     }
 
+
 async def _current(
     store: SignalStore,
     symbol: str,
@@ -237,7 +237,7 @@ async def _current(
             or age > freshness
         ):
             raise ValueError
-    except (KeyError, ValueError, TypeError):
+    except KeyError, ValueError, TypeError:
         return {
             **state,
             "status": "UNAVAILABLE",
@@ -339,9 +339,7 @@ async def _events(
                 last_status_check = now
                 for symbol in symbols:
                     try:
-                        state = await _current(
-                            store, symbol, freshness, config
-                        )
+                        state = await _current(store, symbol, freshness, config)
                     except Exception:
                         state = _unavailable_state(symbol)
                     previous = last_status.get(symbol)
@@ -372,11 +370,10 @@ async def _events(
         if pubsub is not None:
             await pubsub.aclose()  # type: ignore[no-untyped-call]
 
+
 def _sse(event: str, data: dict[str, Any], event_id: str | None = None) -> str:
     identifier = "" if event_id is None else f"id: {event_id}\n"
-    payload = json.dumps(
-        data, ensure_ascii=False, separators=(",", ":"), default=str
-    )
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
     return f"{identifier}event: {event}\ndata: {payload}\n\n"
 
 
