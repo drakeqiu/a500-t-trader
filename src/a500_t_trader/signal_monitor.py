@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import AsyncIterator, Iterable
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 
 from .strategy.intraday_v1_config import (
     STRATEGY_ID,
@@ -27,7 +29,7 @@ UPDATES_CHANNEL = "a500:signals:updates"
 class SignalStore:
     """Redis contract shared by the producer and API, independent of process memory."""
 
-    def __init__(self, redis: Redis[Any]) -> None:
+    def __init__(self, redis: Redis) -> None:
         self.redis = redis
 
     async def health(self) -> bool:
@@ -37,7 +39,7 @@ class SignalStore:
         value = await self.redis.get(f"a500:signals:state:{symbol}")
         if value is None:
             return None
-        return json.loads(value)
+        return cast(dict[str, Any], json.loads(value))
 
     async def publish(self, state: dict[str, Any], event_type: str) -> str | None:
         """Persist latest state; retain only distinct directional events in stream."""
@@ -57,7 +59,7 @@ class SignalStore:
                     "data": json.dumps(state, ensure_ascii=False, default=str),
                 },
             )
-            cutoff = int((datetime.now(timezone.utc) - RETENTION).timestamp() * 1000)
+            cutoff = int((datetime.now(UTC) - RETENTION).timestamp() * 1000)
             pipe.xtrim(STREAM_KEY, minid=f"{cutoff}-0", approximate=False)
         results = await pipe.execute()
         if directional:
@@ -83,21 +85,27 @@ class SignalStore:
         ):
             raise ValueError("cursor unavailable")
         results: list[tuple[str, dict[str, Any]]] = []
-        for event_id, fields in await self.redis.xrange(
+        rows = await self.redis.xrange(
             STREAM_KEY,
             min=f"({cursor}",
             max="+",
-        ):
-            raw = fields.get(b"data", fields.get("data"))
-            results.append((_text(event_id), json.loads(_text(raw))))
+        )
+        for event_id, fields in rows or []:
+            payload = (fields or {}).get(b"data", (fields or {}).get("data"))
+            results.append((_text(event_id), json.loads(_text(payload))))
         return results
 
     async def after(self, cursor: str) -> list[tuple[str, dict[str, Any]]]:
         await self.trim()
         rows = await self.redis.xrange(STREAM_KEY, min=f"({cursor}", max="+")
         return [
-            (_text(event_id), json.loads(_text(fields.get(b"data", fields.get("data")))))
-            for event_id, fields in rows
+            (
+                _text(event_id),
+                json.loads(
+                    _text((fields or {}).get(b"data", (fields or {}).get("data")))
+                ),
+            )
+            for event_id, fields in rows or []
         ]
 
     async def latest_id(self) -> str:
@@ -106,7 +114,7 @@ class SignalStore:
         return "0-0" if not rows else _text(rows[0][0])
 
     async def trim(self) -> None:
-        cutoff = int((datetime.now(timezone.utc) - RETENTION).timestamp() * 1000)
+        cutoff = int((datetime.now(UTC) - RETENTION).timestamp() * 1000)
         await self.redis.xtrim(STREAM_KEY, minid=f"{cutoff}-0", approximate=False)
 
 
@@ -116,7 +124,7 @@ def _id_key(value: str) -> tuple[int, int]:
 
 
 def create_app(
-    redis: Redis[Any] | None = None,
+    redis: Redis | None = None,
     config: LiveSignalConfig | None = None,
     *,
     freshness: timedelta = timedelta(minutes=15),
@@ -140,11 +148,15 @@ def create_app(
         try:
             await store.health()
         except Exception as error:
-            raise HTTPException(status_code=503, detail="signal store unavailable") from error
+            raise HTTPException(
+                status_code=503, detail="signal store unavailable"
+            ) from error
         return {"status": "ok"}
 
     @app.get("/v1/signals")
-    async def signals(symbols: list[str] | None = Query(default=None)) -> dict[str, Any]:
+    async def signals(
+        symbols: list[str] | None = Query(default=None),  # noqa: B008
+    ) -> dict[str, Any]:
         selected = config.etfs if symbols is None else tuple(dict.fromkeys(symbols))
         _validate_symbols(selected, config)
         try:
@@ -153,7 +165,9 @@ def create_app(
                 for symbol in selected
             ]
         except Exception as error:
-            raise HTTPException(status_code=503, detail="signal store unavailable") from error
+            raise HTTPException(
+                status_code=503, detail="signal store unavailable"
+            ) from error
         return {
             "signals": states,
             "strategy": "intraday-etf-t-v1-rsi",
@@ -163,7 +177,7 @@ def create_app(
     @app.get("/v1/signals/stream")
     async def stream(
         request: Request,
-        symbols: list[str] = Query(...),
+        symbols: list[str] = Query(...),  # noqa: B008
         last_event_id: str | None = None,
     ) -> StreamingResponse:
         selected = tuple(dict.fromkeys(symbols))
@@ -215,7 +229,7 @@ async def _current(
     state.setdefault("schema_version", 1)
     try:
         timestamp = datetime.fromisoformat(str(state["bar_timestamp"]))
-        age = datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)
+        age = datetime.now(UTC) - timestamp.astimezone(UTC)
         if (
             timestamp.tzinfo is None
             or timestamp.utcoffset() is None
@@ -247,11 +261,12 @@ async def _events(
     config: LiveSignalConfig,
     request: Request,
 ) -> AsyncIterator[str]:
-    pubsub = store.redis.pubsub()
+    connection = store.redis.pubsub()
+    pubsub: PubSub | None = connection
     try:
-        await pubsub.subscribe(UPDATES_CHANNEL)
+        await connection.subscribe(UPDATES_CHANNEL)
     except Exception:
-        await pubsub.aclose()
+        await connection.aclose()  # type: ignore[no-untyped-call]
         pubsub = None
         yield _sse(
             "unavailable",
@@ -274,7 +289,9 @@ async def _events(
         else:
             for event_id, state in replay:
                 if state.get("symbol") in symbols:
-                    yield _sse(str(state.get("status", "signal")).lower(), state, event_id)
+                    yield _sse(
+                        str(state.get("status", "signal")).lower(), state, event_id
+                    )
             next_id = replay[-1][0] if replay else cursor
     if cursor is None or reset_required:
         try:
@@ -313,7 +330,9 @@ async def _events(
                         received_update = True
                         if state != last_status.get(str(symbol)):
                             last_status[str(symbol)] = state
-                            yield _sse(str(state.get("status", "unavailable")).lower(), state)
+                            yield _sse(
+                                str(state.get("status", "unavailable")).lower(), state
+                            )
 
             now = time.monotonic()
             if now - last_status_check >= 1.0:
@@ -329,7 +348,9 @@ async def _events(
                     last_status[symbol] = state
                     if previous is not None and state != previous:
                         received_update = True
-                        yield _sse(str(state.get("status", "unavailable")).lower(), state)
+                        yield _sse(
+                            str(state.get("status", "unavailable")).lower(), state
+                        )
             try:
                 events = await store.after(next_id)
             except Exception:
@@ -342,12 +363,14 @@ async def _events(
             for event_id, state in events:
                 next_id = event_id
                 if state.get("symbol") in symbols:
-                    yield _sse(str(state.get("status", "signal")).lower(), state, event_id)
+                    yield _sse(
+                        str(state.get("status", "signal")).lower(), state, event_id
+                    )
             if not events and not received_update:
                 await asyncio.sleep(0.5)
     finally:
         if pubsub is not None:
-            await pubsub.aclose()
+            await pubsub.aclose()  # type: ignore[no-untyped-call]
 
 def _sse(event: str, data: dict[str, Any], event_id: str | None = None) -> str:
     identifier = "" if event_id is None else f"id: {event_id}\n"
