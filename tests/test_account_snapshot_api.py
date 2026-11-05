@@ -321,6 +321,7 @@ def test_trade_import_preview_migrates_legacy_imported_fills(tmp_path: Path) -> 
         ).fetchone()
     assert legacy_row == (None, "legacy-1001")
 
+
 def test_trade_import_confirmation_rejects_validation_error_preview(
     tmp_path: Path,
 ) -> None:
