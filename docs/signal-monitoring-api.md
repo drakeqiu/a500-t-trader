@@ -8,15 +8,29 @@
 
 Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；项目不提供浏览器登录客户端或 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
 
-本地开发可使用 Compose 附带的 Keycloak 与 Realm 导入文件。设置启动管理员凭据（不得提交到仓库），再启动身份服务：
+本地开发可通过独立的 Keycloak Compose 文件启动 IdP；该服务不属于生产外部 OIDC 的默认 Compose 部署。先在当前 shell 中生成临时管理员凭据（不要提交或复用真实凭据），再启动身份服务：
 
 ```sh
-export KEYCLOAK_ADMIN_USERNAME='本地管理员用户名'
-export KEYCLOAK_ADMIN_PASSWORD='本地管理员密码'
-docker compose --profile keycloak up -d keycloak
+export KEYCLOAK_ADMIN_USERNAME="local-admin-$(openssl rand -hex 8)"
+export KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -base64 32)"
+docker compose -f compose.keycloak.yaml up -d keycloak
 ```
 
-Keycloak 管理界面为 `http://127.0.0.1:8081`。Realm `a500` 从 `keycloak/realm-a500.json` 导入，设备授权 public client 为 `a500-device-client`，签发 `a500-api` audience。数据写入命名卷 `keycloak-data`，容器重启后保留；不要用 `docker compose down -v`，该命令会删除卷。Realm 文件负责初次导入；修改 Realm 配置时，应通过 Keycloak 管理界面更新现有 Realm，或在确认可丢弃数据后重建卷再导入。没有内置默认用户，Realm 自助注册关闭。管理员登录管理界面后，在 `a500` Realm 的 Users 页面显式创建并启用获准用户、设置其登录凭据；只向受信任用户发放账号，不开放注册入口。
+Keycloak 管理界面为 `http://127.0.0.1:8081`。Realm `a500` 从 `keycloak/realm-a500.json` 导入，设备授权 public client 为 `a500-device-client`，签发 `a500-api` audience。数据写入项目命名卷 `keycloak-data`，容器重启后保留；不要对本地身份服务运行 `docker compose -f compose.keycloak.yaml down -v`，该命令会删除卷。Realm 文件负责初次导入；修改 Realm 配置时，应通过 Keycloak 管理界面更新现有 Realm，或在确认可丢弃数据后重建卷再导入。没有内置默认用户，Realm 自助注册关闭。管理员登录管理界面后，在 `a500` Realm 的 Users 页面显式创建并启用获准用户、设置其登录凭据；只向受信任用户发放账号，不开放注册入口。
+
+### Compose 真实端到端验收
+
+Keycloak 设备授权验收会以随机 Compose 项目名启动 API、网关和独立 Keycloak，临时生成管理员及用户凭据，在 Playwright Chromium 中真实登录并批准设备授权，然后验证 API 访问与 Keycloak 重启后的用户持久性。脚本只在内存和子进程环境中使用这些随机凭据，结束时仅删除本次隔离项目及其命名卷。该验收不依赖设备码过期时间。
+
+先安装锁定的开发依赖和 Playwright Chromium，再运行脚本；它会构建并启动所需 API Compose 服务，不需提前启动本地 Keycloak：
+
+```sh
+uv sync --frozen --group dev
+uv run python -m playwright install --with-deps chromium
+uv run python scripts/compose-keycloak-device-e2e.py
+```
+
+默认使用 Docker Compose；如使用 Podman Compose，可运行 `PODMAN_COMPOSE=podman-compose uv run python scripts/compose-keycloak-device-e2e.py`。该脚本随机选择本机 Keycloak 和 gateway host port，并以独立项目名隔离服务与卷。已有的行情 Compose 真实验收可单独运行 `uv run python scripts/compose-market-data-e2e.py`。
 
 设备授权流程中，应用先向 IdP 的设备授权端点申请设备码和用户码，展示 IdP 返回的验证 URI、用户码及轮询间隔；用户在另一设备打开验证 URI 并登录 Keycloak、确认授权。客户端按 IdP 返回的间隔轮询 token 端点，依照 OAuth 2.0 Device Authorization Grant 处理 `authorization_pending`、`slow_down`、`access_denied` 和过期结果，不得在每次 pending 时加速轮询。Keycloak discovery 地址为 `http://127.0.0.1:8081/realms/a500/.well-known/openid-configuration`；可从 discovery 读取 `device_authorization_endpoint`、`token_endpoint` 与 `jwks_uri`。本地 Keycloak 端点分别为 `/realms/a500/protocol/openid-connect/auth/device` 和 `/realms/a500/protocol/openid-connect/token`。直接使用 OAuth 客户端命令行工具时，参数对应 client ID `a500-device-client`、scope `openid`，并按该工具的设备授权实现展示验证 URI/码及轮询令牌端点；不要把用户密码发送给 A500 API。
 可用 `curl` 观察完整协议交互（以下变量仅为示例配置，不含凭据）：

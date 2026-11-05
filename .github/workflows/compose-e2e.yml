@@ -30,8 +30,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install locked project dependencies
-        run: uv sync --frozen --no-dev
+      - name: Install locked project and E2E dependencies
+        run: uv sync --frozen --group dev
 
       - name: Run real RabbitMQ Compose E2E
         run: uv run --no-sync python scripts/compose-market-data-e2e.py
+
+      - name: 安装 Playwright Chromium 浏览器
+        run: uv run --no-sync python -m playwright install --with-deps chromium
+
+      - name: 验收真实 Keycloak 设备授权流程
+        run: uv run --no-sync python scripts/compose-keycloak-device-e2e.py
