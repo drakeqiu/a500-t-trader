@@ -340,9 +340,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             ).status_code
             == 404
         )
-        assert (
-            store.history_for_subject("alice") == []
-        )
+        assert store.history_for_subject("alice") == []
         created = client.put(
             "/v1/account-snapshot",
             json=SNAPSHOT,
@@ -361,10 +359,7 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
             ).json()["holdings"]
             == SNAPSHOT["holdings"]
         )
-        assert (
-            len(store.history_for_subject("alice"))
-            == 1
-        )
+        assert len(store.history_for_subject("alice")) == 1
 
 
 def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) -> None:
