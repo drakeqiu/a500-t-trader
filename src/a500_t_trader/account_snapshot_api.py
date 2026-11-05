@@ -7,6 +7,8 @@ import json
 import os
 import re
 import sqlite3
+import time
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -14,10 +16,11 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import jwt
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
 
+from .account_ledger import AccountLedger, preview_galaxy_fills
 from .market_data import normalize_symbol
 
 CLASSIFICATION = "user-entered; not broker-verified"
@@ -406,6 +409,11 @@ def _validate_snapshot(value: object) -> dict[str, object]:
     }
 
 
+
+def _json_default(value: object) -> str:
+    if isinstance(value, (datetime, Decimal)):
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+    raise TypeError(f"unsupported JSON value: {type(value).__name__}")
 def _authenticated_subject(auth: Authenticator, authorization: str | None) -> str:
     if authorization is None:
         raise HTTPException(
@@ -431,6 +439,11 @@ def _authenticated_subject(auth: Authenticator, authorization: str | None) -> st
         ) from exc
 
 
+MAX_TRADE_IMPORT_BYTES = 5 * 1024 * 1024
+MAX_TRADE_IMPORT_ROWS = 10_000
+TRADE_IMPORT_BATCH_TTL_SECONDS = 15 * 60
+
+
 def create_app(
     database: str | Path | None = None,
     authenticator: Authenticator | None = None,
@@ -439,8 +452,74 @@ def create_app(
     path = database or os.environ.get("A500_ACCOUNT_DATABASE", "accounts.sqlite3")
     auth = authenticator or OIDCAuthenticator.from_environment()
     store = AccountSnapshotStore(path)
+    ledger = AccountLedger(path)
     app = FastAPI(title="A500 account snapshot API")
     app.state.account_snapshot_store = store
+    app.state.account_ledger = ledger
+    with sqlite3.connect(str(path)) as db:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS trade_import_batches (
+                batch_id TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                records_json TEXT NOT NULL,
+                errors_json TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL
+            )"""
+        )
+
+    @app.post("/v1/trade-imports/previews")
+    async def preview_trade_import(
+        file: UploadFile = File(...),
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        content = await file.read(MAX_TRADE_IMPORT_BYTES + 1)
+        if len(content) > MAX_TRADE_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="Upload exceeds 5 MiB limit")
+        result = preview_galaxy_fills(
+            path, content, owner=subject, max_rows=MAX_TRADE_IMPORT_ROWS
+        )
+        if any(error["field"] == "limit" for error in result["error_details"]):
+            raise HTTPException(status_code=413, detail="CSV exceeds 10,000 row limit")
+        if any(error["field"] == "header" for error in result["error_details"]):
+            raise HTTPException(status_code=422, detail="Unsupported Galaxy CSV format")
+        records = result.pop("_records")
+        batch_id = str(uuid.uuid4())
+        now = time.time()
+        with sqlite3.connect(str(path)) as db:
+            db.execute("DELETE FROM trade_import_batches WHERE expires_at<=?", (now,))
+            db.execute(
+                """INSERT INTO trade_import_batches(
+                    batch_id,owner,records_json,errors_json,summary_json,
+                    created_at,expires_at
+                ) VALUES(?,?,?,?,?,?,?)""",
+                (
+                    batch_id,
+                    subject,
+                    json.dumps(records, default=_json_default),
+                    json.dumps(result["error_details"]),
+                    json.dumps(
+                        {
+                            key: result[key]
+                            for key in ("valid", "new", "duplicates", "errors")
+                        }
+                    ),
+                    now,
+                    now + TRADE_IMPORT_BATCH_TTL_SECONDS,
+                ),
+            )
+        return JSONResponse(
+            {
+                "batch_id": batch_id,
+                "valid": result["valid"],
+                "new": result["new"],
+                "duplicates": result["duplicates"],
+                "errors": result["errors"],
+                "error_details": result["error_details"],
+            }
+        )
 
     @app.get("/v1/account-snapshot")
     def get_account_snapshot(

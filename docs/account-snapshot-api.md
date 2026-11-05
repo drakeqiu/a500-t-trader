@@ -20,3 +20,9 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
 
 未提供有效 OIDC 配置时应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；测试可通过 `create_app(database, authenticator)` 使用临时数据库与确定性身份验证替身。
+
+## 成交文件预览
+
+`POST /v1/trade-imports/previews` 接受 multipart 字段 `file`，只支持现有银河证券 GB18030 CSV 表头。请求必须使用与账户快照相同的 Bearer 认证；所有权仅来自验证后的 OIDC `sub`。上传上限为 5 MiB、10,000 条记录，超限返回 `413`，不支持的格式返回 `422`。
+
+预览响应包含 `batch_id`、`valid`、`new`、`duplicates`、`errors` 和脱敏 `error_details`。预览不会写入成交记录或更新账户快照；仅将解析后的成交暂存 15 分钟，不保留原始上传文件。无效行的错误只包含 CSV 行号、字段和固定原因，不包含原始行内容、股东账户号或资金余额。导入成交独立存储，并标记为用户提供、未经系统核实。
