@@ -145,6 +145,7 @@ def create_app(
         if authenticator is not None
         else OIDCAuthenticator.from_environment()
     )
+    bearer = HTTPBearer(auto_error=False)
     app = FastAPI(
         title="A500 signal monitor",
         docs_url=None,
