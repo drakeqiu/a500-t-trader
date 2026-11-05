@@ -8,10 +8,13 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_compose_provides_persistent_keycloak_with_env_admin_credentials() -> None:
+def test_keycloak_is_standalone_and_persistent() -> None:
     compose = yaml.safe_load((ROOT / "compose.yaml").read_text())
+    local_compose = yaml.safe_load((ROOT / "compose.keycloak.yaml").read_text())
 
-    keycloak = compose["services"]["keycloak"]
+    assert "keycloak" not in compose["services"]
+    assert "keycloak-data" not in compose.get("volumes", {})
+    keycloak = local_compose["services"]["keycloak"]
     assert keycloak["image"] == "quay.io/keycloak/keycloak:26.2"
     assert keycloak["command"] == ["start-dev", "--import-realm"]
     assert (
@@ -22,9 +25,19 @@ def test_compose_provides_persistent_keycloak_with_env_admin_credentials() -> No
         keycloak["environment"]["KC_BOOTSTRAP_ADMIN_PASSWORD"]
         == "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}"
     )
-    assert "./keycloak/realm-a500.json:/opt/keycloak/data/import/realm-a500.json:ro" in keycloak["volumes"]
+    assert keycloak["ports"] == [
+        "127.0.0.1:${KEYCLOAK_HOST_PORT:-8081}:8080"
+    ]
+    assert keycloak["environment"]["KC_HOSTNAME"] == "${KEYCLOAK_HOSTNAME:-}"
+    assert compose["services"]["gateway"]["ports"] == [
+        "127.0.0.1:${A500_GATEWAY_HOST_PORT:-8080}:8080"
+    ]
+    assert (
+        "./keycloak/realm-a500.json:/opt/keycloak/data/import/realm-a500.json:ro"
+        in keycloak["volumes"]
+    )
     assert "keycloak-data:/opt/keycloak/data" in keycloak["volumes"]
-    assert compose["volumes"]["keycloak-data"] is None
+    assert local_compose["volumes"]["keycloak-data"] is None
 
 
 def test_imported_realm_has_public_device_client_and_a500_api_audience() -> None:
