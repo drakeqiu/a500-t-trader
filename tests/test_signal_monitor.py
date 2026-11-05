@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 
-import fakeredis
 import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
@@ -248,6 +248,62 @@ def test_sse_sends_snapshot_replays_after_cursor_and_resets_expired_cursor() -> 
             assert next(lines) == 'data: {"reason":"cursor unavailable"}'
             assert next(lines) == ""
             assert next(lines) == "event: snapshot"
+        client.portal.call(lambda: redis.aclose())
+
+
+def test_sse_filters_delivery_without_changing_global_event_order() -> None:
+    config = LiveSignalConfig(
+        ("510300", "563360", "000001"), {}, {}, "stable-fingerprint"
+    )
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with TestClient(create_app(redis, config)) as client:
+        assert client.portal is not None
+        now = datetime.now(UTC)
+        store = SignalStore(redis)
+        first = client.portal.call(
+            lambda: store.publish(state("510300", "BUY", now), "BUY")
+        )
+        client.portal.call(
+            lambda: store.publish(
+                state("000001", "SELL", now + timedelta(minutes=1)), "SELL"
+            )
+        )
+        second = client.portal.call(
+            lambda: store.publish(
+                state("563360", "SELL", now + timedelta(minutes=2)), "SELL"
+            )
+        )
+        third = client.portal.call(
+            lambda: store.publish(
+                state("510300", "BUYBACK", now + timedelta(minutes=3)), "BUYBACK"
+            )
+        )
+
+        with client.stream(
+            "GET", "/v1/signals/stream?symbols=563360&symbols=510300"
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines) == "event: snapshot"
+            snapshots = set()
+            snapshots.add(json.loads(next(lines).removeprefix("data: "))["symbol"])
+            assert next(lines) == ""
+            assert next(lines) == "event: snapshot"
+            snapshots.add(json.loads(next(lines).removeprefix("data: "))["symbol"])
+            assert snapshots == {"563360", "510300"}
+
+        with client.stream(
+            "GET",
+            "/v1/signals/stream?symbols=563360&symbols=510300",
+            headers={"Last-Event-ID": first or ""},
+        ) as response:
+            lines = iter(response.iter_lines())
+            assert next(lines) == f"id: {second}"
+            assert next(lines) == "event: sell"
+            assert '"symbol":"563360"' in next(lines)
+            assert next(lines) == ""
+            assert next(lines) == f"id: {third}"
+            assert next(lines) == "event: buyback"
+            assert '"symbol":"510300"' in next(lines)
         client.portal.call(lambda: redis.aclose())
 
 
