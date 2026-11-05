@@ -62,7 +62,7 @@ def _wait_for_keycloak(base_url: str) -> None:
             status, _ = _request(url)
             if status == 200:
                 return
-        except (TimeoutError, URLError, OSError):
+        except TimeoutError, URLError, OSError:
             pass
         time.sleep(1)
     raise RuntimeError("临时 Keycloak 未在 180 秒内就绪")
@@ -90,8 +90,11 @@ def _create_temporary_user(
     body = json.dumps(
         {
             "username": username,
-            "enabled": True,
+            "email": f"{username}@example.test",
             "emailVerified": True,
+            "firstName": "Device",
+            "lastName": "Flow",
+            "enabled": True,
             "credentials": [
                 {"type": "password", "value": password, "temporary": False}
             ],
@@ -124,7 +127,9 @@ def _device_authorize(base_url: str, username: str, password: str) -> str:
         raise RuntimeError(f"设备授权端点拒绝请求: HTTP {status}")
     device_code = str(result["device_code"])
     user_code = str(result["user_code"])
-    page_url = str(result.get("verification_uri_complete") or result["verification_uri"])
+    page_url = str(
+        result.get("verification_uri_complete") or result["verification_uri"]
+    )
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -134,16 +139,18 @@ def _device_authorize(base_url: str, username: str, password: str) -> str:
             code_field = page.locator("input[name='user_code']")
             if code_field.count() and code_field.is_visible():
                 code_field.fill(user_code)
-                page.locator("button[type='submit'], input[type='submit']").first.click()
+                (
+                    page.locator(
+                        "button[type='submit'], input[type='submit']"
+                    ).first.click()
+                )
             username_field = page.locator("input[name='username']")
             username_field.wait_for(state="visible", timeout=30000)
             username_field.fill(username)
             page.locator("input[name='password']").fill(password)
             page.locator("button[type='submit'], input[type='submit']").first.click()
             username_field.wait_for(state="hidden", timeout=30000)
-            approvals = page.locator(
-                "button[type='submit'], input[type='submit']"
-            )
+            approvals = page.locator("button[type='submit'], input[type='submit']")
             if approvals.count() and approvals.first.is_visible():
                 approvals.first.click()
         finally:
@@ -258,7 +265,16 @@ def main() -> None:
     ]
     try:
         subprocess.run(
-            [*compose, "up", "-d", "--build", "keycloak", "gateway"],
+            [
+                *compose,
+                "up",
+                "-d",
+                "--build",
+                "keycloak",
+                "signal-api",
+                "account-api",
+                "gateway",
+            ],
             cwd=ROOT,
             env=environment,
             check=True,

@@ -17,7 +17,6 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "oauth2DeviceAuthorizationGrantEnabled": true,
       "attributes": {
         "oauth2.device.authorization.grant.enabled": "true"
       },
