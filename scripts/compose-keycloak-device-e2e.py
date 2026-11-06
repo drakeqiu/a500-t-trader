@@ -435,35 +435,39 @@ def _check_binding(
             ).stdout.strip()
             if not container or "\n" in container:
                 raise RuntimeError(f"无法唯一确定 {service} 容器")
-            result = subprocess.run(
-                [
-                    "podman",
-                    "inspect",
-                    "--format",
-                    "{{json .NetworkSettings.Ports}}",
-                    container,
-                ],
+        else:
+            container = subprocess.run(
+                [*compose, "ps", "-q", service],
                 cwd=ROOT,
                 env=environment,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=True,
-            )
-            ports = json.loads(result.stdout) or {}
-            return "\n".join(
-                f"{item['HostIp']}:{item['HostPort']}"
-                for item in (ports.get(f"{container_port}/tcp") or [])
-            )
+            ).stdout.strip()
+            if not container or "\n" in container:
+                raise RuntimeError(f"无法唯一确定 {service} 容器")
+        runtime = "podman" if "podman" in Path(compose[0]).name else "docker"
         result = subprocess.run(
-            [*compose, "port", service, str(container_port)],
+            [
+                runtime,
+                "inspect",
+                "--format",
+                "{{json .NetworkSettings.Ports}}",
+                container,
+            ],
             cwd=ROOT,
             env=environment,
             capture_output=True,
             text=True,
             timeout=30,
+            check=True,
         )
-        return result.stdout.strip()
+        ports = json.loads(result.stdout) or {}
+        return "\n".join(
+            f"{item['HostIp']}:{item['HostPort']}"
+            for item in (ports.get(f"{container_port}/tcp") or [])
+        )
 
     binding = published("gateway", 8080)
     if binding != f"{host}:{port}":

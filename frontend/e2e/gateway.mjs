@@ -35,6 +35,8 @@ server.on("upgrade", (request, socket, head) => {
     headers: request.headers,
   });
   upstream.on("upgrade", (response, upstreamSocket, upstreamHead) => {
+    socket.on("error", () => upstreamSocket.destroy());
+    upstreamSocket.on("error", () => socket.destroy());
     socket.write(
       `HTTP/${response.httpVersion} ${response.statusCode} ${response.statusMessage}\r\n` +
         response.rawHeaders.reduce(

@@ -38,6 +38,8 @@ uv run python scripts/compose-keycloak-device-e2e.py --mock-market-data
 uv run python -c 'import os, runpy; env = runpy.run_path("scripts/start-local.py")["local_environment"](); os.execvpe("python", ["python", "scripts/compose-keycloak-device-e2e.py"], env)'
 ```
 
+后端镜像已包含 TGW SDK 所需的 Kerberos 运行库；修改镜像依赖后需重新构建。
+
 也可在受保护的执行环境直接设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT` 后运行 `uv run python scripts/compose-keycloak-device-e2e.py`。不带 `--mock-market-data` 时账户 API 始终连接真实服务，缺少或不可用的凭据不能完成真实验收；生产 Compose 不包含测试覆盖。默认使用 Docker Compose，Podman Compose 通过 `PODMAN_COMPOSE=podman-compose` 选择。该脚本构建所需前端和 API，以独立项目名隔离服务与卷，随机选择本机 Keycloak 和 gateway host port。行情 Compose 验收另运行 `uv run python scripts/compose-market-data-e2e.py`，Podman Compose 使用 `A500_COMPOSE_COMMAND=podman-compose`。
 
 设备授权流程中，应用先向 IdP 的设备授权端点申请设备码和用户码，展示 IdP 返回的验证 URI、用户码及轮询间隔；用户在另一设备打开验证 URI 并登录 Keycloak、确认授权。客户端按 IdP 返回的间隔轮询 token 端点，依照 OAuth 2.0 Device Authorization Grant 处理 `authorization_pending`、`slow_down`、`access_denied` 和过期结果，不得在每次 pending 时加速轮询。Keycloak discovery 地址为 `http://127.0.0.1:8081/realms/a500/.well-known/openid-configuration`；可从 discovery 读取 `device_authorization_endpoint`、`token_endpoint` 与 `jwks_uri`。本地 Keycloak 端点分别为 `/realms/a500/protocol/openid-connect/auth/device` 和 `/realms/a500/protocol/openid-connect/token`。直接使用 OAuth 客户端命令行工具时，参数对应 client ID `a500-device-client`、scope `openid`，并按该工具的设备授权实现展示验证 URI/码及轮询令牌端点；不要把用户密码发送给 A500 API。
