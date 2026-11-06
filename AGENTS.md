@@ -23,3 +23,5 @@ Use the single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agen
 - Prefer Matt Pocock Skills for requirements clarification, solution design, and code-quality checks. Follow Next.js App Router and TypeScript best practices.
 - Use Impeccable Skills first for frontend UI/UX design and refinement; follow established design conventions and ensure consistency, responsive behavior, and accessibility.
 - Prefer existing code and patterns. Avoid unnecessary dependencies, abstractions, and large-scale refactors.
+
+- Frontend changes must include unit tests and end-to-end tests for the affected behavior; run both suites before merging.

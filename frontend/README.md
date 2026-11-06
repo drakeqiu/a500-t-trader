@@ -36,3 +36,8 @@ OIDC issuer discovery 必须提供设备授权和 token endpoint。前端按 OAu
 - 账户快照编辑等其他已存在 API 尚未在此首页提供操作入口。
 
 本地开发地址默认为 [http://localhost:3000](http://localhost:3000)。
+
+### 测试
+
+- `bun run test` 运行单元测试。
+- `bun run test:e2e` 运行 Playwright 端到端测试；首次运行先执行 `bunx playwright install chromium`。
