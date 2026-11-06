@@ -220,7 +220,9 @@ def main() -> int:
             )
             gateway_port = environment.get("A500_GATEWAY_HOST_PORT", "8080")
             wait_ready(arguments.timeout, gateway_port)
-            print(f"Ready: http://localhost:{gateway_port} (Keycloak: http://localhost:8081)")
+            print(
+                f"Ready: http://localhost:{gateway_port} (Keycloak: http://localhost:8081)"
+            )
             print(
                 "Provision an enabled user in the a500 realm; no default user exists."
             )
