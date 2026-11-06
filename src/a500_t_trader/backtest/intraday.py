@@ -12,6 +12,7 @@ from enum import StrEnum
 from typing import Protocol, cast
 
 from ..market_data import MinuteBar
+from ..strategy.intraday_risk import v1_stop_distance
 from ..strategy.intraday_technical import (
     IntradayTechnicalAnalysis,
     analyze_intraday_technical,
@@ -1188,6 +1189,8 @@ def _risk_quantity(
         atr = (atr * Decimal(13) + true_range) / Decimal(14)
     if atr <= 0:
         return None
+    # Seed without grid: grid depends on commission, which depends on quantity.
+    # The loop below then refines quantity and grid together.
     quantity = (
         Decimal("0.0015") * nav / max(Decimal("1.5") * atr, Decimal("0.004") * price)
     ).to_integral_value(rounding=ROUND_DOWN)
@@ -1213,11 +1216,7 @@ def _risk_quantity(
         grid = (price * grid_ratio / Decimal("0.001")).to_integral_value(
             rounding=ROUND_UP
         ) * Decimal("0.001")
-        stop_distance = max(
-            Decimal("1.5") * atr,
-            Decimal("1.2") * grid,
-            Decimal("0.004") * price,
-        )
+        stop_distance = v1_stop_distance(atr, grid, price)
         next_quantity = (Decimal("0.0015") * nav / stop_distance).to_integral_value(
             rounding=ROUND_DOWN
         )

@@ -23,6 +23,11 @@ import {
 } from "@/lib/a500-client";
 import { parseSnapshotDraft, snapshotDraft, snapshotFields } from "@/lib/snapshot-draft";
 
+const STREAM_DISCONNECTED = "尚未连接";
+const STREAM_NO_SYMBOLS = "当前没有可订阅的标的";
+const STREAM_LIVE = "实时订阅";
+const STREAM_RECONNECT_DELAY_MS = 5000;
+
 type Device = {
   user_code: string;
   verification_uri: string;
@@ -69,7 +74,7 @@ export default function Workspace() {
   const [draft, setDraft] = useState(snapshotDraft);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
-  const [streamState, setStreamState] = useState("尚未连接");
+  const [streamState, setStreamState] = useState<string>(STREAM_DISCONNECTED);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -100,7 +105,7 @@ export default function Workspace() {
     setSnapshotBusy(false);
     setBusy(false);
     setNotice(null);
-    setStreamState("尚未连接");
+    setStreamState(STREAM_DISCONNECTED);
   }, []);
   const fail = useCallback(
     (reason: unknown) => {
@@ -154,7 +159,7 @@ export default function Workspace() {
           setSignals(current);
           setLastUpdated(new Date().toISOString());
           if (!current.length) {
-            setStreamState("当前没有可订阅的标的");
+            setStreamState(STREAM_NO_SYMBOLS);
           } else {
             setStreamState("连接中");
             await streamSignals(
@@ -168,7 +173,7 @@ export default function Workspace() {
                   cursor = undefined;
                   setNotice("信号游标已重置；正在重新读取当前信号。");
                 }
-                setStreamState(event.event === "unavailable" ? "信号服务不可用" : "实时订阅");
+                setStreamState(event.event === "unavailable" ? "信号服务不可用" : STREAM_LIVE);
                 // Stream events include retained historical directional states. Never render
                 // those as current advice: requery the freshness-checked current endpoint.
                 void refreshSignals();
@@ -188,7 +193,7 @@ export default function Workspace() {
           if (reason instanceof ApiError && reason.status === 401) return;
         }
         try {
-          await abortableDelay(5000, signal);
+          await abortableDelay(STREAM_RECONNECT_DELAY_MS, signal);
         } catch {
           return;
         }
@@ -531,21 +536,11 @@ export default function Workspace() {
           <a href="#imports">成交导入</a>
         </nav>
         <div className="connection">
-          <span className={`status-dot ${token ? "online" : ""}`} aria-hidden="true" />
-          <span>{token ? streamState : "未连接"}</span>
-          {token ? (
-            <button className="text-button" onClick={disconnect}>
-              断开
-            </button>
-          ) : (
-            <button
-              className="text-button"
-              onClick={connect}
-              disabled={busy || !configurationReady}
-            >
-              {busy ? "连接中…" : "连接数据服务"}
-            </button>
-          )}
+          <span className="status-dot online" aria-hidden="true" />
+          <span>{streamState}</span>
+          <button className="text-button" onClick={disconnect}>
+            断开
+          </button>
         </div>
       </header>
       {!configurationReady && (
@@ -616,48 +611,36 @@ export default function Workspace() {
                 ))}
               </tbody>
             </table>
-            {!token && (
-              <div className="empty-state">
-                <strong>连接后查看实时信号</strong>
-                <span>信号状态来自现有服务；页面不会展示模拟数据。</span>
-              </div>
-            )}
-            {token && signals.length === 0 && (
+            {signals.length === 0 && (
               <div className="empty-state">
                 <strong>
-                  {streamState === "当前没有可订阅的标的"
+                  {streamState === STREAM_NO_SYMBOLS
                     ? "当前没有可显示的标的"
-                    : streamState === "尚未连接"
+                    : streamState === STREAM_DISCONNECTED
                       ? "正在读取当前信号"
                       : streamState}
                 </strong>
                 <span>
-                  {streamState === "当前没有可订阅的标的"
+                  {streamState === STREAM_NO_SYMBOLS
                     ? "服务尚未返回已配置标的，将定时重新读取。"
                     : "暂不展示未验证的旧信号；连接恢复后重新读取当前状态。"}
                 </span>
               </div>
             )}
-            {token && (
-              <div className="stream-foot">
-                <span
-                  className={`status-dot ${streamState === "实时订阅" ? "online" : ""}`}
-                  aria-hidden="true"
-                />{" "}
-                {streamState} · 变更通过服务端事件更新
-              </div>
-            )}
+            <div className="stream-foot">
+              <span
+                className={`status-dot ${streamState === STREAM_LIVE ? "online" : ""}`}
+                aria-hidden="true"
+              />{" "}
+              {streamState} · 变更通过服务端事件更新
+            </div>
           </div>
         </section>
         <aside className="side-rail">
           <section className="rail-section" id="account" aria-labelledby="account-title">
             <div className="rail-heading">
               <h2 id="account-title">账户净资产</h2>
-              <button
-                className="text-button"
-                disabled={!token || busy}
-                onClick={() => void refreshNav()}
-              >
+              <button className="text-button" disabled={busy} onClick={() => void refreshNav()}>
                 刷新
               </button>
             </div>
@@ -795,7 +778,7 @@ export default function Workspace() {
               <input
                 type="file"
                 accept=".csv,text/csv"
-                disabled={!token || busy}
+                disabled={busy}
                 onChange={(event) => {
                   setFile(event.target.files?.[0] || null);
                   setPreview(null);
@@ -803,11 +786,7 @@ export default function Workspace() {
               />
             </label>
             <p className="file-name">{file?.name || "未选择文件"}</p>
-            <button
-              className="button primary"
-              disabled={!token || !file || busy}
-              onClick={previewFile}
-            >
+            <button className="button primary" disabled={!file || busy} onClick={previewFile}>
               {busy ? "处理中…" : "预览文件"}
             </button>
             {preview && (

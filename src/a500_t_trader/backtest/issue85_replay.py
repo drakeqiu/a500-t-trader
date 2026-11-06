@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from ..market_data import SHANGHAI, MinuteBar
 from ..strategy.intraday_api import _filter_rsi_momentum
+from ..strategy.intraday_risk import v1_stop_distance
 from ..strategy.intraday_technical import (
     TECHNICAL_PARAMETER_HASH,
     TECHNICAL_PARAMETERS,
@@ -235,11 +236,7 @@ class _SequentialV1Signals:
     def _ordinary_quantity(
         self, nav: Decimal, price: Decimal, atr: Decimal, grid: Decimal
     ) -> int:
-        risk_distance = max(
-            Decimal("1.5") * atr,
-            Decimal("1.2") * grid,
-            Decimal("0.004") * price,
-        )
+        risk_distance = v1_stop_distance(atr, grid, price)
         quantity = min(
             Decimal("0.0015") * nav / risk_distance,
             Decimal("0.08") * nav / price,
