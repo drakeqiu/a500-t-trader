@@ -64,3 +64,12 @@ intraday analysis.
 **获准用户**：由 IdP 明确允许访问的用户；应用不提供自助注册。
 
 **API 访问令牌**：由 IdP 签发、用于访问本项目受保护 API 的 Bearer 令牌；业务 API 验证令牌，不负责登录或发行令牌。
+
+## Development environment
+
+- Local tests and development commands that download dependencies MUST use the
+  configured package mirrors to avoid slow upstream downloads. This includes the
+  npm registry and the uv/Python package index.
+- CI MUST NOT inherit or configure local package mirrors; GitHub Actions uses
+  the default upstream registries unless a workflow explicitly requires
+  otherwise.

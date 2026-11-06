@@ -6,7 +6,7 @@ services:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
     ports:
-      - "5672:5672"
+      - "${A500_RABBITMQ_HOST_PORT:-5672}:5672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 2s
@@ -30,6 +30,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-signal-calculator", "--purpose", "signal-calculator"]
     environment:
       A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
@@ -46,6 +48,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-signal-api"]
     environment:
       A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
@@ -76,6 +80,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-account-api"]
     environment:
       A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
@@ -109,6 +115,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
     environment: &market-data-env
       A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
@@ -119,10 +127,12 @@ services:
     restart: unless-stopped
 
   consumer-audit:
-    image: a500-market-data-consumer:local
+    image: ${A500_MARKET_DATA_CONSUMER_IMAGE:-a500-market-data-consumer:local}
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-market-data-consumer", "--purpose", "audit", "--max-age-seconds", "30"]
     environment: *market-data-env
     depends_on:
@@ -135,7 +145,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["a500-market-data-replay"]
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
     environment: *market-data-env
     volumes:
       - ./data:/app/data:ro
