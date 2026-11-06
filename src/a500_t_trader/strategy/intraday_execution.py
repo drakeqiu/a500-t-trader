@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_FLOOR, Decimal
 
+from .intraday_risk import v1_stop_distance
 from .intraday_technical import IntradayTechnicalAnalysis
 from .intraday_v1_config import IntradayV1Config
 
@@ -365,11 +366,7 @@ def calculate_intraday_execution(
                     symbol, False, 0, side, score, tuple(reasons)
                 )
                 continue
-            stop_distance = max(
-                Decimal("1.5") * atr,
-                Decimal("1.2") * grid_step,
-                Decimal("0.004") * price,
-            )
+            stop_distance = v1_stop_distance(atr, grid_step, price)
             risk_budget = nav * MAX_RISK_NAV
             risk_quantity_by_stop = max(
                 ZERO,
