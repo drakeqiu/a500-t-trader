@@ -48,6 +48,6 @@ uv sync --frozen --no-dev
 uv run --no-sync python scripts/compose-market-data-e2e.py
 ```
 
-该脚本以 TGW 模式启动 Compose，通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，检查两种用途消费者均收到事件，并在清理时移除 Compose volume。GitHub Actions 的 `Compose market-data E2E` workflow 使用同一脚本。
+该脚本以 TGW 模式启动独立 Compose 项目（RabbitMQ、Redis 和行情消费者），通过项目的真实 `RabbitMQPublisher` 发布 schema-valid `Trade`，检查两种用途消费者均收到事件，并在清理时移除 Compose volume。每次运行使用独立 Compose 项目名和动态 RabbitMQ 主机端口，避免并行 CI 运行共享容器、数据卷或端口。需要本地容器构建走镜像时，可在运行脚本前设置 `UV_INDEX_URL`；Compose 会把该可选值传给镜像构建。GitHub Actions 未设置该值，仍使用默认 PyPI 源。
 
 E2E 脚本为 Compose 启动设置 300 秒上限，为日志查询设置 15 秒上限，并为清理设置 60 秒上限；超时会使运行失败，而不是无限等待。

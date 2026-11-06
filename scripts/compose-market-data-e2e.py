@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shlex
 import subprocess
 import time
@@ -20,14 +21,45 @@ COMPOSE = [
     "-f",
     str(ROOT / "compose.yaml"),
 ]
-URL = "amqp://guest:guest@localhost:5672/%2F"
+
+
+def _project_name() -> str:
+    return f"a500-market-data-e2e-{secrets.token_hex(6)}"
+
+
+def _consumer_image(project: str) -> str:
+    return f"{project}-consumer:local"
+
+
+def _published_port(compose: list[str], environment: dict[str, str]) -> int:
+    result = subprocess.run(
+        [*compose, "port", "rabbitmq", "5672"],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return int(result.stdout.strip().rsplit(":", 1)[1])
+
+
+def _compose_command(project: str) -> list[str]:
+    return [
+        *COMPOSE[:-2],
+        "--project-name",
+        project,
+        *COMPOSE[-2:],
+    ]
 
 
 def main() -> None:
+    project = _project_name()
+    consumer_image = _consumer_image(project)
     environment = {
         **os.environ,
-        "A500_RABBITMQ_URL": URL,
         "A500_MARKET_DATA_MODE": "tgw",
+        "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
+        "A500_RABBITMQ_HOST_PORT": "0",
         "A500_OIDC_ISSUER": "https://identity.example.test",
         "A500_OIDC_AUDIENCE": "a500-api",
         "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",
@@ -36,18 +68,38 @@ def main() -> None:
         "AMAZINGDATA_HOST": "127.0.0.1",
         "AMAZINGDATA_PORT": "1",
     }
+    compose = _compose_command(project)
     try:
         subprocess.run(
-            [*COMPOSE, "up", "-d", "--build"],
+            [*compose, "up", "-d", "rabbitmq", "redis"],
             cwd=ROOT,
             env=environment,
             check=True,
             timeout=300,
         )
+        port = _published_port(compose, environment)
+        url = f"amqp://guest:guest@localhost:{port}/%2F"
+        environment["A500_RABBITMQ_URL"] = url
+        subprocess.run(
+            [
+                *compose,
+                "up",
+                "-d",
+                "--build",
+                "signal-calculator",
+                "consumer-signals",
+                "consumer-audit",
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            timeout=300,
+        )
+
         connection = None
         for _ in range(60):
             try:
-                connection = pika.BlockingConnection(pika.URLParameters(URL))
+                connection = pika.BlockingConnection(pika.URLParameters(url))
                 break
             except pika.exceptions.AMQPConnectionError:
                 time.sleep(1)
@@ -66,7 +118,7 @@ def main() -> None:
                             f"consumer queue {queue} was not declared"
                         ) from error
                     time.sleep(1)
-        publisher = RabbitMQPublisher(url=URL, exchange="market.events.tgw")
+        publisher = RabbitMQPublisher(url=url, exchange="market.events.tgw")
         try:
             publisher.publish(
                 Trade(
@@ -87,7 +139,7 @@ def main() -> None:
             while time.monotonic() < deadline:
                 result = subprocess.run(
                     [
-                        *COMPOSE,
+                        *compose,
                         "logs",
                         "--since=1m",
                         f"consumer-{purpose}",
@@ -130,7 +182,7 @@ def main() -> None:
 
     except subprocess.CalledProcessError:
         subprocess.run(
-            [*COMPOSE, "logs", "rabbitmq"],
+            [*compose, "logs", "rabbitmq"],
             cwd=ROOT,
             env=environment,
             check=False,
@@ -140,7 +192,7 @@ def main() -> None:
 
     finally:
         subprocess.run(
-            [*COMPOSE, "down", "--volumes", "--remove-orphans"],
+            [*compose, "down", "--volumes", "--remove-orphans"],
             cwd=ROOT,
             env=environment,
             check=True,

@@ -149,10 +149,9 @@ def _device_authorize(base_url: str, username: str, password: str) -> str:
             username_field.fill(username)
             page.locator("input[name='password']").fill(password)
             page.locator("button[type='submit'], input[type='submit']").first.click()
-            username_field.wait_for(state="hidden", timeout=30000)
-            approvals = page.locator("button[type='submit'], input[type='submit']")
-            if approvals.count() and approvals.first.is_visible():
-                approvals.first.click()
+            approval = page.locator("#kc-oauth")
+            approval.wait_for(state="visible", timeout=30000)
+            page.locator("#kc-login").click()
         finally:
             browser.close()
 
