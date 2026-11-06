@@ -181,6 +181,127 @@ export default function Workspace() {
       setBusy(false);
     }
   }
+  if (!token) {
+    return (
+      <div className="shell login-shell">
+        <header className="masthead login-masthead">
+          <div className="brand" aria-label="A500 Trader">
+            <span className="brand-mark">A</span>
+            <span>
+              A500 <b>TRADER</b>
+            </span>
+          </div>
+          <span className="login-service">
+            <span className="status-dot" aria-hidden="true" /> 数据服务入口
+          </span>
+        </header>
+        <main className="login-layout" aria-labelledby="login-title">
+          <section className="login-primary">
+            <h1 id="login-title">
+              连接你的
+              <br />
+              投资工作台
+            </h1>
+            <p className="login-intro">
+              使用已配置的身份提供方授权。登录后，实时信号与账户数据仅对当前认证主体可见。
+            </p>
+            {!configurationReady && (
+              <div className="config-note login-config" role="status">
+                需配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code> 与{" "}
+                <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接数据服务。
+              </div>
+            )}
+            {error && (
+              <div className="notice error login-error" role="alert">
+                {error}
+              </div>
+            )}
+            <section className="auth-box" aria-labelledby="auth-title" aria-live="polite">
+              <div className="auth-box-heading">
+                <div>
+                  <h2 id="auth-title">{device ? "在另一台设备完成授权" : "通过身份提供方继续"}</h2>
+                  <p>
+                    {device
+                      ? "仅在官方验证页面输入此代码。"
+                      : "我们会安全地将你转至已配置的身份提供方。"}
+                  </p>
+                </div>
+                <span className={`auth-state ${busy ? "is-active" : ""}`}>
+                  <span className="status-dot" aria-hidden="true" />
+                  {busy ? "等待授权" : "尚未连接"}
+                </span>
+              </div>
+              {device ? (
+                <>
+                  <div className="code-row">
+                    <span>一次性设备代码</span>
+                    <strong className="user-code">{device.user_code}</strong>
+                  </div>
+                  <a
+                    className="button primary full auth-action"
+                    href={device.verification_uri_complete || device.verification_uri}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    打开验证页面 <span aria-hidden="true">↗</span>
+                  </a>
+                  <button className="text-button auth-cancel" onClick={disconnect}>
+                    取消授权
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="button primary full auth-action"
+                  onClick={() => void connect()}
+                  disabled={busy || !configurationReady}
+                >
+                  {busy ? "正在连接…" : "安全连接"}
+                  {!busy && <span aria-hidden="true">→</span>}
+                </button>
+              )}
+              <p className="auth-footnote">
+                访问令牌仅保存在当前页面内存中；关闭页面或断开连接后即清除。
+              </p>
+            </section>
+          </section>
+          <aside className="login-aside" aria-label="授权说明">
+            <div className="aside-rule" />
+            <h2>一次授权，开始查看</h2>
+            <ol className="login-steps">
+              <li>
+                <span>1</span>
+                <div>
+                  <strong>连接身份提供方</strong>
+                  <p>由系统配置的 OIDC 服务验证身份。</p>
+                </div>
+              </li>
+              <li>
+                <span>2</span>
+                <div>
+                  <strong>确认设备代码</strong>
+                  <p>在官方验证页面确认本次登录。</p>
+                </div>
+              </li>
+              <li>
+                <span>3</span>
+                <div>
+                  <strong>返回工作台</strong>
+                  <p>授权完成后自动载入服务数据。</p>
+                </div>
+              </li>
+            </ol>
+            <p className="login-disclaimer">
+              信号仅供参考，不构成交易指令。账户净资产数据以服务端提供内容为准。
+            </p>
+          </aside>
+        </main>
+        <footer className="login-footer">
+          <span>A500 TRADER</span>
+          <span>身份验证由已配置的服务提供</span>
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="shell">

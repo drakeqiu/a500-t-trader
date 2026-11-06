@@ -24,7 +24,11 @@ OIDC issuer discovery 必须提供设备授权和 token endpoint。前端按 OAu
 
 浏览器需能访问 OIDC issuer 和 API origin；API 与 IdP 必须允许前端部署来源的 CORS 请求。部署方负责提供正确 issuer、API 地址与跨域策略，不要将任何客户端密钥写入 `NEXT_PUBLIC_*` 变量。
 
-### 当前首页
+### 首页与登录
+
+未授权时首页显示 OIDC 设备码登录页；完成身份提供方验证后自动进入工作台。页面不收集密码，设备代码仅用于当前授权流程。
+
+授权后首页提供：
 
 - 读取 `/v1/signals`，并订阅 `/v1/signals/stream` 展示已配置标的当前状态；信号仅供参考，不代表交易执行。
 - 读取当前认证主体的 `/v1/account-nav`；账户快照和净资产明确标记为用户录入、未经券商核验。
