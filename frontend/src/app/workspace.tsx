@@ -2,19 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ApiError,
+  abortableDelay,
   configurationReady,
   confirmPreview,
   discover,
   getNav,
+  getPreview,
   getSignals,
+  getSnapshot,
   pollDeviceToken,
   requestDeviceCode,
+  saveSnapshot,
   streamSignals,
   uploadPreview,
   type AccountNav,
   type ImportPreview,
   type Signal,
+  type SnapshotResult,
 } from "@/lib/a500-client";
+import { parseSnapshotDraft, snapshotDraft, snapshotFields } from "@/lib/snapshot-draft";
 
 type Device = {
   user_code: string;
@@ -47,138 +54,334 @@ export default function Workspace() {
   const [device, setDevice] = useState<Device | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [nav, setNav] = useState<AccountNav | null>(null);
+  const [navError, setNavError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [snapshotBusy, setSnapshotBusy] = useState(false);
+  const [snapshotKnown, setSnapshotKnown] = useState(false);
+  const [etag, setEtag] = useState<string | null>(null);
+  const [latest, setLatest] = useState<SnapshotResult | null | undefined>(undefined);
+  const [draft, setDraft] = useState(snapshotDraft);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
   const [streamState, setStreamState] = useState("尚未连接");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const authAbort = useRef<AbortController | null>(null);
-
-  const loadData = useCallback(async (accessToken: string) => {
-    setError(null);
-    const [signalResult, navResult] = await Promise.allSettled([
-      getSignals(accessToken),
-      getNav(accessToken),
-    ]);
-    if (signalResult.status === "fulfilled") {
-      setSignals(signalResult.value);
-      setLastUpdated(new Date().toISOString());
-    } else
-      setError(
-        signalResult.reason instanceof Error ? signalResult.reason.message : "读取信号失败。",
-      );
-    if (navResult.status === "fulfilled") setNav(navResult.value);
-    else if (String(navResult.reason).includes("404")) setNav(null);
+  const sessionAbort = useRef<AbortController | null>(null);
+  const identity = useRef(0);
+  const draftDirty = useRef(false);
+  const clearSession = useCallback(() => {
+    identity.current += 1;
+    authAbort.current?.abort();
+    sessionAbort.current?.abort();
+    setToken(null);
+    setDevice(null);
+    setSignals([]);
+    setNav(null);
+    setNavError(null);
+    setPreview(null);
+    setFile(null);
+    setLastUpdated(null);
+    setDraft(snapshotDraft());
+    draftDirty.current = false;
+    setSnapshotKnown(false);
+    setEtag(null);
+    setLatest(undefined);
+    setConflict(false);
+    setSnapshotError(null);
+    setSnapshotBusy(false);
+    setBusy(false);
+    setNotice(null);
+    setStreamState("尚未连接");
   }, []);
+  const fail = useCallback(
+    (reason: unknown) => {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      if (reason instanceof ApiError && reason.status === 401) clearSession();
+      setError(reason instanceof Error ? reason.message : "服务请求失败。");
+    },
+    [clearSession],
+  );
 
   useEffect(() => {
     if (!token) return;
+    const accessToken = token;
     const controller = new AbortController();
-    let retry: number | undefined;
-    let disposed = false;
-    const connectStream = async () => {
+    sessionAbort.current = controller;
+    const active = () => !controller.signal.aborted;
+    const signal = controller.signal;
+    let cursor: string | undefined;
+    let requeryRunning = false;
+    let requeryAgain = false;
+    async function refreshSignals() {
+      if (requeryRunning) {
+        requeryAgain = true;
+        return;
+      }
+      requeryRunning = true;
       try {
-        const current = await getSignals(token);
-        setSignals(current);
-        setLastUpdated(new Date().toISOString());
-        setStreamState("实时订阅");
-        await streamSignals(
-          token,
-          current.map((row) => row.symbol),
-          controller.signal,
-          (incoming) => {
-            setSignals((existing) =>
-              existing.map((row) => (row.symbol === incoming.symbol ? incoming : row)),
-            );
+        do {
+          requeryAgain = false;
+          const rows = await getSignals(accessToken, signal);
+          if (active()) {
+            setSignals(rows);
             setLastUpdated(new Date().toISOString());
-          },
-        );
+          }
+        } while (requeryAgain && active());
       } catch (reason) {
-        if (!controller.signal.aborted) {
+        if (active()) {
+          setSignals([]);
+          setStreamState("读取信号失败");
+          fail(reason);
+        }
+      } finally {
+        requeryRunning = false;
+      }
+    }
+    async function connectStream() {
+      while (active()) {
+        try {
+          const current = await getSignals(accessToken, signal);
+          if (!active()) return;
+          setSignals(current);
+          setLastUpdated(new Date().toISOString());
+          if (!current.length) {
+            setStreamState("当前没有可订阅的标的");
+          } else {
+            setStreamState("连接中");
+            await streamSignals(
+              accessToken,
+              current.map((row) => row.symbol),
+              signal,
+              (event) => {
+                if (!active()) return;
+                if (event.id !== undefined) cursor = event.id || undefined;
+                if (event.event === "reset") {
+                  cursor = undefined;
+                  setNotice("信号游标已重置；正在重新读取当前信号。");
+                }
+                setStreamState(event.event === "unavailable" ? "信号服务不可用" : "实时订阅");
+                // Stream events include retained historical directional states. Never render
+                // those as current advice: requery the freshness-checked current endpoint.
+                void refreshSignals();
+              },
+              cursor,
+            );
+            if (active()) {
+              setSignals([]);
+              setStreamState("连接中断");
+            }
+          }
+        } catch (reason) {
+          if (!active()) return;
+          setSignals([]);
           setStreamState("连接中断");
-          setError(reason instanceof Error ? reason.message : "实时订阅中断。");
-          retry = window.setTimeout(() => {
-            if (!disposed) void connectStream();
-          }, 5000);
+          fail(reason);
+          if (reason instanceof ApiError && reason.status === 401) return;
+        }
+        try {
+          await abortableDelay(5000, signal);
+        } catch {
+          return;
         }
       }
-    };
+    }
     void connectStream();
-    return () => {
-      disposed = true;
-      controller.abort();
-      if (retry) window.clearTimeout(retry);
-    };
-  }, [token]);
-  useEffect(() => () => authAbort.current?.abort(), []);
+    void getNav(token, signal)
+      .then((value) => {
+        if (active()) setNav(value);
+      })
+      .catch((reason) => {
+        if (active()) {
+          setNavError(String(reason.message || reason));
+          fail(reason);
+        }
+      });
+    void getSnapshot(token, signal)
+      .then((value) => {
+        if (!active()) return;
+        setSnapshotKnown(true);
+        setEtag(value?.etag ?? null);
+        if (!draftDirty.current) setDraft(snapshotDraft(value?.snapshot));
+        else setLatest(value);
+      })
+      .catch((reason) => {
+        if (active()) {
+          setSnapshotError(String(reason.message || reason));
+          fail(reason);
+        }
+      })
+      .finally(() => {
+        if (active()) setSnapshotBusy(false);
+      });
+    const batchId = window.localStorage.getItem("a500.import-batch-id");
+    if (batchId)
+      void getPreview(token, batchId, signal)
+        .then((value) => {
+          if (active()) {
+            setPreview(value);
+            setNotice("已恢复导入批次。导入不会更新账户快照。");
+          }
+        })
+        .catch((reason) => {
+          if (!active()) return;
+          if (reason instanceof ApiError && reason.status === 404) {
+            window.localStorage.removeItem("a500.import-batch-id");
+            setNotice("导入批次不存在、已过期或不属于当前账户，请重新预览文件。");
+          } else fail(reason);
+        });
+    return () => controller.abort();
+  }, [token, fail]);
+  useEffect(
+    () => () => {
+      authAbort.current?.abort();
+      sessionAbort.current?.abort();
+    },
+    [],
+  );
 
   async function connect() {
-    setStreamState("连接中");
+    clearSession();
+    const generation = identity.current;
+    const controller = new AbortController();
+    authAbort.current = controller;
     setBusy(true);
     setError(null);
-    setNotice(null);
+    setStreamState("连接中");
     try {
-      const endpoints = await discover();
-      const result = await requestDeviceCode(endpoints.device);
+      const endpoints = await discover(controller.signal);
+      const result = await requestDeviceCode(endpoints.device, controller.signal);
+      if (generation !== identity.current || controller.signal.aborted) return;
       setDevice(result);
-      setNotice("请在另一台设备完成身份验证；访问令牌仅保存在当前页面内存中。");
-      const controller = new AbortController();
-      authAbort.current = controller;
       const accessToken = await pollDeviceToken(
         endpoints.token,
         result.device_code,
         result.interval || 5,
         controller.signal,
+        result.expires_in,
       );
+      if (generation !== identity.current || controller.signal.aborted) return;
+      setSnapshotBusy(true);
       setToken(accessToken);
       setDevice(null);
       setNotice("数据服务已连接。");
-      await loadData(accessToken);
     } catch (reason) {
-      if (!(reason instanceof DOMException && reason.name === "AbortError"))
-        setError(reason instanceof Error ? reason.message : "身份授权失败。");
-      setDevice(null);
+      if (generation === identity.current) {
+        fail(reason);
+        setDevice(null);
+      }
     } finally {
-      setBusy(false);
+      if (generation === identity.current) setBusy(false);
     }
   }
   function disconnect() {
-    authAbort.current?.abort();
-    setToken(null);
-    setDevice(null);
-    setSignals([]);
-    setNav(null);
-    setPreview(null);
-    setStreamState("尚未连接");
+    clearSession();
+    setError(null);
     setNotice("已断开；访问令牌已从页面内存清除。");
+  }
+  async function refreshNav() {
+    if (!token) return;
+    const generation = identity.current;
+    setNav(null);
+    setNavError(null);
+    try {
+      const value = await getNav(token, sessionAbort.current?.signal);
+      if (generation === identity.current) setNav(value);
+    } catch (reason) {
+      if (generation === identity.current) {
+        setNavError(String((reason as Error).message));
+        fail(reason);
+      }
+    }
+  }
+  async function readLatest() {
+    if (!token) return;
+    const generation = identity.current;
+    setSnapshotBusy(true);
+    setSnapshotError(null);
+    try {
+      const value = await getSnapshot(token, sessionAbort.current?.signal);
+      if (generation !== identity.current) return;
+      setLatest(value);
+      setSnapshotKnown(true);
+      setNotice("已读取最新快照，当前草稿未修改。请明确选择替换草稿或以最新版本继续编辑。");
+      await refreshNav();
+    } catch (reason) {
+      if (generation === identity.current) {
+        setSnapshotError(String((reason as Error).message));
+        fail(reason);
+      }
+    } finally {
+      if (generation === identity.current) setSnapshotBusy(false);
+    }
+  }
+  async function saveAccount() {
+    if (!token || !snapshotKnown) return;
+    const generation = identity.current;
+    setSnapshotBusy(true);
+    setSnapshotError(null);
+    try {
+      const result = await saveSnapshot(
+        token,
+        parseSnapshotDraft(draft),
+        etag,
+        sessionAbort.current?.signal,
+      );
+      if (generation !== identity.current) return;
+      setEtag(result.etag);
+      setLatest(undefined);
+      setConflict(false);
+      setDraft(snapshotDraft(result.snapshot));
+      draftDirty.current = false;
+      setNotice("账户快照已保存；正在刷新净资产。");
+      await refreshNav();
+    } catch (reason) {
+      if (generation !== identity.current) return;
+      if (reason instanceof ApiError && (reason.status === 412 || reason.status === 428)) {
+        setConflict(true);
+        setSnapshotError("快照版本冲突，草稿已保留。请读取最新快照后选择如何继续。");
+      } else {
+        setSnapshotError(String((reason as Error).message));
+        fail(reason);
+      }
+    } finally {
+      if (generation === identity.current) setSnapshotBusy(false);
+    }
   }
   async function previewFile() {
     if (!token || !file) return;
+    const generation = identity.current;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      setPreview(await uploadPreview(token, file));
+      const value = await uploadPreview(token, file, sessionAbort.current?.signal);
+      if (generation !== identity.current) return;
+      setPreview(value);
+      window.localStorage.setItem("a500.import-batch-id", value.batch_id);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "文件预览失败。");
+      if (generation === identity.current) fail(reason);
     } finally {
-      setBusy(false);
+      if (generation === identity.current) setBusy(false);
     }
   }
   async function confirmImport() {
     if (!token || !preview) return;
+    const generation = identity.current;
     setBusy(true);
     setError(null);
     try {
-      const result = await confirmPreview(token, preview.batch_id);
+      const result = await confirmPreview(token, preview.batch_id, sessionAbort.current?.signal);
+      if (generation !== identity.current) return;
       setPreview(result);
-      setNotice("导入已确认；成交将按后端定义标记为用户提供、未经系统核实。");
+      setNotice("导入已确认；成交为用户提供、未经系统核实。导入不会更新账户快照。");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "确认导入失败。");
+      if (generation === identity.current) fail(reason);
     } finally {
-      setBusy(false);
+      if (generation === identity.current) setBusy(false);
     }
   }
   if (!token) {
@@ -207,8 +410,8 @@ export default function Workspace() {
             </p>
             {!configurationReady && (
               <div className="config-note login-config" role="status">
-                需配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code> 与{" "}
-                <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接数据服务。
+                需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务。 API 默认使用同源{" "}
+                <code>/api</code>；独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
               </div>
             )}
             {error && (
@@ -257,6 +460,11 @@ export default function Workspace() {
                 >
                   {busy ? "正在连接…" : "安全连接"}
                   {!busy && <span aria-hidden="true">→</span>}
+                </button>
+              )}
+              {busy && !device && (
+                <button className="text-button auth-cancel" onClick={disconnect}>
+                  取消连接
                 </button>
               )}
               <p className="auth-footnote">
@@ -337,8 +545,8 @@ export default function Workspace() {
       </header>
       {!configurationReady && (
         <div className="config-note" role="status">
-          需配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code> 与{" "}
-          <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接数据服务。
+          需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务； API 默认使用同源{" "}
+          <code>/api</code>，独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
         </div>
       )}
       {error && (
@@ -353,23 +561,6 @@ export default function Workspace() {
         <div className="notice" role="status">
           {notice}
         </div>
-      )}
-      {device && (
-        <section className="device-panel" aria-live="polite">
-          <div>
-            <h2>完成身份验证</h2>
-            <p>在受信任的身份提供方中输入此代码。不要将代码发送给他人。</p>
-          </div>
-          <strong className="user-code">{device.user_code}</strong>
-          <a
-            className="button secondary"
-            href={device.verification_uri_complete || device.verification_uri}
-            target="_blank"
-            rel="noreferrer"
-          >
-            打开验证页面 ↗
-          </a>
-        </section>
       )}
       <main className="layout">
         <section className="signal-section" id="signals" aria-labelledby="signals-title">
@@ -409,7 +600,11 @@ export default function Workspace() {
                       </span>
                       {signal.stale && <span className="subline">数据过期</span>}
                     </td>
-                    <td className="numeric">{signal.quantity ?? "—"}</td>
+                    <td className="numeric">
+                      {signal.stale || signal.status === "UNAVAILABLE"
+                        ? "—"
+                        : (signal.quantity ?? "—")}
+                    </td>
                     <td className="reason">{signal.reasons.join("；") || "暂无说明"}</td>
                     <td className="timestamp">{formatTime(signal.bar_timestamp)}</td>
                   </tr>
@@ -424,8 +619,18 @@ export default function Workspace() {
             )}
             {token && signals.length === 0 && (
               <div className="empty-state">
-                <strong>当前没有可显示的标的</strong>
-                <span>服务尚未返回已配置标的。</span>
+                <strong>
+                  {streamState === "当前没有可订阅的标的"
+                    ? "当前没有可显示的标的"
+                    : streamState === "尚未连接"
+                      ? "正在读取当前信号"
+                      : streamState}
+                </strong>
+                <span>
+                  {streamState === "当前没有可订阅的标的"
+                    ? "服务尚未返回已配置标的，将定时重新读取。"
+                    : "暂不展示未验证的旧信号；连接恢复后重新读取当前状态。"}
+                </span>
               </div>
             )}
             {token && (
@@ -446,7 +651,7 @@ export default function Workspace() {
               <button
                 className="text-button"
                 disabled={!token || busy}
-                onClick={() => token && void loadData(token)}
+                onClick={() => void refreshNav()}
               >
                 刷新
               </button>
@@ -462,13 +667,116 @@ export default function Workspace() {
               </>
             ) : (
               <div className="rail-empty">
-                {!token
-                  ? "连接服务后读取当前账户。"
+                {navError
+                  ? `净资产读取失败：${navError}。请重试刷新。`
                   : nav
                     ? `暂不可估值：${nav.reason || "数据不完整"}`
-                    : "尚无账户快照，或当前净资产不可用。"}
+                    : "正在读取账户净资产…"}
               </div>
             )}
+          </section>
+          <section className="rail-section" aria-labelledby="snapshot-title">
+            <h2 id="snapshot-title">账户快照</h2>
+            <p className="rail-note">
+              完整替换六个字段；数量为整数，现金与成本为十进制字符串。时间必须包含时区。导入成交不会更新此快照。
+            </p>
+            <p className="rail-note">
+              多标的示例：数量 {`{"510500":100,"159919":200}`}，成本{" "}
+              {`{"510500":"5.20","159919":"4.00"}`}。保护底仓、可卖数量须与持仓标的一致。
+            </p>
+            <form
+              className="snapshot-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveAccount();
+              }}
+            >
+              {snapshotFields.map(([field, label]) => (
+                <label key={field} className="snapshot-field">
+                  <span>{label}</span>
+                  {field === "as_of" || field === "available_cash" ? (
+                    <input
+                      value={draft[field]}
+                      required
+                      inputMode={field === "available_cash" ? "decimal" : "text"}
+                      onChange={(event) => {
+                        draftDirty.current = true;
+                        setDraft({ ...draft, [field]: event.target.value });
+                      }}
+                    />
+                  ) : (
+                    <textarea
+                      value={draft[field]}
+                      rows={3}
+                      spellCheck={false}
+                      required
+                      onChange={(event) => {
+                        draftDirty.current = true;
+                        setDraft({ ...draft, [field]: event.target.value });
+                      }}
+                    />
+                  )}
+                </label>
+              ))}
+              {snapshotError && (
+                <p className="snapshot-error" role="alert">
+                  {snapshotError}
+                </p>
+              )}
+              <button
+                className="button primary full"
+                type="submit"
+                disabled={snapshotBusy || !snapshotKnown || conflict}
+              >
+                保存账户快照
+              </button>
+              <button
+                className="button secondary full"
+                type="button"
+                disabled={snapshotBusy}
+                onClick={() => void readLatest()}
+              >
+                读取最新快照
+              </button>
+              {latest !== undefined && (
+                <div className="snapshot-latest" role="status">
+                  <p className="rail-note">
+                    {latest ? `最新快照时间：${latest.snapshot.as_of}` : "服务端尚无快照。"}{" "}
+                    当前草稿仍保留。
+                  </p>
+                  {latest && (
+                    <pre aria-label="最新快照内容">{JSON.stringify(latest.snapshot, null, 2)}</pre>
+                  )}
+                  <button
+                    className="button secondary full"
+                    type="button"
+                    onClick={() => {
+                      setDraft(snapshotDraft(latest?.snapshot));
+                      setEtag(latest?.etag ?? null);
+                      setLatest(undefined);
+                      setConflict(false);
+                      setSnapshotError(null);
+                      draftDirty.current = false;
+                    }}
+                  >
+                    使用最新快照替换草稿
+                  </button>
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => {
+                      setEtag(latest?.etag ?? null);
+                      setLatest(undefined);
+                      setConflict(false);
+                      setSnapshotError(null);
+                      setNotice("草稿已保留，下一次保存将基于刚读取的最新版本完整替换快照。");
+                    }}
+                  >
+                    保留草稿并使用最新版本
+                  </button>
+                </div>
+              )}
+            </form>
           </section>
           <section
             className="rail-section import-section"
@@ -495,11 +803,12 @@ export default function Workspace() {
               disabled={!token || !file || busy}
               onClick={previewFile}
             >
-              {busy ? "处理中…" : "预览导入"}
+              {busy ? "处理中…" : "预览文件"}
             </button>
             {preview && (
               <div className="preview" aria-live="polite">
                 <h3>{preview.confirmed ? "已确认" : "导入预览"}</h3>
+                <p className="rail-note">批次编号 {preview.batch_id}</p>
                 <dl>
                   <div>
                     <dt>有效</dt>
@@ -519,7 +828,19 @@ export default function Workspace() {
                   </div>
                 </dl>
                 {preview.error_details?.length > 0 && (
-                  <p className="rail-note">存在校验错误，后端不会允许确认。</p>
+                  <>
+                    <p className="rail-note">
+                      存在校验错误，后端不会允许确认。以下仅展示脱敏的逐行错误。
+                    </p>
+                    <ul className="import-errors" aria-label="导入逐行错误">
+                      {preview.error_details.map((item, index) => (
+                        <li key={index}>
+                          第 {item.row ?? "—"} 行 · {item.field || "文件"} ·{" "}
+                          {item.reason || item.code || "校验失败"}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
                 {!preview.confirmed && preview.errors === 0 && (
                   <button className="button secondary full" disabled={busy} onClick={confirmImport}>

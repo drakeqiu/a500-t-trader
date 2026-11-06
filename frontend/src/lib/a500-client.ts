@@ -13,7 +13,6 @@ export type Signal = {
   stale: boolean;
   execution_eligible: boolean;
 };
-
 export type AccountNav = {
   status: "available" | "unavailable";
   currency?: string;
@@ -24,48 +23,68 @@ export type AccountNav = {
   classification?: string;
   reason?: string;
 };
-
+export type AccountSnapshot = {
+  as_of: string;
+  holdings: Record<string, number>;
+  protected_floor: Record<string, number>;
+  sellable: Record<string, number>;
+  cost_basis: Record<string, string>;
+  available_cash: string;
+};
+export type SnapshotResult = { snapshot: AccountSnapshot; etag: string };
 export type ImportPreview = {
   batch_id: string;
   valid: number;
   new: number;
   duplicates: number;
   errors: number;
-  error_details: Array<{ row?: number; field?: string; reason?: string }>;
+  error_details: Array<{ row?: number; field?: string; reason?: string; code?: string }>;
   confirmed?: unknown;
 };
-
+export type SignalEvent = { event: string; id?: string; data: unknown };
 type SignalResponse = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
-const apiOrigin = process.env.NEXT_PUBLIC_A500_API_BASE_URL?.replace(/\/$/, "");
+const apiOrigin = (process.env.NEXT_PUBLIC_A500_API_BASE_URL || "/api").replace(/\/$/, "");
 const issuer = process.env.NEXT_PUBLIC_A500_OIDC_ISSUER?.replace(/\/$/, "");
 const clientId = process.env.NEXT_PUBLIC_A500_OIDC_CLIENT_ID || "a500-device-client";
-export const configurationReady = Boolean(apiOrigin && issuer);
+export const configurationReady = Boolean(issuer);
 
-async function responseJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    if (response.status === 401) throw new Error("授权已失效，请重新连接数据服务。");
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail || `服务请求失败（${response.status}）`);
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
   }
-  return response.json() as Promise<T>;
 }
-
-export async function discover(): Promise<{ device: string; token: string }> {
-  if (!issuer) throw new Error("缺少 OIDC issuer 配置。");
-  const response = await fetch(`${issuer}/.well-known/openid-configuration`, { cache: "no-store" });
+async function responseJson<T>(response: Response): Promise<T> {
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const details = Array.isArray(body?.errors)
+      ? body.errors
+          .map((item: { path: string; code: string }) => `${item.path}: ${item.code}`)
+          .join("；")
+      : "";
+    throw new ApiError(
+      response.status,
+      response.status === 401
+        ? "授权已失效，请重新安全连接。"
+        : details ||
+            (typeof body?.detail === "string" ? body.detail : body?.title) ||
+            `服务请求失败（${response.status}）`,
+    );
+  }
+  return body as T;
+}
+export async function discover(signal?: AbortSignal): Promise<{ device: string; token: string }> {
+  if (!issuer) throw new Error("缺少 NEXT_PUBLIC_A500_OIDC_ISSUER 配置。");
   const config = await responseJson<{
     device_authorization_endpoint: string;
     token_endpoint: string;
-  }>(response);
+  }>(await fetch(`${issuer}/.well-known/openid-configuration`, { cache: "no-store", signal }));
   return { device: config.device_authorization_endpoint, token: config.token_endpoint };
 }
-
-export async function requestDeviceCode(endpoint: string) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: clientId, scope: "openid" }),
-  });
+export async function requestDeviceCode(endpoint: string, signal?: AbortSignal) {
   return responseJson<{
     device_code: string;
     user_code: string;
@@ -73,28 +92,41 @@ export async function requestDeviceCode(endpoint: string) {
     verification_uri_complete?: string;
     interval?: number;
     expires_in: number;
-  }>(response);
+  }>(
+    await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: clientId, scope: "openid" }),
+      signal,
+    }),
+  );
 }
-
+export function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const abort = () => {
+    clearTimeout(timer);
+    reject(new DOMException("Aborted", "AbortError"));
+  };
+  const timer = setTimeout(() => {
+    signal.removeEventListener("abort", abort);
+    resolve();
+  }, milliseconds);
+  signal.addEventListener("abort", abort, { once: true });
+  return promise;
+}
 export async function pollDeviceToken(
   endpoint: string,
   deviceCode: string,
   interval: number,
   signal: AbortSignal,
+  expiresIn = 600,
 ): Promise<string> {
   let intervalMs = Math.max(1, interval) * 1000;
+  const expiresAt = Date.now() + expiresIn * 1000;
   while (!signal.aborted) {
-    const { promise, resolve, reject } = Promise.withResolvers<void>();
-    const timer = window.setTimeout(resolve, intervalMs);
-    signal.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
-    await promise;
+    if (Date.now() + intervalMs >= expiresAt) throw new Error("授权码已过期，请重新开始。");
+    await abortableDelay(intervalMs, signal);
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -118,89 +150,130 @@ export async function pollDeviceToken(
   }
   throw new DOMException("Aborted", "AbortError");
 }
-
-async function api<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-  if (!apiOrigin) throw new Error("缺少 API 地址配置。");
-  const response = await fetch(`${apiOrigin}${path}`, {
+function request(path: string, token: string, init?: RequestInit) {
+  return fetch(`${apiOrigin}${path}`, {
     ...init,
     cache: "no-store",
     headers: { Authorization: `Bearer ${token}`, ...init?.headers },
   });
-  return responseJson<T>(response);
 }
-
-export async function getSignals(token: string): Promise<Signal[]> {
-  return (await api<SignalResponse>("/v1/signals", token)).signals;
+async function api<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  return responseJson<T>(await request(path, token, init));
 }
-export function getNav(token: string) {
-  return api<AccountNav>("/v1/account-nav", token);
+export async function getSignals(token: string, signal?: AbortSignal): Promise<Signal[]> {
+  return (await api<SignalResponse>("/v1/signals", token, { signal })).signals;
 }
-export function uploadPreview(token: string, file: File) {
+export async function getNav(token: string, signal?: AbortSignal): Promise<AccountNav> {
+  const response = await request("/v1/account-nav", token, { signal });
+  // The account API returns its explicit unavailable envelope with 404 when no snapshot exists.
+  if (response.status === 404) return response.json() as Promise<AccountNav>;
+  return responseJson<AccountNav>(response);
+}
+export async function getSnapshot(
+  token: string,
+  signal?: AbortSignal,
+): Promise<SnapshotResult | null> {
+  const response = await request("/v1/account-snapshot", token, { signal });
+  if (response.status === 404) return null;
+  const snapshot = await responseJson<AccountSnapshot>(response);
+  const etag = response.headers.get("ETag");
+  if (!etag) throw new Error("快照缺少 ETag，无法安全保存；请检查 API 代理或 CORS 配置。");
+  return { snapshot, etag };
+}
+export async function saveSnapshot(
+  token: string,
+  snapshot: AccountSnapshot,
+  etag: string | null,
+  signal?: AbortSignal,
+): Promise<SnapshotResult> {
+  const response = await request("/v1/account-snapshot", token, {
+    method: "PUT",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      ...(etag ? { "If-Match": etag } : { "If-None-Match": "*" }),
+    },
+    body: JSON.stringify(snapshot),
+  });
+  const saved = await responseJson<AccountSnapshot>(response);
+  const nextEtag = response.headers.get("ETag");
+  if (!nextEtag) throw new Error("快照已保存但未返回 ETag；请读取最新快照后再保存。");
+  return { snapshot: saved, etag: nextEtag };
+}
+export function uploadPreview(token: string, file: File, signal?: AbortSignal) {
   const body = new FormData();
   body.append("file", file);
-  return api<ImportPreview>("/v1/trade-imports/previews", token, { method: "POST", body });
+  return api<ImportPreview>("/v1/trade-imports/previews", token, { method: "POST", body, signal });
 }
-export function confirmPreview(token: string, batchId: string) {
-  return api<ImportPreview>(
-    `/v1/trade-imports/previews/${encodeURIComponent(batchId)}/confirm`,
-    token,
-    { method: "POST" },
-  );
+export function getPreview(token: string, batchId: string, signal?: AbortSignal) {
+  return api<ImportPreview>(`/v1/trade-imports/previews/${encodeURIComponent(batchId)}`, token, {
+    signal,
+  });
 }
-
+export async function confirmPreview(token: string, batchId: string, signal?: AbortSignal) {
+  // Confirm returns a ledger summary, not a preview envelope. Re-read the durable batch.
+  await api<unknown>(`/v1/trade-imports/previews/${encodeURIComponent(batchId)}/confirm`, token, {
+    method: "POST",
+    signal,
+  });
+  return getPreview(token, batchId, signal);
+}
+export function parseSignalEvent(block: string): SignalEvent | null {
+  let event = "message";
+  let id: string | undefined;
+  const data: string[] = [];
+  for (const line of block.split(/\r\n|\r|\n/)) {
+    if (line.startsWith(":")) continue;
+    const separator = line.indexOf(":");
+    const field = separator < 0 ? line : line.slice(0, separator);
+    const raw = separator < 0 ? "" : line.slice(separator + 1);
+    const value = raw.startsWith(" ") ? raw.slice(1) : raw;
+    if (field === "event") event = value;
+    if (field === "id" && !value.includes("\0")) id = value;
+    if (field === "data") data.push(value);
+  }
+  if (!data.length) return id === undefined ? null : { event, id, data: null };
+  try {
+    return { event, id, data: JSON.parse(data.join("\n")) };
+  } catch {
+    return null;
+  }
+}
 export async function streamSignals(
   token: string,
   symbols: string[],
   signal: AbortSignal,
-  onSignal: (signal: Signal) => void,
+  onEvent: (event: SignalEvent) => void,
+  cursor?: string,
 ) {
-  if (!apiOrigin || symbols.length === 0) return;
+  if (symbols.length === 0) return;
   const query = new URLSearchParams();
   symbols.forEach((symbol) => query.append("symbols", symbol));
-  const response = await fetch(`${apiOrigin}/v1/signals/stream?${query}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
-    cache: "no-store",
+  const response = await request(`/v1/signals/stream?${query}`, token, {
+    headers: { Accept: "text/event-stream", ...(cursor ? { "Last-Event-ID": cursor } : {}) },
     signal,
   });
-  if (!response.ok || !response.body)
-    throw new Error(
-      response.status === 401
-        ? "授权已失效，请重新连接数据服务。"
-        : `实时订阅失败（${response.status}）`,
-    );
+  if (!response.ok) await responseJson(response);
+  if (!response.body) throw new Error("实时订阅没有返回事件流。");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
-  while (!signal.aborted) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    pending += decoder.decode(value, { stream: true });
-    const blocks = pending.split(/\r?\n\r?\n/);
-    pending = blocks.pop() || "";
-    for (const block of blocks) {
-      const data = block
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!data) continue;
-      try {
-        const event: unknown = JSON.parse(data);
-        if (isSignal(event)) onSignal(event);
-      } catch {
-        /* Ignore malformed frames; the next snapshot or update remains authoritative. */
+  try {
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      // Split complete blank-line-delimited SSE records; tolerate CRLF across network chunks.
+      let match: RegExpExecArray | null;
+      while ((match = /\r\n\r\n|\n\n|\r\r/.exec(pending))) {
+        const block = pending.slice(0, match.index);
+        pending = pending.slice(match.index + match[0].length);
+        const event = parseSignalEvent(block);
+        if (event) onEvent(event);
       }
+      if (done) break;
     }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-}
-
-function isSignal(value: unknown): value is Signal {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "symbol" in value &&
-    typeof value.symbol === "string" &&
-    "status" in value &&
-    typeof value.status === "string"
-  );
 }
