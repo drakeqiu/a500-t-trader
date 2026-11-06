@@ -38,6 +38,21 @@ jobs:
       - name: Install locked Node dependencies
         run: npm ci
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install locked frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Frontend lint
+        run: bun run lint
+        working-directory: frontend
+
+      - name: Frontend format check
+        run: bun run format:check
+        working-directory: frontend
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
