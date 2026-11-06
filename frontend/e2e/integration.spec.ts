@@ -67,6 +67,7 @@ test("serves the UI and API from one origin without the legacy API route", async
   request,
 }) => {
   await page.goto("/");
+  await expect(page.getByRole("button", { name: "安全连接", exact: true })).toBeEnabled();
   expect(new URL(page.url()).origin).toBe(new URL(test.info().project.use.baseURL!).origin);
   expect((await request.get("/api/v1/account-snapshot")).status()).toBe(401);
   expect((await request.get("/v1/account-snapshot")).status()).toBe(404);

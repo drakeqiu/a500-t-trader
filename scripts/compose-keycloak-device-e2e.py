@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
@@ -379,6 +380,29 @@ def _check_binding(
     compose: list[str], environment: dict[str, str], host: str, port: int
 ) -> None:
     def published(service: str, container_port: int) -> str:
+        if "podman" in Path(compose[0]).name:
+            project = compose[compose.index("--project-name") + 1]
+            container = subprocess.run(
+                [
+                    "podman", "ps", "-q",
+                    "--filter", f"label=com.docker.compose.project={project}",
+                    "--filter", f"label=com.docker.compose.service={service}",
+                ],
+                cwd=ROOT, env=environment, capture_output=True, text=True,
+                timeout=30, check=True,
+            ).stdout.strip()
+            if not container or "\n" in container:
+                raise RuntimeError(f"无法唯一确定 {service} 容器")
+            result = subprocess.run(
+                ["podman", "inspect", "--format", "{{json .NetworkSettings.Ports}}", container],
+                cwd=ROOT, env=environment, capture_output=True, text=True,
+                timeout=30, check=True,
+            )
+            ports = json.loads(result.stdout) or {}
+            return "\n".join(
+                f"{item['HostIp']}:{item['HostPort']}"
+                for item in (ports.get(f"{container_port}/tcp") or [])
+            )
         result = subprocess.run(
             [*compose, "port", service, str(container_port)],
             cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
@@ -402,11 +426,11 @@ def _check_no_plaintext(port: int) -> None:
         raise AssertionError("HTTPS 入口接受了明文 API 请求")
 
 
-def main() -> None:
+def main(*, mock_market_data: bool = False) -> None:
     global TLS_CONTEXT
     required = ("AMAZINGDATA_USERNAME", "AMAZINGDATA_PASSWORD", "AMAZINGDATA_HOST", "AMAZINGDATA_PORT")
     missing = [name for name in required if not os.environ.get(name)]
-    if missing:
+    if missing and not mock_market_data:
         raise RuntimeError(
             "真实账户 API 验收需要可用的 AmazingData 服务和环境变量: "
             + ", ".join(missing)
@@ -432,9 +456,15 @@ def main() -> None:
             f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
         ),
         "A500_MARKET_DATA_MODE": "replay",
-        # Account API eagerly connects to the real provider, even in replay mode.
-        # Keep the deployer's credentials inherited above; never use test credentials.
+        # Only an explicit test-mode override may replace the live provider.
     }
+    if mock_market_data:
+        print("验收使用测试专用模拟行情，非真实 TGW 行情", flush=True)
+        for name in required:
+            environment[name] = "test-only-not-used"
+        environment["A500_E2E_MOCK_MARKET_SCRIPT"] = str(
+            ROOT / "scripts/fixtures/account-api-mock-market.py"
+        )
     for name in ("A500_GATEWAY_HOST", "A500_GATEWAY_HOST_PORT", "A500_TLS_CERT", "A500_TLS_KEY"):
         environment.pop(name, None)
     compose_command = shlex.split(
@@ -443,11 +473,13 @@ def main() -> None:
         or "docker compose"
     )
     common = [
-        *compose_command, "--project-name", project,
+        *compose_command, "--env-file", os.devnull, "--project-name", project,
         "-f", str(ROOT / "compose.yaml"),
         "-f", str(ROOT / "compose.keycloak.yaml"),
         "-f", str(ROOT / "compose.web.yaml"),
     ]
+    if mock_market_data:
+        common.extend(["-f", str(ROOT / "scripts/fixtures/compose-account-mock-market.yaml")])
     compose = [*common, "-f", str(ROOT / "compose.web-http.yaml")]
     with tempfile.TemporaryDirectory(prefix="a500-e2e-tls-") as directory:
         cert, key = _make_test_certificate(Path(directory))
@@ -515,4 +547,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="验收真实 Keycloak、账户 API、网关和浏览器链路")
+    parser.add_argument(
+        "--mock-market-data", action="store_true",
+        help="显式使用测试专用模拟行情（CI；不验证真实 TGW）",
+    )
+    main(mock_market_data=parser.parse_args().mock_market_data)
