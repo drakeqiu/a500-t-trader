@@ -38,7 +38,8 @@ Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重�
 
 ### 测试
 
-- `bun run test`：单元测试。
+- `bun run test`：单元测试。Vitest 配置使用 `vitest.config.mts`，以便 Vite 的原生配置加载器按 ES module 加载。
 - `bun run test:e2e`：Playwright；浏览器准备命令按仓库 Playwright 配置/根验收说明执行。可控行情 fixture 是测试数据，不是实时行情或实际 IdP 证明。
+  当设置 `NO_COLOR` 时，测试进程将其转换为 `FORCE_COLOR=0`，避免 Playwright 子进程的颜色变量冲突；Playwright 自身仍会强制测试 worker 输出颜色。
   并行开发端口被占用时可设置 `A500_E2E_FIXTURE_PORT`、`A500_E2E_WEB_PORT` 与 `A500_E2E_NEXT_PORT`（默认 Web 端口加一）；测试专用网关把 UI 和 API 汇集到同一来源，不用于生产。测试产物按 Web 端口隔离。独立 Next 实例可用 `A500_NEXT_DIST_DIR` 隔离构建目录。
 - 真实 Keycloak/设备授权/API 验收命令见 [信号 API 文档](../docs/signal-monitoring-api.md#compose-真实端到端验收)。

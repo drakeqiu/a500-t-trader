@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
+// Playwright forces colors in workers; do not pass them conflicting color settings.
+if (process.env.NO_COLOR) {
+  delete process.env.NO_COLOR;
+  process.env.FORCE_COLOR ??= "0";
+}
+
 const fixturePort = process.env.A500_E2E_FIXTURE_PORT || "38100";
 const webPort = process.env.A500_E2E_WEB_PORT || "3100";
 const nextPort = process.env.A500_E2E_NEXT_PORT || String(Number(webPort) + 1);
