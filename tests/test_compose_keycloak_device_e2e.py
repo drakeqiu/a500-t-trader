@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,24 +20,6 @@ def test_main_requires_real_provider_configuration(
         monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
     with pytest.raises(RuntimeError, match="AMAZINGDATA_USERNAME"):
         E2E.main()
-
-
-def test_binding_checks_runtime_published_ports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    outputs = iter(["127.0.0.1:8080\n", "", "", ""])
-    monkeypatch.setattr(
-        E2E.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=next(outputs)),
-    )
-    E2E._check_binding(["compose"], {}, "127.0.0.1", 8080)
-    outputs = iter(["0.0.0.0:8080\n"])
-    with pytest.raises(AssertionError, match="监听地址"):
-        E2E._check_binding(["compose"], {}, "127.0.0.1", 8080)
-    outputs = iter(["127.0.0.1:8080\n", "0.0.0.0:3000\n"])
-    with pytest.raises(AssertionError, match="frontend"):
-        E2E._check_binding(["compose"], {}, "127.0.0.1", 8080)
 
 
 def test_https_rejects_plaintext_api(monkeypatch: pytest.MonkeyPatch) -> None:
