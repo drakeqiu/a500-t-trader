@@ -7,7 +7,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-}
     ports:
-      - "127.0.0.1:${KEYCLOAK_HOST_PORT:-8081}:8080"
+      - "${KEYCLOAK_BIND_HOST:-127.0.0.1}:${KEYCLOAK_HOST_PORT:-8081}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak/realm-a500.json:/opt/keycloak/data/import/realm-a500.json:ro

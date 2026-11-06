@@ -61,6 +61,27 @@ python3 scripts/start-local.py replay \
   --symbol 563360 --start-time 2026-11-02T10:00:00+08:00 --speed 10
 ```
 
+本地不连接 TGW 时，也可以使用快捷脚本启动完整服务：
+
+```bash
+./scripts/start-local-replay.sh
+./scripts/start-local-replay.sh ps
+./scripts/start-local-replay.sh logs
+./scripts/start-local-replay.sh down
+```
+
+脚本选择 `replay` 模式，账户 API 仍使用 `.env` 中的 AmazingData 连接信息；不会自动回放数据，可使用上面的 `replay` 命令。Keycloak 首次初始化的管理员为 `admin` / `changeme`，仅供本机开发；已有 Keycloak 持久化卷不会因此重置管理员密码。应用用户仍需在 `a500` Realm 中另行创建。
+
+可信局域网内的其他机器访问时，指定本机的局域网 IPv4 地址（不是客户端地址）：
+
+```bash
+./scripts/start-lan-replay.py 192.168.1.10
+./scripts/start-lan-replay.py 192.168.1.10 ps
+./scripts/start-lan-replay.py 192.168.1.10 down
+```
+
+将示例 IP 替换为本机实际地址，并从其他机器打开 `http://该IP:8080`。脚本使用独立的 `a500-lan` Compose 项目和数据卷；回放时使用 `./scripts/start-lan-replay.py 192.168.1.10 replay` 后接上述回放参数。脚本开放 Web 的 8080 和 Keycloak 的 8081，更新设备授权客户端的允许来源；RabbitMQ 仅绑定回环地址。首次启动会在 `a500` Realm 中创建应用用户 `admin` / `changeme`；已有用户和管理员的密码不会重置。HTTP 和默认密码仅适合可信局域网，禁止暴露到公网；防火墙须限制访问。使用的 AmazingData 主机也必须能从容器访问。
+
 历史时间不会被伪装成实时行情，NAV 使用独立 AmazingData 查询及真实新鲜度约束，可能不可用。更多回放语义见 [行情 Compose 指南](docs/single-host-market-data-compose.md#历史回放模式)。确定性浏览器测试使用明确标记的行情 fixture，不能代替实时供应商或真实 IdP 证明。真实服务验收命令见 [API 验收说明](docs/signal-monitoring-api.md#compose-真实端到端验收)。
 
 ## 开发与贡献

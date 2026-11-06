@@ -6,9 +6,9 @@ services:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
     ports:
-      - "${A500_RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${A500_RABBITMQ_BIND_HOST:-0.0.0.0}:${A500_RABBITMQ_HOST_PORT:-5672}:5672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "su", "rabbitmq", "-s", "/bin/sh", "-c", "rabbitmq-diagnostics -q ping"]
       interval: 2s
       timeout: 5s
       retries: 30
