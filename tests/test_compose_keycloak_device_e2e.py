@@ -26,6 +26,8 @@ def test_acceptance_runs_both_modes_and_cleans_its_project(
         monkeypatch.delenv("PODMAN_COMPOSE", raising=False)
     else:
         monkeypatch.setenv("PODMAN_COMPOSE", compose_env)
+    for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
+        monkeypatch.setenv(f"AMAZINGDATA_{name}", f"real-{name.lower()}")
     # Inherited deployment settings must not invalidate default-listener coverage.
     monkeypatch.setenv("A500_GATEWAY_HOST", "192.0.2.1")
     monkeypatch.setenv("A500_GATEWAY_HOST_PORT", "9999")
@@ -58,10 +60,12 @@ def test_acceptance_runs_both_modes_and_cleans_its_project(
     assert str(E2E.ROOT / "compose.web.yaml") in startup
     assert str(E2E.ROOT / "compose.web-http.yaml") in startup
     assert startup[startup.index("up") + 1 :] == [
-        "-d", "--build", "keycloak", "signal-api", "account-api", "gateway",
+        "-d", "--build", "keycloak", "signal-api", "account-api", "frontend", "gateway",
     ]
     assert "A500_GATEWAY_HOST" not in calls[0][1]["env"]
     assert "A500_GATEWAY_HOST_PORT" not in calls[0][1]["env"]
+    assert calls[0][1]["env"]["AMAZINGDATA_USERNAME"] == "real-username"
+    assert calls[0][1]["env"]["AMAZINGDATA_PASSWORD"] == "real-password"
     assert bindings == [("127.0.0.1", 8080), ("0.0.0.0", 18080), ("127.0.0.1", 8443), ("0.0.0.0", 18443)]
     assert browser == [("http://localhost:8080", False), ("http://localhost:18080", False), ("https://localhost:8443", True), ("https://localhost:18443", True)]
     assert api == [(url, index == 0) for index, (url, _) in enumerate(browser)] + [("https://localhost:18443", False)]
@@ -77,6 +81,13 @@ def test_acceptance_runs_both_modes_and_cleans_its_project(
     assert project.startswith("a500-keycloak-e2e-")
     assert cleanup[cleanup.index("--project-name") + 1] == project
     assert E2E.TLS_CONTEXT is None
+
+
+def test_main_requires_real_provider_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
+        monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
+    with pytest.raises(RuntimeError, match="AMAZINGDATA_USERNAME"):
+        E2E.main()
 
 
 def test_binding_checks_runtime_published_ports(monkeypatch: pytest.MonkeyPatch) -> None:

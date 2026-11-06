@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/a500-client", async (importOriginal) => ({
@@ -86,6 +87,17 @@ async function login() {
     expect(screen.getByLabelText("可用现金")).toHaveProperty("value", "123.4500"),
   );
 }
+
+it("disables connection in server HTML until the client has hydrated", () => {
+  const html = renderToString(<Workspace />);
+  const document = new DOMParser().parseFromString(html, "text/html");
+  const button = [...document.querySelectorAll("button")].find((item) =>
+    item.textContent?.includes("安全连接"),
+  );
+  expect(button?.disabled).toBe(true);
+  render(<Workspace />);
+  expect(screen.getByRole("button", { name: "安全连接" })).toHaveProperty("disabled", false);
+});
 
 describe("snapshot workflows", () => {
   it.each([412, 428])(

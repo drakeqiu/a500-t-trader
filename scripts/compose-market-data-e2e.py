@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import shlex
+import socket
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -29,6 +30,12 @@ def _project_name() -> str:
 
 def _consumer_image(project: str) -> str:
     return f"{project}-consumer:local"
+
+
+def _available_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def _published_port(compose: list[str], environment: dict[str, str]) -> int:
@@ -59,7 +66,7 @@ def main() -> None:
         **os.environ,
         "A500_MARKET_DATA_MODE": "tgw",
         "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
-        "A500_RABBITMQ_HOST_PORT": "0",
+        "A500_RABBITMQ_HOST_PORT": str(_available_port()),
         "A500_OIDC_ISSUER": "https://identity.example.test",
         "A500_OIDC_AUDIENCE": "a500-api",
         "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",

@@ -42,4 +42,9 @@ jobs:
           chromium
 
       - name: 验收真实 Keycloak 设备授权流程
+        env:
+          AMAZINGDATA_USERNAME: ${{ secrets.AMAZINGDATA_USERNAME }}
+          AMAZINGDATA_PASSWORD: ${{ secrets.AMAZINGDATA_PASSWORD }}
+          AMAZINGDATA_HOST: ${{ secrets.AMAZINGDATA_HOST }}
+          AMAZINGDATA_PORT: ${{ secrets.AMAZINGDATA_PORT }}
         run: uv run --no-sync python scripts/compose-keycloak-device-e2e.py

@@ -404,6 +404,13 @@ def _check_no_plaintext(port: int) -> None:
 
 def main() -> None:
     global TLS_CONTEXT
+    required = ("AMAZINGDATA_USERNAME", "AMAZINGDATA_PASSWORD", "AMAZINGDATA_HOST", "AMAZINGDATA_PORT")
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError(
+            "真实账户 API 验收需要可用的 AmazingData 服务和环境变量: "
+            + ", ".join(missing)
+        )
     project = f"a500-keycloak-e2e-{secrets.token_hex(6)}"
     keycloak_port = _available_port()
     admin_name = f"e2e-admin-{secrets.token_hex(8)}"
@@ -425,10 +432,8 @@ def main() -> None:
             f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
         ),
         "A500_MARKET_DATA_MODE": "replay",
-        "AMAZINGDATA_USERNAME": "isolated-device-flow-test",
-        "AMAZINGDATA_PASSWORD": secrets.token_urlsafe(32),
-        "AMAZINGDATA_HOST": "127.0.0.1",
-        "AMAZINGDATA_PORT": "1",
+        # Account API eagerly connects to the real provider, even in replay mode.
+        # Keep the deployer's credentials inherited above; never use test credentials.
     }
     for name in ("A500_GATEWAY_HOST", "A500_GATEWAY_HOST_PORT", "A500_TLS_CERT", "A500_TLS_KEY"):
         environment.pop(name, None)
@@ -450,7 +455,7 @@ def main() -> None:
         TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
         try:
             subprocess.run(
-                [*compose, "up", "-d", "--build", "keycloak", "signal-api", "account-api", "gateway"],
+                [*compose, "up", "-d", "--build", "keycloak", "signal-api", "account-api", "frontend", "gateway"],
                 cwd=ROOT, env=environment, check=True, timeout=600,
             )
             _wait_for_keycloak(base_url)
