@@ -43,7 +43,7 @@ export type ImportPreview = {
 };
 export type SignalEvent = { event: string; id?: string; data: unknown };
 type SignalResponse = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
-const apiOrigin = (process.env.NEXT_PUBLIC_A500_API_BASE_URL || "/api").replace(/\/$/, "");
+const apiOrigin = "/api";
 const issuer = process.env.NEXT_PUBLIC_A500_OIDC_ISSUER?.replace(/\/$/, "");
 const clientId = process.env.NEXT_PUBLIC_A500_OIDC_CLIENT_ID || "a500-device-client";
 export const configurationReady = Boolean(issuer);

@@ -1,8 +1,8 @@
 ﻿# 账户快照 API
 
-`GET /v1/account-snapshot` 返回当前认证主体的当前账户快照；首次写入前返回 `404`。快照包含 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash`、服务器写入时间 `updated_at` 和 `user-entered; not broker-verified` 分类。响应带有代表完整当前状态的强 `ETag`。
+`GET /api/v1/account-snapshot` 返回当前认证主体的当前账户快照；首次写入前返回 `404`。快照包含 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash`、服务器写入时间 `updated_at` 和 `user-entered; not broker-verified` 分类。响应带有代表完整当前状态的强 `ETag`。
 
-`PUT /v1/account-snapshot` 是完整替换，不是部分更新。请求体必须且只能提供 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash` 六个字段；缺失或未知字段、任意位置的 `null`、以及不符合字段类型的值均拒绝。`as_of` 必须是带 `Z` 或 `±HH:MM` 时区偏移的 RFC 3339 日期时间，不限制历史日期。金额必须是有限、非负的十进制字符串。证券数量必须是非负整数（布尔值不算整数）；`holdings`、`protected_floor`、`sellable` 的证券 key 集合必须相同，且 `protected_floor <= holdings`、`sellable <= holdings - protected_floor`。`cost_basis` 必须为对象，key 经证券代码标准化后须为 holdings 的子集，金额也必须是有限非负十进制字符串；所有证券映射标准化后发生重复时拒绝。
+`PUT /api/v1/account-snapshot` 是完整替换，不是部分更新。请求体必须且只能提供 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash` 六个字段；缺失或未知字段、任意位置的 `null`、以及不符合字段类型的值均拒绝。`as_of` 必须是带 `Z` 或 `±HH:MM` 时区偏移的 RFC 3339 日期时间，不限制历史日期。金额必须是有限、非负的十进制字符串。证券数量必须是非负整数（布尔值不算整数）；`holdings`、`protected_floor`、`sellable` 的证券 key 集合必须相同，且 `protected_floor <= holdings`、`sellable <= holdings - protected_floor`。`cost_basis` 必须为对象，key 经证券代码标准化后须为 holdings 的子集，金额也必须是有限非负十进制字符串；所有证券映射标准化后发生重复时拒绝。
 
 格式错误或非标准 JSON（包括 `NaN`、`Infinity`）返回 `400 application/problem+json`；合法 JSON 但不符合快照契约返回 `422 application/problem+json`。错误响应的 `errors` 数组提供稳定的 `path` 和 `code`，例如 `{"path":"holdings.510300","code":"invalid_quantity"}`。校验失败不会修改当前快照或追加历史记录。成功响应保留规范化证券 key，并包含 `user-entered; not broker-verified` classification。
 
@@ -19,13 +19,13 @@ A500_OIDC_JWKS_URI=https://identity.example.internal/.well-known/jwks.json
 A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 ```
 
-未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `account-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/v1/account-*`、`/v1/trade-imports` 至账户 API，gateway 自身也不得发布到公共接口。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
+未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `account-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/api/v1/account-*`、`/api/v1/trade-imports` 至账户 API。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
 
-本地前后端真实集成使用 [根 README 启动器](../README.md#本地前后端集成)；浏览器从 `http://localhost:3000/api/v1/*` 经 Next rewrite 访问上述同一 gateway。该代理不增加账户业务逻辑，原 `/v1/*` 及 CLI 调用保持不变。前端使用页面内存 access token，刷新/失效后重新设备授权；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
+本地前后端真实集成使用 [根 README 启动器](../README.md#本地前后端集成)；浏览器与直接 API 调用均通过 `http://localhost:8080/api/v1/*` 访问 Nginx gateway，旧 `/v1/*` 网关路径不再提供。该代理不增加账户业务逻辑。前端使用页面内存 access token，刷新/失效后重新设备授权；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
 
 ## 当前净资产
 
-`GET /v1/account-nav` 根据当前认证主体的账户快照与行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`，响应标记 `status: unavailable` 且 `nav: null`。
+`GET /api/v1/account-nav` 根据当前认证主体的账户快照与行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`，响应标记 `status: unavailable` 且 `nav: null`。
 
 计算公式为 `available_cash + Σ(持仓数量 × 有效行情价)`，货币为 CNY。保护底仓、可卖数量和成本基础不参与估值。零数量持仓估值为零，不要求行情。所有金额使用精确十进制运算并以十进制字符串返回；不逐项舍入或强制保留两位小数。
 
@@ -76,10 +76,10 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 
 ## 成交文件预览
 
-`POST /v1/trade-imports/previews` 接受 multipart 字段 `file`，只支持现有银河证券 GB18030 CSV 表头。请求必须使用与账户快照相同的 Bearer 认证；所有权仅来自验证后的 OIDC `sub`。上传上限为 5 MiB、10,000 条记录，超限返回 `413`，不支持的格式返回 `422`。
+`POST /api/v1/trade-imports/previews` 接受 multipart 字段 `file`，只支持现有银河证券 GB18030 CSV 表头。请求必须使用与账户快照相同的 Bearer 认证；所有权仅来自验证后的 OIDC `sub`。上传上限为 5 MiB、10,000 条记录，超限返回 `413`，不支持的格式返回 `422`。
 
 预览响应包含 `batch_id`、`valid`、`new`、`duplicates`、`errors` 和脱敏 `error_details`。预览不会写入成交记录或更新账户快照；仅将解析后的成交暂存 15 分钟，不保留原始上传文件。无效行的错误只包含 CSV 行号、字段和固定原因，不包含原始行内容、股东账户号或资金余额。导入成交独立存储，并标记为用户提供、未经系统核实。
 
-通过 `POST /v1/trade-imports/previews/{batch_id}/confirm` 显式确认预览。主体必须与创建预览的已验证 `sub` 相同；其他主体及不存在或已过期的未确认批次返回 `404`。含校验错误的预览返回 `409` 且不写入。成功响应含 `valid`、`new`、`duplicates`、`errors`、`inserted_ids` 和 `confirmed`；同一主体重复确认返回首次确认的相同结果，不会重复插入。确认成功后立即清除暂存的解析记录。
+通过 `POST /api/v1/trade-imports/previews/{batch_id}/confirm` 显式确认预览。主体必须与创建预览的已验证 `sub` 相同；其他主体及不存在或已过期的未确认批次返回 `404`。含校验错误的预览返回 `409` 且不写入。成功响应含 `valid`、`new`、`duplicates`、`errors`、`inserted_ids` 和 `confirmed`；同一主体重复确认返回首次确认的相同结果，不会重复插入。确认成功后立即清除暂存的解析记录。
 
-`GET /v1/trade-imports/previews/{batch_id}` 返回当前主体可见批次的持久化预览结果：`batch_id`、预览汇总、脱敏 `error_details`，以及 `confirmed`（未确认时为 `null`，确认后为首次确认响应）。只有创建批次的已验证 `sub` 可读取；其他主体、不存在或已过期的未确认批次统一返回 `404`。已确认批次的结果在解析记录清除后仍可查询及重复确认。响应不包含原始 CSV 或其他主体的记录。
+`GET /api/v1/trade-imports/previews/{batch_id}` 返回当前主体可见批次的持久化预览结果：`batch_id`、预览汇总、脱敏 `error_details`，以及 `confirmed`（未确认时为 `null`，确认后为首次确认响应）。只有创建批次的已验证 `sub` 可读取；其他主体、不存在或已过期的未确认批次统一返回 `404`。已确认批次的结果在解析记录清除后仍可查询及重复确认。响应不包含原始 CSV 或其他主体的记录。

@@ -410,8 +410,8 @@ export default function Workspace() {
             </p>
             {!configurationReady && (
               <div className="config-note login-config" role="status">
-                需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务。 API 默认使用同源{" "}
-                <code>/api</code>；独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
+                需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务。API 使用同源{" "}
+                <code>/api/v1</code>。
               </div>
             )}
             {error && (
@@ -545,8 +545,8 @@ export default function Workspace() {
       </header>
       {!configurationReady && (
         <div className="config-note" role="status">
-          需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务； API 默认使用同源{" "}
-          <code>/api</code>，独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
+          需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务；API 使用同源{" "}
+          <code>/api/v1</code>。
         </div>
       )}
       {error && (

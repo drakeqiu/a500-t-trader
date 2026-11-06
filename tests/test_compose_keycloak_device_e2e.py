@@ -41,15 +41,18 @@ def test_compose_startup_builds_api_services_and_cleans_only_its_project(
     )
     monkeypatch.setattr(E2E, "_wait_for_keycloak", lambda _url: None)
     monkeypatch.setattr(E2E, "_admin_token", lambda *_args: "admin-token")
+    monkeypatch.setattr(E2E, "_allow_browser_origin", lambda *_args: None)
+    monkeypatch.setattr(E2E, "_check_browser_login", lambda *_args: None)
     monkeypatch.setattr(E2E, "_create_temporary_user", lambda *_args: None)
     monkeypatch.setattr(E2E, "_device_authorize", lambda *_args: "access-token")
-    monkeypatch.setattr(E2E, "_check_api", lambda *_args: None)
+    monkeypatch.setattr(E2E, "_check_api", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(E2E, "_verify_user_persisted", lambda *_args: None)
 
     E2E.main()
 
     startup, cleanup = calls[0][0], calls[-1][0]
     assert startup[: len(expected_prefix)] == expected_prefix
+    assert str(E2E.ROOT / "compose.web.yaml") in startup
     assert startup[startup.index("up") + 1 :] == [
         "-d",
         "--build",

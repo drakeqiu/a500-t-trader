@@ -62,6 +62,16 @@ async function upload(page: Page, request: APIRequestContext, kind: "valid" | "i
   return response.json() as Promise<{ batch_id: string; errors: number; new: number }>;
 }
 
+test("serves the UI and API from one origin without the legacy API route", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  expect(new URL(page.url()).origin).toBe(new URL(test.info().project.use.baseURL!).origin);
+  expect((await request.get("/api/v1/account-snapshot")).status()).toBe(401);
+  expect((await request.get("/v1/account-snapshot")).status()).toBe(404);
+});
+
 test("creates and edits an account; a real 412 retains the draft until explicitly replaced", async ({
   page,
   context,
