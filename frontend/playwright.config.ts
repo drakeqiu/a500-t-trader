@@ -7,6 +7,7 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:3100",
     channel: process.env.PLAYWRIGHT_CHANNEL,
+    headless: true,
     ...devices["Desktop Chrome"],
   },
   webServer: {
