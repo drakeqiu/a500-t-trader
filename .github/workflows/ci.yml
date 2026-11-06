@@ -82,3 +82,11 @@ jobs:
 
       - name: pytest
         run: uv run pytest
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps --only-shell chromium
+        working-directory: frontend
+
+      - name: Frontend E2E
+        run: bun run test:e2e
+        working-directory: frontend
