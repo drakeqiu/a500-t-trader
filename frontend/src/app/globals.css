@@ -616,3 +616,218 @@ tbody th {
     scroll-behavior: auto;
   }
 }
+
+.login-shell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+.login-masthead {
+  justify-content: space-between;
+}
+.login-service,
+.auth-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.login-layout {
+  flex: 1;
+  width: min(100%, 1120px);
+  margin: 0 auto;
+  padding: clamp(58px, 10vh, 108px) 0 70px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(270px, 0.75fr);
+  gap: clamp(52px, 9vw, 132px);
+  align-items: center;
+}
+.login-primary {
+  max-width: 600px;
+}
+.login-primary h1 {
+  font-family: Georgia, "Noto Serif CJK SC", serif;
+  margin: 0 0 30px;
+  font-size: clamp(40px, 5vw, 62px);
+  font-weight: 500;
+  line-height: 1.17;
+  letter-spacing: -0.035em;
+}
+.login-intro {
+  max-width: 46ch;
+  margin: 0 0 30px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+.login-config,
+.login-error {
+  margin: 0 0 15px;
+}
+.auth-box {
+  padding: 22px 24px 18px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+.auth-box-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+.auth-box-heading h2,
+.login-aside h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+}
+.auth-box-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.auth-state {
+  flex-shrink: 0;
+  padding-top: 3px;
+  font-size: 11px;
+}
+.auth-state.is-active .status-dot {
+  background: var(--green);
+}
+.auth-action {
+  min-height: 46px;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-right: 15px;
+  padding-left: 15px;
+}
+.auth-action span {
+  font-size: 17px;
+}
+.auth-footnote {
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.code-row {
+  margin-top: 19px;
+  padding: 13px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 12px;
+}
+.code-row .user-code {
+  margin: 0;
+  color: var(--ink);
+}
+.auth-cancel {
+  margin-top: 10px;
+}
+.login-aside {
+  align-self: center;
+  padding-top: 5px;
+}
+.aside-rule {
+  width: 42px;
+  height: 2px;
+  margin-bottom: 21px;
+  background: var(--green);
+}
+.login-aside h2 {
+  font-size: 15px;
+}
+.login-steps {
+  margin: 23px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.login-steps li {
+  display: grid;
+  grid-template-columns: 25px 1fr;
+  gap: 13px;
+  padding: 0 0 21px;
+}
+.login-steps li > span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--rule);
+  color: var(--green);
+  font-family: Georgia, serif;
+  font-size: 13px;
+}
+.login-steps strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.login-steps p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.login-disclaimer {
+  margin: 2px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.login-footer {
+  min-height: 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 11px;
+}
+@media (max-width: 900px) {
+  .login-layout {
+    gap: 40px;
+  }
+}
+@media (max-width: 680px) {
+  .login-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 42px;
+    padding: 54px 0 48px;
+  }
+  .login-primary h1 {
+    font-size: clamp(38px, 11vw, 48px);
+  }
+  .login-intro {
+    margin: 16px 0 24px;
+    font-size: 14px;
+  }
+  .auth-box {
+    padding: 18px 16px 15px;
+  }
+  .auth-box-heading {
+    flex-direction: column;
+  }
+  .login-aside {
+    padding-top: 0;
+  }
+  .login-steps {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .login-footer {
+    min-height: 58px;
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+  }
+}
