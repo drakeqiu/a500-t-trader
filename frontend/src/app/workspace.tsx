@@ -640,11 +640,7 @@ export default function Workspace() {
           <section className="rail-section" id="account" aria-labelledby="account-title">
             <div className="rail-heading">
               <h2 id="account-title">账户净资产</h2>
-              <button
-                className="text-button"
-                disabled={busy}
-                onClick={() => void refreshNav()}
-              >
+              <button className="text-button" disabled={busy} onClick={() => void refreshNav()}>
                 刷新
               </button>
             </div>
@@ -790,11 +786,7 @@ export default function Workspace() {
               />
             </label>
             <p className="file-name">{file?.name || "未选择文件"}</p>
-            <button
-              className="button primary"
-              disabled={!file || busy}
-              onClick={previewFile}
-            >
+            <button className="button primary" disabled={!file || busy} onClick={previewFile}>
               {busy ? "处理中…" : "预览文件"}
             </button>
             {preview && (
