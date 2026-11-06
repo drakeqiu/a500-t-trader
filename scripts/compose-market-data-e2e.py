@@ -43,17 +43,35 @@ def _published_port(compose: list[str], environment: dict[str, str]) -> int:
         project = compose[compose.index("--project-name") + 1]
         container = subprocess.run(
             [
-                "podman", "ps", "-q",
-                "--filter", f"label=com.docker.compose.project={project}",
-                "--filter", "label=com.docker.compose.service=rabbitmq",
+                "podman",
+                "ps",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=rabbitmq",
             ],
-            cwd=ROOT, env=environment, check=True, capture_output=True, text=True,
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         if not container or "\n" in container:
             raise RuntimeError("无法唯一确定 rabbitmq 容器")
         result = subprocess.run(
-            ["podman", "inspect", "--format", "{{json .NetworkSettings.Ports}}", container],
-            cwd=ROOT, env=environment, check=True, capture_output=True, text=True,
+            [
+                "podman",
+                "inspect",
+                "--format",
+                "{{json .NetworkSettings.Ports}}",
+                container,
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         bindings = json.loads(result.stdout).get("5672/tcp") or []
         if len(bindings) != 1:

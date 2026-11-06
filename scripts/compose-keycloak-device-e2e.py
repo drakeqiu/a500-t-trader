@@ -41,8 +41,10 @@ def _request(
     headers: dict[str, str] | None = None,
     method: str | None = None,
 ) -> tuple[int, dict[str, Any] | str]:
-    body = json.dumps(json_data).encode() if json_data is not None else (
-        urlencode(data).encode() if data is not None else None
+    body = (
+        json.dumps(json_data).encode()
+        if json_data is not None
+        else (urlencode(data).encode() if data is not None else None)
     )
     request_headers = dict(headers or {})
     if json_data is not None:
@@ -130,6 +132,7 @@ def _create_temporary_user(
     if status != 201:
         raise RuntimeError(f"无法创建隔离测试用户: HTTP {status}")
 
+
 def _allow_browser_origin(base_url: str, admin_token: str, origin: str) -> None:
     url = f"{base_url}/admin/realms/{REALM}/clients"
     status, clients = _request(f"{url}?clientId={CLIENT_ID}", bearer=admin_token)
@@ -162,7 +165,9 @@ def _check_browser_login(
             code_field = popup.locator("input[name='user_code']")
             if code_field.count() and code_field.is_visible():
                 code_field.fill(code)
-                popup.locator("button[type='submit'], input[type='submit']").first.click()
+                popup.locator(
+                    "button[type='submit'], input[type='submit']"
+                ).first.click()
             popup.locator("input[name='username']").fill(username, timeout=30000)
             popup.locator("input[name='password']").fill(password)
             popup.locator("button[type='submit'], input[type='submit']").first.click()
@@ -271,8 +276,11 @@ def _check_api(
     if status != 200:
         raise AssertionError(f"有效 Keycloak 令牌访问 API 应为 200，实际为 {status}")
     for path in (
-        "/v1/signals", "/v1/account-snapshot", "/web-config",
-        "/web/app.js", "/web/app.css",
+        "/v1/signals",
+        "/v1/account-snapshot",
+        "/web-config",
+        "/web/app.js",
+        "/web/app.css",
     ):
         status, _ = _request(f"{base_url}{path}", bearer=token)
         if status != 404:
@@ -329,9 +337,20 @@ def _check_api(
             )
             subprocess.run(
                 [
-                    *compose, "exec", "-T", "redis", "redis-cli", "XADD",
-                    "a500:signals:events", "*", "symbol", "563360", "type", "BUY",
-                    "data", payload,
+                    *compose,
+                    "exec",
+                    "-T",
+                    "redis",
+                    "redis-cli",
+                    "XADD",
+                    "a500:signals:events",
+                    "*",
+                    "symbol",
+                    "563360",
+                    "type",
+                    "BUY",
+                    "data",
+                    payload,
                 ],
                 cwd=ROOT,
                 env=environment,
@@ -367,11 +386,26 @@ def _make_test_certificate(directory: Path) -> tuple[Path, Path]:
     cert, key = directory / "cert.pem", directory / "key.pem"
     subprocess.run(
         [
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-            "-keyout", str(key), "-out", str(cert), "-days", "1",
-            "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
         ],
-        check=True, capture_output=True, timeout=30,
+        check=True,
+        capture_output=True,
+        timeout=30,
     )
     return cert, key
 
@@ -384,19 +418,37 @@ def _check_binding(
             project = compose[compose.index("--project-name") + 1]
             container = subprocess.run(
                 [
-                    "podman", "ps", "-q",
-                    "--filter", f"label=com.docker.compose.project={project}",
-                    "--filter", f"label=com.docker.compose.service={service}",
+                    "podman",
+                    "ps",
+                    "-q",
+                    "--filter",
+                    f"label=com.docker.compose.project={project}",
+                    "--filter",
+                    f"label=com.docker.compose.service={service}",
                 ],
-                cwd=ROOT, env=environment, capture_output=True, text=True,
-                timeout=30, check=True,
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
             ).stdout.strip()
             if not container or "\n" in container:
                 raise RuntimeError(f"无法唯一确定 {service} 容器")
             result = subprocess.run(
-                ["podman", "inspect", "--format", "{{json .NetworkSettings.Ports}}", container],
-                cwd=ROOT, env=environment, capture_output=True, text=True,
-                timeout=30, check=True,
+                [
+                    "podman",
+                    "inspect",
+                    "--format",
+                    "{{json .NetworkSettings.Ports}}",
+                    container,
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
             )
             ports = json.loads(result.stdout) or {}
             return "\n".join(
@@ -405,14 +457,22 @@ def _check_binding(
             )
         result = subprocess.run(
             [*compose, "port", service, str(container_port)],
-            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return result.stdout.strip()
 
     binding = published("gateway", 8080)
     if binding != f"{host}:{port}":
         raise AssertionError(f"网关监听地址不符: {binding!r}")
-    for service, container_port in (("frontend", 3000), ("signal-api", 8000), ("account-api", 8000)):
+    for service, container_port in (
+        ("frontend", 3000),
+        ("signal-api", 8000),
+        ("account-api", 8000),
+    ):
         if published(service, container_port):
             raise AssertionError(f"{service} 不应发布主机端口")
 
@@ -420,7 +480,7 @@ def _check_binding(
 def _check_no_plaintext(port: int) -> None:
     try:
         status, _ = _request(f"http://localhost:{port}/api/v1/signals")
-    except (OSError, URLError):
+    except OSError, URLError:
         return
     if status in (200, 401):
         raise AssertionError("HTTPS 入口接受了明文 API 请求")
@@ -428,7 +488,12 @@ def _check_no_plaintext(port: int) -> None:
 
 def main(*, mock_market_data: bool = False) -> None:
     global TLS_CONTEXT
-    required = ("AMAZINGDATA_USERNAME", "AMAZINGDATA_PASSWORD", "AMAZINGDATA_HOST", "AMAZINGDATA_PORT")
+    required = (
+        "AMAZINGDATA_USERNAME",
+        "AMAZINGDATA_PASSWORD",
+        "AMAZINGDATA_HOST",
+        "AMAZINGDATA_PORT",
+    )
     missing = [name for name in required if not os.environ.get(name)]
     if missing and not mock_market_data:
         raise RuntimeError(
@@ -465,7 +530,12 @@ def main(*, mock_market_data: bool = False) -> None:
         environment["A500_E2E_MOCK_MARKET_SCRIPT"] = str(
             ROOT / "scripts/fixtures/account-api-mock-market.py"
         )
-    for name in ("A500_GATEWAY_HOST", "A500_GATEWAY_HOST_PORT", "A500_TLS_CERT", "A500_TLS_KEY"):
+    for name in (
+        "A500_GATEWAY_HOST",
+        "A500_GATEWAY_HOST_PORT",
+        "A500_TLS_CERT",
+        "A500_TLS_KEY",
+    ):
         environment.pop(name, None)
     compose_command = shlex.split(
         os.environ.get("A500_COMPOSE_COMMAND")
@@ -473,13 +543,22 @@ def main(*, mock_market_data: bool = False) -> None:
         or "docker compose"
     )
     common = [
-        *compose_command, "--env-file", os.devnull, "--project-name", project,
-        "-f", str(ROOT / "compose.yaml"),
-        "-f", str(ROOT / "compose.keycloak.yaml"),
-        "-f", str(ROOT / "compose.web.yaml"),
+        *compose_command,
+        "--env-file",
+        os.devnull,
+        "--project-name",
+        project,
+        "-f",
+        str(ROOT / "compose.yaml"),
+        "-f",
+        str(ROOT / "compose.keycloak.yaml"),
+        "-f",
+        str(ROOT / "compose.web.yaml"),
     ]
     if mock_market_data:
-        common.extend(["-f", str(ROOT / "scripts/fixtures/compose-account-mock-market.yaml")])
+        common.extend(
+            ["-f", str(ROOT / "scripts/fixtures/compose-account-mock-market.yaml")]
+        )
     compose = [*common, "-f", str(ROOT / "compose.web-http.yaml")]
     with tempfile.TemporaryDirectory(prefix="a500-e2e-tls-") as directory:
         cert, key = _make_test_certificate(Path(directory))
@@ -487,8 +566,21 @@ def main(*, mock_market_data: bool = False) -> None:
         TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
         try:
             subprocess.run(
-                [*compose, "up", "-d", "--build", "keycloak", "signal-api", "account-api", "frontend", "gateway"],
-                cwd=ROOT, env=environment, check=True, timeout=600,
+                [
+                    *compose,
+                    "up",
+                    "-d",
+                    "--build",
+                    "keycloak",
+                    "signal-api",
+                    "account-api",
+                    "frontend",
+                    "gateway",
+                ],
+                cwd=ROOT,
+                env=environment,
+                check=True,
+                timeout=600,
             )
             _wait_for_keycloak(base_url)
             admin_token = _admin_token(base_url, admin_name, admin_password)
@@ -510,46 +602,80 @@ def main(*, mock_market_data: bool = False) -> None:
                         environment.pop("A500_GATEWAY_HOST", None)
                         environment.pop("A500_GATEWAY_HOST_PORT", None)
                     else:
-                        environment.update(A500_GATEWAY_HOST=host, A500_GATEWAY_HOST_PORT=str(port))
+                        environment.update(
+                            A500_GATEWAY_HOST=host, A500_GATEWAY_HOST_PORT=str(port)
+                        )
                     subprocess.run(
-                        [*compose, "up", "-d", "--no-deps", "--force-recreate", "gateway"],
-                        cwd=ROOT, env=environment, check=True, timeout=120,
+                        [
+                            *compose,
+                            "up",
+                            "-d",
+                            "--no-deps",
+                            "--force-recreate",
+                            "gateway",
+                        ],
+                        cwd=ROOT,
+                        env=environment,
+                        check=True,
+                        timeout=120,
                     )
                 _check_binding(compose, environment, host, port)
                 url = f"{scheme}://localhost:{port}"
                 if scheme == "https":
                     _check_no_plaintext(port)
                 _allow_browser_origin(base_url, admin_token, url)
-                _check_browser_login(url, user_name, user_password, https=scheme == "https")
+                _check_browser_login(
+                    url, user_name, user_password, https=scheme == "https"
+                )
                 _check_api(
-                    url, token, other_token, create=index == 0,
-                    compose=compose, environment=environment,
+                    url,
+                    token,
+                    other_token,
+                    create=index == 0,
+                    compose=compose,
+                    environment=environment,
                 )
 
             subprocess.run(
                 [*compose, "restart", "keycloak"],
-                cwd=ROOT, env=environment, check=True, timeout=120,
+                cwd=ROOT,
+                env=environment,
+                check=True,
+                timeout=120,
             )
             _wait_for_keycloak(base_url)
             admin_token = _admin_token(base_url, admin_name, admin_password)
             _verify_user_persisted(base_url, admin_token, user_name)
             token = _device_authorize(base_url, user_name, user_password)
             other_token = _device_authorize(base_url, other_name, other_password)
-            _check_api(url, token, other_token, create=False, compose=compose, environment=environment)
+            _check_api(
+                url,
+                token,
+                other_token,
+                create=False,
+                compose=compose,
+                environment=environment,
+            )
         finally:
             try:
                 subprocess.run(
                     [*compose, "down", "--volumes", "--remove-orphans"],
-                    cwd=ROOT, env=environment, check=True, timeout=120,
+                    cwd=ROOT,
+                    env=environment,
+                    check=True,
+                    timeout=120,
                 )
             finally:
                 TLS_CONTEXT = None
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="验收真实 Keycloak、账户 API、网关和浏览器链路")
+    parser = argparse.ArgumentParser(
+        description="验收真实 Keycloak、账户 API、网关和浏览器链路"
+    )
     parser.add_argument(
-        "--mock-market-data", action="store_true",
+        "--mock-market-data",
+        action="store_true",
         help="显式使用测试专用模拟行情（CI；不验证真实 TGW）",
     )
     main(mock_market_data=parser.parse_args().mock_market_data)
