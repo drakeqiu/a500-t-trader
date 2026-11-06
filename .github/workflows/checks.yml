@@ -7,7 +7,7 @@ on:
 
 jobs:
   quality:
-    name: Quality checks
+    name: Lint, typecheck, and tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
