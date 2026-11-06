@@ -8,7 +8,7 @@
 
 Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；项目提供设备码浏览器客户端，不提供 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
 
-浏览器与后端的统一本地启动见 [根 README](../README.md#本地前后端集成)：`python3 scripts/start-local.py` 组合基础 Compose、Keycloak 与 `compose.web.yaml`。浏览器访问 `http://localhost:8080`，Nginx 将同源 `/api/v1/*` 路由到内部 API，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新设备授权。直接 API 调用方也使用相同网关路径。
+浏览器与后端的统一本地启动见 [根 README](../README.md#本地前后端集成)：`python3 scripts/start-local.py` 组合基础 Compose、Keycloak、`compose.web.yaml` 和 `compose.web-http.yaml`。浏览器访问 `http://localhost:8080`，Nginx 将同源 `/api/v1/*` 路由到内部 API，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新设备授权。直接 API 调用方也使用相同网关路径。
 
 本地开发可通过独立的 Keycloak Compose 文件启动 IdP；该服务不属于生产外部 OIDC 的默认 Compose 部署。先在当前 shell 中生成临时管理员凭据（不要提交或复用真实凭据），再启动身份服务：
 
@@ -87,15 +87,15 @@ export A500_OIDC_CLIENT_ID=a500-device-client
 
 实际值必须与 IdP 配置一致，issuer 必须与令牌 `iss` 完全匹配，JWKS URI 必须可从 API 容器网络访问；`A500_OIDC_CLIENT_ID` 默认为 `a500-device-client`，用于前端设备授权，不是 API 的认证凭据。前端公开 issuer 和 client ID 在镜像构建时写入，修改后必须重新构建前端镜像并重建容器；公开 issuer 必须可从浏览器访问。`KEYCLOAK_ADMIN_USERNAME` 和 `KEYCLOAK_ADMIN_PASSWORD` 仅用于本地 Keycloak bootstrap 管理员；生产外部 IdP 的管理员凭据应由运行环境的密钥管理/secret 注入提供，不得写入镜像、仓库、文档或应用 `.env`。Compose 使用 `.env` 时文件必须未提交且限制访问。
 
-在部署主机提供环境变量或未提交的 `.env` 文件后，叠加 `compose.web.yaml` 构建并启动完整应用（不包括本地 Keycloak）：
+完整配置、HTTP/HTTPS 选择、证书、身份提供方、迁移和运维操作见[统一 Web 部署指南](web-deployment.md)。`compose.web.yaml` 仅提供公共服务定义，必须额外叠加且仅选择一个模式文件；例如外部 IdP 的 HTTP 部署：
 
 ```sh
 export A500_MARKET_DATA_MODE=tgw
-docker compose -f compose.yaml -f compose.web.yaml up -d --build
-docker compose -f compose.yaml -f compose.web.yaml ps
+docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml up -d --build
+docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml ps
 ```
 
-`gateway` 在容器网络内部监听 8080，默认发布到宿主机 `127.0.0.1:8080`；通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 可分别调整绑定地址和端口。发布到非回环地址前应按部署环境限制访问；变更来源还须更新 IdP 允许来源。浏览器与直接 API 调用均使用网关的 `/api/v1/*`，不提供旧 `/v1/*` 网关路径。`deploy/oidc-gateway.conf` 将账户快照、NAV、交易导入路由送至账户 API，其余 API 请求送至信号 API，禁用 SSE 缓冲，并对 gateway 的 `/healthz` 返回 404。账户数据库持久化在 `account-data` 卷中。`signal-api` 容器健康探针仅从容器内部访问 `127.0.0.1:8000/healthz`；该路由无需用户认证，必须只用于内部探针，不得转发给外部用户。账户 API 需要实际可用的 AmazingData 凭据与服务，以启动其行情服务。集成本地公开 issuer 为 `http://localhost:8081/realms/a500`，API 容器 JWKS 为 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs`；两者用途不同，不能以容器内部 hostname 替换 JWT 的公开 issuer。独立行情消费者不需叠加 `compose.web.yaml` 或启动 UI，见[行情 Compose 指南](single-host-market-data-compose.md)。
+HTTP 默认绑定 `127.0.0.1:8080`，仅适合可信网络或外部 TLS 终止；HTTPS 使用 `compose.web-https.yaml`，默认 `127.0.0.1:8443`，证书路径通过 `A500_TLS_CERT` 和 `A500_TLS_KEY` 提供。`A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 可覆盖监听地址和端口。浏览器与直接 API 调用均使用 `/api/v1/*`，旧 `/v1/*` 不再提供。账户数据库持久化在 `account-data` 卷；账户 API 需要可用的 AmazingData 凭据与服务。独立行情消费者不需 Web 配置，见[行情 Compose 指南](single-host-market-data-compose.md)。
 
 所有信号查询和 SSE 订阅均由应用验证 Bearer access token 的签名、issuer、audience 与有效期；反向代理认证不得替代此应用层边界。网关不开放原信号 `/docs`、`/redoc` 与 `/openapi.json`，账户 schema 可通过 `/api/account/openapi.json` 访问并要求有效 Bearer token。有效共享 audience 的获准用户读取相同的行情与信号，不按 token 主体隔离。`/healthz` 仅供 Compose 内部健康探针使用，Nginx gateway 对此路径返回 `404`，不得将探针地址作为外部服务路由。未认证或无效令牌返回 `401`，并附 `WWW-Authenticate: Bearer`。
 
@@ -109,23 +109,3 @@ docker compose -f compose.yaml -f compose.web.yaml ps
 
 所有信号均为参考信息而非交易执行指令。
 
-如需以 Nginx 部署私有反向代理，可在该私有网络中的代理服务配置类似以下访问策略；`monitor.example.internal` 必须仅解析到内部地址，`10.20.0.0/16` 应替换为实际受控网段：
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name monitor.example.internal;
-
-    location / {
-        allow 10.20.0.0/16;
-        deny all;
-        proxy_pass http://gateway:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;
-        proxy_read_timeout 1h;
-    }
-}
-```

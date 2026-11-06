@@ -105,6 +105,8 @@ def compose_command(environment: dict[str, str]) -> list[str]:
         str(ROOT / "compose.keycloak.yaml"),
         "-f",
         str(ROOT / "compose.web.yaml"),
+        "-f",
+        str(ROOT / "compose.web-http.yaml"),
     ]
 
 

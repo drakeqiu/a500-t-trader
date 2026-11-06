@@ -6,7 +6,9 @@ import os
 import secrets
 import shlex
 import socket
+import ssl
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REALM = "a500"
 CLIENT_ID = "a500-device-client"
 API_AUDIENCE = "a500-api"
+TLS_CONTEXT: ssl.SSLContext | None = None
 
 
 def _available_port() -> int:
@@ -49,7 +52,7 @@ def _request(
         request_headers["Authorization"] = f"Bearer {bearer}"
     request = Request(url, data=body, headers=request_headers, method=method)
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
             raw = response.read().decode()
             try:
                 return response.status, json.loads(raw)
@@ -140,11 +143,13 @@ def _allow_browser_origin(base_url: str, admin_token: str, origin: str) -> None:
         raise RuntimeError(f"无法配置设备客户端浏览器来源: HTTP {status}")
 
 
-def _check_browser_login(gateway_url: str, username: str, password: str) -> None:
+def _check_browser_login(
+    gateway_url: str, username: str, password: str, *, https: bool = False
+) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
-            page = browser.new_page()
+            page = browser.new_page(ignore_https_errors=https)
             page.goto(gateway_url, wait_until="domcontentloaded", timeout=30000)
             page.get_by_role("button", name="安全连接", exact=True).click()
             page.locator(".user-code").wait_for(state="visible", timeout=30000)
@@ -306,7 +311,7 @@ def _check_api(
         f"{base_url}/api/v1/signals/stream?symbols=563360",
         headers={"Authorization": f"Bearer {token}"},
     )
-    with urlopen(request, timeout=10) as response:
+    with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
         if response.status != 200 or response.headers.get_content_type() != (
             "text/event-stream"
         ):
@@ -357,27 +362,64 @@ def _verify_user_persisted(base_url: str, admin_token: str, username: str) -> No
         raise AssertionError("Keycloak 重启后 Realm 中未找到临时测试用户")
 
 
+def _make_test_certificate(directory: Path) -> tuple[Path, Path]:
+    cert, key = directory / "cert.pem", directory / "key.pem"
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(key), "-out", str(cert), "-days", "1",
+            "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+        ],
+        check=True, capture_output=True, timeout=30,
+    )
+    return cert, key
+
+
+def _check_binding(
+    compose: list[str], environment: dict[str, str], host: str, port: int
+) -> None:
+    def published(service: str, container_port: int) -> str:
+        result = subprocess.run(
+            [*compose, "port", service, str(container_port)],
+            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
+        )
+        return result.stdout.strip()
+
+    binding = published("gateway", 8080)
+    if binding != f"{host}:{port}":
+        raise AssertionError(f"网关监听地址不符: {binding!r}")
+    for service, container_port in (("frontend", 3000), ("signal-api", 8000), ("account-api", 8000)):
+        if published(service, container_port):
+            raise AssertionError(f"{service} 不应发布主机端口")
+
+
+def _check_no_plaintext(port: int) -> None:
+    try:
+        status, _ = _request(f"http://localhost:{port}/api/v1/signals")
+    except (OSError, URLError):
+        return
+    if status in (200, 401):
+        raise AssertionError("HTTPS 入口接受了明文 API 请求")
+
+
 def main() -> None:
+    global TLS_CONTEXT
     project = f"a500-keycloak-e2e-{secrets.token_hex(6)}"
     keycloak_port = _available_port()
-    gateway_port = _available_port()
     admin_name = f"e2e-admin-{secrets.token_hex(8)}"
     admin_password = secrets.token_urlsafe(32)
     user_name = f"e2e-user-{secrets.token_hex(8)}"
     user_password = secrets.token_urlsafe(32)
     other_name = f"e2e-user-{secrets.token_hex(8)}"
     other_password = secrets.token_urlsafe(32)
-    public_url = f"http://localhost:{keycloak_port}"
-    base_url = public_url
-    api_url = f"http://127.0.0.1:{gateway_port}"
+    base_url = f"http://localhost:{keycloak_port}"
     environment = {
         **os.environ,
         "KEYCLOAK_ADMIN_USERNAME": admin_name,
         "KEYCLOAK_ADMIN_PASSWORD": admin_password,
-        "KEYCLOAK_HOSTNAME": public_url,
+        "KEYCLOAK_HOSTNAME": base_url,
         "KEYCLOAK_HOST_PORT": str(keycloak_port),
-        "A500_GATEWAY_HOST_PORT": str(gateway_port),
-        "A500_OIDC_ISSUER": f"{public_url}/realms/{REALM}",
+        "A500_OIDC_ISSUER": f"{base_url}/realms/{REALM}",
         "A500_OIDC_AUDIENCE": API_AUDIENCE,
         "A500_OIDC_JWKS_URI": (
             f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
@@ -388,70 +430,83 @@ def main() -> None:
         "AMAZINGDATA_HOST": "127.0.0.1",
         "AMAZINGDATA_PORT": "1",
     }
+    for name in ("A500_GATEWAY_HOST", "A500_GATEWAY_HOST_PORT", "A500_TLS_CERT", "A500_TLS_KEY"):
+        environment.pop(name, None)
     compose_command = shlex.split(
         os.environ.get("A500_COMPOSE_COMMAND")
         or os.environ.get("PODMAN_COMPOSE")
         or "docker compose"
     )
-    compose = [
-        *compose_command,
-        "--project-name",
-        project,
-        "-f",
-        str(ROOT / "compose.yaml"),
-        "-f",
-        str(ROOT / "compose.keycloak.yaml"),
-        "-f",
-        str(ROOT / "compose.web.yaml"),
+    common = [
+        *compose_command, "--project-name", project,
+        "-f", str(ROOT / "compose.yaml"),
+        "-f", str(ROOT / "compose.keycloak.yaml"),
+        "-f", str(ROOT / "compose.web.yaml"),
     ]
-    try:
-        subprocess.run(
-            [
-                *compose,
-                "up",
-                "-d",
-                "--build",
-                "keycloak",
-                "signal-api",
-                "account-api",
-                "gateway",
-            ],
-            cwd=ROOT,
-            env=environment,
-            check=True,
-            timeout=600,
-        )
-        _wait_for_keycloak(base_url)
-        admin_token = _admin_token(base_url, admin_name, admin_password)
-        _allow_browser_origin(base_url, admin_token, f"http://localhost:{gateway_port}")
-        _create_temporary_user(base_url, admin_token, user_name, user_password)
-        _create_temporary_user(base_url, admin_token, other_name, other_password)
-        _check_browser_login(f"http://localhost:{gateway_port}", user_name, user_password)
-        token = _device_authorize(base_url, user_name, user_password)
-        other_token = _device_authorize(base_url, other_name, other_password)
-        _check_api(api_url, token, other_token, create=True, compose=compose, environment=environment)
+    compose = [*common, "-f", str(ROOT / "compose.web-http.yaml")]
+    with tempfile.TemporaryDirectory(prefix="a500-e2e-tls-") as directory:
+        cert, key = _make_test_certificate(Path(directory))
+        environment.update(A500_TLS_CERT=str(cert), A500_TLS_KEY=str(key))
+        TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
+        try:
+            subprocess.run(
+                [*compose, "up", "-d", "--build", "keycloak", "signal-api", "account-api", "gateway"],
+                cwd=ROOT, env=environment, check=True, timeout=600,
+            )
+            _wait_for_keycloak(base_url)
+            admin_token = _admin_token(base_url, admin_name, admin_password)
+            _create_temporary_user(base_url, admin_token, user_name, user_password)
+            _create_temporary_user(base_url, admin_token, other_name, other_password)
+            token = _device_authorize(base_url, user_name, user_password)
+            other_token = _device_authorize(base_url, other_name, other_password)
 
-        subprocess.run(
-            [*compose, "restart", "keycloak"],
-            cwd=ROOT,
-            env=environment,
-            check=True,
-            timeout=120,
-        )
-        _wait_for_keycloak(base_url)
-        admin_token = _admin_token(base_url, admin_name, admin_password)
-        _verify_user_persisted(base_url, admin_token, user_name)
-        token = _device_authorize(base_url, user_name, user_password)
-        other_token = _device_authorize(base_url, other_name, other_password)
-        _check_api(api_url, token, other_token, create=False, compose=compose, environment=environment)
-    finally:
-        subprocess.run(
-            [*compose, "down", "--volumes", "--remove-orphans"],
-            cwd=ROOT,
-            env=environment,
-            check=True,
-            timeout=120,
-        )
+            scenarios = [
+                ("http", "127.0.0.1", 8080),
+                ("http", "0.0.0.0", _available_port()),
+                ("https", "127.0.0.1", 8443),
+                ("https", "0.0.0.0", _available_port()),
+            ]
+            for index, (scheme, host, port) in enumerate(scenarios):
+                if index:
+                    compose = [*common, "-f", str(ROOT / f"compose.web-{scheme}.yaml")]
+                    if host == "127.0.0.1":
+                        environment.pop("A500_GATEWAY_HOST", None)
+                        environment.pop("A500_GATEWAY_HOST_PORT", None)
+                    else:
+                        environment.update(A500_GATEWAY_HOST=host, A500_GATEWAY_HOST_PORT=str(port))
+                    subprocess.run(
+                        [*compose, "up", "-d", "--no-deps", "--force-recreate", "gateway"],
+                        cwd=ROOT, env=environment, check=True, timeout=120,
+                    )
+                _check_binding(compose, environment, host, port)
+                url = f"{scheme}://localhost:{port}"
+                if scheme == "https":
+                    _check_no_plaintext(port)
+                _allow_browser_origin(base_url, admin_token, url)
+                _check_browser_login(url, user_name, user_password, https=scheme == "https")
+                _check_api(
+                    url, token, other_token, create=index == 0,
+                    compose=compose, environment=environment,
+                )
+
+            subprocess.run(
+                [*compose, "restart", "keycloak"],
+                cwd=ROOT, env=environment, check=True, timeout=120,
+            )
+            _wait_for_keycloak(base_url)
+            admin_token = _admin_token(base_url, admin_name, admin_password)
+            _verify_user_persisted(base_url, admin_token, user_name)
+            token = _device_authorize(base_url, user_name, user_password)
+            other_token = _device_authorize(base_url, other_name, other_password)
+            _check_api(url, token, other_token, create=False, compose=compose, environment=environment)
+        finally:
+            try:
+                subprocess.run(
+                    [*compose, "down", "--volumes", "--remove-orphans"],
+                    cwd=ROOT, env=environment, check=True, timeout=120,
+                )
+            finally:
+                TLS_CONTEXT = None
 
 
 if __name__ == "__main__":

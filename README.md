@@ -35,7 +35,7 @@ export A500_MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
-启动器自动选择 Docker Compose 或 `podman-compose`，也可显式设置 `A500_COMPOSE_COMMAND='podman-compose'`。它使用固定项目名 `a500-local`，组合 `compose.yaml`、`compose.keycloak.yaml`、`compose.web.yaml`，构建并启动所有服务，再检查 IdP discovery、页面及同源 API 的未认证 `401`。默认就绪等待 180 秒，可加 `--timeout 300`；这不是实时行情或完整登录验收。模式、wheel、容器引擎或必要配置缺失时会明确失败。
+启动器自动选择 Docker Compose 或 `podman-compose`，也可显式设置 `A500_COMPOSE_COMMAND='podman-compose'`。它使用固定项目名 `a500-local`，组合 `compose.yaml`、`compose.keycloak.yaml`、`compose.web.yaml` 和 `compose.web-http.yaml`，构建并启动所有服务，再检查 IdP discovery、页面及同源 API 的未认证 `401`。默认就绪等待 180 秒，可加 `--timeout 300`；这不是实时行情或完整登录验收。模式、wheel、容器引擎或必要配置缺失时会明确失败。
 
 打开 `http://localhost:8081` 管理界面，在 `a500` Realm 的 Users 中创建并启用获准用户、设置密码，然后从 `http://localhost:8080` 开始设备码授权。没有提交默认用户、管理员密码或客户端密钥，自助注册关闭。请勿以 `127.0.0.1:8080` 替代页面来源：Realm 精确允许 `http://localhost:8080` 的浏览器跨域 IdP 请求。旧 Keycloak 卷不会重新导入 Realm；已有 `a500-device-client` 需在管理界面将 Web origins 更新为该来源，不要为此删除用户卷。
 
@@ -49,7 +49,7 @@ python3 scripts/start-local.py logs
 python3 scripts/start-local.py down
 ```
 
-后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（账户、身份和 Redis 数据保留），不要加 `down -v`。Nginx gateway 默认绑定 `127.0.0.1:8080`，可通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 分别设置绑定地址和端口；Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用本地 Keycloak；自定义域名、外部 IdP 或生产环境请使用 Compose 配置，参见 [部署说明](docs/signal-monitoring-api.md#compose-部署)。独立行情消费者无需前端或 `compose.web.yaml`，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
+后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（账户、身份和 Redis 数据保留），不要加 `down -v`。HTTP gateway 默认绑定 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`；可通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 分别设置绑定地址和端口。Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用 HTTP 和本地 Keycloak；完整生产、HTTPS、证书维护和迁移步骤见[统一 Web 部署指南](docs/web-deployment.md)。独立行情消费者无需前端或 Web 配置，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
 
 `tgw` 模式不会自动启动 TGW 采集器；没有外部规范化行情事件时信号可显示不可用。`replay` 模式需另行显式运行下列命令，使用同一 `a500-local` 项目及配置，不能误连另一个 Compose 项目的 broker：
 

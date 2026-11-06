@@ -1,0 +1,7 @@
+# Select this file OR compose.web-https.yaml, never both.
+services:
+  gateway:
+    ports:
+      - "${A500_GATEWAY_HOST:-127.0.0.1}:${A500_GATEWAY_HOST_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/oidc-gateway-http.conf:/etc/nginx/conf.d/default.conf:ro
