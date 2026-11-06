@@ -17,6 +17,7 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
+      "webOrigins": ["http://localhost:3000"],
       "attributes": {
         "oauth2.device.authorization.grant.enabled": "true"
       },

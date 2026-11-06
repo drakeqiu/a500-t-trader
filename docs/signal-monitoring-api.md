@@ -6,7 +6,9 @@
 
 ## Compose 部署
 
-Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；项目不提供浏览器登录客户端或 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
+Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；项目提供设备码浏览器客户端，不提供 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
+
+浏览器与后端的统一本地启动见 [根 README](../README.md#本地前后端集成)：`python3 scripts/start-local.py` 组合原后端 Compose、Keycloak 与 `compose.web.yaml`。浏览器访问 `http://localhost:3000`，同源 `/api/v1/*` 由 Next rewrite 转发至 gateway `/v1/*`，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新设备授权。下文独立 IdP/直接 API 命令继续适用于非浏览器调用方。
 
 本地开发可通过独立的 Keycloak Compose 文件启动 IdP；该服务不属于生产外部 OIDC 的默认 Compose 部署。先在当前 shell 中生成临时管理员凭据（不要提交或复用真实凭据），再启动身份服务：
 
@@ -16,7 +18,7 @@ export KEYCLOAK_ADMIN_PASSWORD="$(openssl rand -base64 32)"
 docker compose -f compose.keycloak.yaml up -d keycloak
 ```
 
-Keycloak 管理界面为 `http://127.0.0.1:8081`。Realm `a500` 从 `keycloak/realm-a500.json` 导入，设备授权 public client 为 `a500-device-client`，签发 `a500-api` audience。数据写入项目命名卷 `keycloak-data`，容器重启后保留；不要对本地身份服务运行 `docker compose -f compose.keycloak.yaml down -v`，该命令会删除卷。Realm 文件负责初次导入；修改 Realm 配置时，应通过 Keycloak 管理界面更新现有 Realm，或在确认可丢弃数据后重建卷再导入。没有内置默认用户，Realm 自助注册关闭。管理员登录管理界面后，在 `a500` Realm 的 Users 页面显式创建并启用获准用户、设置其登录凭据；只向受信任用户发放账号，不开放注册入口。
+Keycloak 管理界面为 `http://localhost:8081`。Realm `a500` 从 `keycloak/realm-a500.json` 导入，设备授权 public client 为 `a500-device-client`，签发 `a500-api` audience。设备客户端的 `webOrigins` 精确允许 `http://localhost:3000`，不允许任意网页来源。数据写入项目命名卷 `keycloak-data`，容器重启后保留；不要对本地身份服务运行 `docker compose -f compose.keycloak.yaml down -v`，该命令会删除卷。Realm 文件负责初次导入；已有 Realm 应通过管理界面显式更新 Web origins，不能依靠重启重新导入，也不要为此删除身份卷。没有内置默认用户，Realm 自助注册关闭。管理员登录管理界面后，在 `a500` Realm 的 Users 页面显式创建并启用获准用户、设置其登录凭据；只向受信任用户发放账号，不开放注册入口。统一启动器固定 Keycloak 的公开 hostname 为 `http://localhost:8081`，避免浏览器 discovery/令牌 issuer 随请求 Host 漂移。
 
 ### Compose 真实端到端验收
 
@@ -91,7 +93,7 @@ A500_MARKET_DATA_MODE=tgw docker compose up -d --build redis signal-api account-
 docker compose ps
 ```
 
-`gateway` 在容器网络内部监听 8080，供同一受限部署网络中的 TLS 反向代理访问；不得将 Compose API 或 gateway 端口发布到公共主机接口。默认 Compose 不含 host `ports`。`deploy/oidc-gateway.conf` 将账户快照、NAV、交易导入路由送至账户 API，其余请求送至信号 API，并对 gateway 的 `/healthz` 返回 404。账户数据库持久化在 `account-data` 卷中。`signal-api` 容器健康探针仅从容器内部访问 `127.0.0.1:8000/healthz`；该路由无需用户认证，必须只用于内部探针，不得转发给外部用户。账户 API 需要实际可用的 AmazingData 凭据与服务，以启动其行情服务。
+`gateway` 在容器网络内部监听 8080，默认仅发布到宿主机 `127.0.0.1:8080`（可设置 `A500_GATEWAY_HOST_PORT`），保留现有 CLI/直接 API 访问；不得发布到公共主机接口。集成浏览器只访问 `localhost:3000` 下的 `/api`，不直连 gateway。`deploy/oidc-gateway.conf` 将账户快照、NAV、交易导入路由送至账户 API，其余请求送至信号 API，禁用 SSE 缓冲，并对 gateway 的 `/healthz` 返回 404。账户数据库持久化在 `account-data` 卷中。`signal-api` 容器健康探针仅从容器内部访问 `127.0.0.1:8000/healthz`；该路由无需用户认证，必须只用于内部探针，不得转发给外部用户。账户 API 需要实际可用的 AmazingData 凭据与服务，以启动其行情服务。集成本地公开 issuer 为 `http://localhost:8081/realms/a500`，API 容器 JWKS 为 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs`；两者用途不同，不能以容器内部 hostname 替换 JWT 的公开 issuer。
 
 所有信号查询和 SSE 订阅均由应用验证 Bearer access token 的签名、issuer、audience 与有效期；反向代理认证不得替代此应用层边界。`/docs`、`/redoc` 与 `/openapi.json` 也要求有效 Bearer token。有效共享 audience 的获准用户读取相同的行情与信号，不按 token 主体隔离。`/healthz` 仅供 Compose 内部健康探针使用，Nginx gateway 对此路径返回 `404`，不得将探针地址作为外部服务路由。未认证或无效令牌返回 `401`，并附 `WWW-Authenticate: Bearer`。
 

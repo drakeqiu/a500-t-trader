@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- 安装 Docker Engine 与 Docker Compose 插件，并能拉取 `python:3.14-slim`、RabbitMQ 镜像。
+- 安装 Docker Engine 与 Docker Compose 插件，或 rootless Podman 与 `podman-compose`，并能拉取 Python、RabbitMQ 等所需镜像。浏览器/Keycloak/完整 API 统一启动命令见 [根 README](../README.md#本地前后端集成)；本页保留独立行情消费者与回放命令。
 - 使用 rootless Podman Compose 时，本项目配置让服务以独立容器运行，不加入 Podman pod。
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
 - TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。

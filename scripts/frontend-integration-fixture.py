@@ -1,0 +1,233 @@
+"""Explicit browser-test fixtures around the real account and signal HTTP routes.
+
+Not a live IdP or market feed: device authorization and Redis are deterministic
+fixtures. SQLite and tokens exist only for this loopback process's lifetime.
+Run only through Playwright, or: uv run python scripts/frontend-integration-fixture.py
+--test-mode --port 38100. There is no production configuration fallback.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import html
+import os
+import secrets
+import tempfile
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+
+import fakeredis.aioredis
+import uvicorn
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+
+from a500_t_trader.account_snapshot_api import create_app as create_account_app
+from a500_t_trader.signal_monitor import STREAM_KEY
+from a500_t_trader.signal_monitor import create_app as create_signal_app
+from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
+
+
+def create_fixture(port: int) -> FastAPI:
+    temporary = tempfile.TemporaryDirectory(prefix="a500-browser-fixture-")
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    tokens: dict[str, str] = {}
+    devices: dict[str, dict[str, str]] = {}
+    stream_generation = 0
+    issuer = f"http://127.0.0.1:{port}/fixture-idp"
+    config = LiveSignalConfig(("510300", "563360"), {}, {}, "browser-fixture")
+
+    def authenticate(token: str) -> str:
+        if token not in tokens:
+            raise ValueError("Unknown fixture bearer token")
+        return tokens[token]
+
+    account = create_account_app(
+        Path(temporary.name) / "accounts.sqlite3", authenticate, market_data=None
+    )
+    signals = create_signal_app(redis, config, authenticator=authenticate)
+    store = signals.state.signal_store
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await redis.aclose()
+        temporary.cleanup()
+
+    app = FastAPI(title="Explicit A500 browser-test fixture", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[f"http://127.0.0.1:{os.getenv('A500_E2E_WEB_PORT', '3100')}"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+
+    @app.middleware("http")
+    async def fixture_transport_fault(request: Request, call_next):
+        generation = stream_generation
+        response = await call_next(request)
+        if request.url.path != "/v1/signals/stream":
+            return response
+        # Fault only the transport, retaining the real API's SSE bytes and IDs.
+        original = response.body_iterator
+
+        async def disconnectable():
+            pending = asyncio.create_task(anext(original))
+            try:
+                while generation == stream_generation:
+                    done, _ = await asyncio.wait({pending}, timeout=0.05)
+                    if not done:
+                        continue
+                    try:
+                        chunk = pending.result()
+                    except StopAsyncIteration:
+                        break
+                    yield chunk
+                    pending = asyncio.create_task(anext(original))
+            finally:
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                    await pending
+                await original.aclose()
+
+        response.body_iterator = disconnectable()
+        return response
+
+    app.include_router(account.router)
+    app.include_router(signals.router)
+
+    @app.get("/__fixture/health")
+    async def health():
+        return {"mode": "deterministic-browser-test", "live_idp": False}
+
+    @app.get("/fixture-idp/.well-known/openid-configuration")
+    async def discovery():
+        return {
+            "issuer": issuer,
+            "device_authorization_endpoint": f"{issuer}/device",
+            "token_endpoint": f"{issuer}/token",
+        }
+
+    @app.post("/fixture-idp/device")
+    async def device(client_id: str = Form(), scope: str = Form()):
+        if client_id != "a500-device-client" or scope != "openid":
+            raise HTTPException(400, "Unknown fixture client or scope")
+        code = secrets.token_urlsafe(24)
+        devices[code] = {"subject": ""}
+        return {
+            "device_code": code,
+            "user_code": code[:8].upper(),
+            "verification_uri": f"{issuer}/verify",
+            "verification_uri_complete": f"{issuer}/verify?code={code}",
+            "interval": 1,
+            "expires_in": 300,
+        }
+
+    @app.get("/fixture-idp/verify", response_class=HTMLResponse)
+    async def verify(code: str):
+        if code not in devices:
+            raise HTTPException(404, "Unknown fixture device")
+        return (
+            "<!doctype html><html lang='en'><title>Fixture device authorization</title>"
+            "<h1>Deterministic test IdP — not Keycloak</h1>"
+            "<form method='post'><input type='hidden' name='code' "
+            f"value='{html.escape(code)}'>"
+            "<label>Fixture account<input name='subject' required></label>"
+            "<button type='submit'>Authorize fixture device</button></form></html>"
+        )
+
+    @app.post("/fixture-idp/verify", response_class=HTMLResponse)
+    async def approve(code: str = Form(), subject: str = Form()):
+        if code not in devices or not subject.strip():
+            raise HTTPException(400, "Unknown fixture device or empty subject")
+        devices[code]["subject"] = subject.strip()
+        return "<h1>Fixture device authorized</h1><p>You may close this test page.</p>"
+
+    @app.post("/fixture-idp/token")
+    async def token(
+        device_code: str = Form(), grant_type: str = Form(), client_id: str = Form()
+    ):
+        if (
+            client_id != "a500-device-client"
+            or grant_type != "urn:ietf:params:oauth:grant-type:device_code"
+            or device_code not in devices
+        ):
+            return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        subject = devices[device_code]["subject"]
+        if not subject:
+            return JSONResponse({"error": "authorization_pending"}, status_code=400)
+        access_token = secrets.token_urlsafe(32)
+        tokens[access_token] = subject
+        return {"access_token": access_token, "token_type": "Bearer", "expires_in": 300}
+
+    @app.post("/__fixture/signals/{status}")
+    async def publish(status: str):
+        if status not in {"WAIT", "BUY", "SELL", "UNAVAILABLE"}:
+            raise HTTPException(422, "Unsupported fixture state")
+        event_id = await store.publish(
+            {
+                "schema_version": 1,
+                "symbol": "563360",
+                "bar_timestamp": datetime.now(UTC).isoformat(),
+                "strategy_identity": "intraday-etf-t-v1-rsi:browser-fixture",
+                "rule_version": "V1.0",
+                "parameters": {},
+                "parameter_fingerprint": "browser-fixture",
+                "status": status,
+                "direction": status if status in {"BUY", "SELL"} else None,
+                "quantity": 100 if status in {"BUY", "SELL"} else None,
+                "execution_eligible": False,
+                "reasons": ["deterministic browser-test market fixture; not live"],
+            },
+            status,
+        )
+        return {"event_id": event_id}
+
+    @app.post("/__fixture/disconnect-streams")
+    async def disconnect_streams():
+        nonlocal stream_generation
+        stream_generation += 1
+        return {"generation": stream_generation}
+
+    @app.post("/__fixture/expire-events")
+    async def expire_events():
+        await redis.delete(STREAM_KEY)
+        return {"expired": True}
+
+    @app.get("/__fixture/csv/{kind}")
+    async def csv(kind: str):
+        if kind not in {"valid", "invalid"}:
+            raise HTTPException(404, "Unknown fixture CSV")
+        header = (
+            "成交日期,成交时间,证券代码,证券名称,操作,成交数量,成交均价,成交金额,"
+            "合同编号,成交编号,手续费,印花税,其他杂费,发生金额,资金余额,交易市场,"
+            "股东帐户,交收日期,证券中文全称,\n"
+        )
+        row = (
+            "20261030,10:01:02,563360,A500基金,买入,8000,1.264,10112,"
+            "contract-1001,1001,0.510,0.000,0.000,-10112.510,"
+            "PRIVATE-BALANCE,沪Ａ,PRIVATE-ACCOUNT,20261030,A500ETF华泰柏瑞,\n"
+        )
+        content = header + row
+        if kind == "invalid":
+            content += row.replace(",8000,1.264,", ",0,1.264,").replace(
+                ",1001,", ",1002,"
+            )
+        return Response(content.encode("gb18030"), media_type="text/csv")
+
+    return app
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--test-mode", action="store_true", required=True)
+    parser.add_argument("--port", type=int, default=38100)
+    args = parser.parse_args()
+    uvicorn.run(create_fixture(args.port), host="127.0.0.1", port=args.port)
+
+
+if __name__ == "__main__":
+    main()

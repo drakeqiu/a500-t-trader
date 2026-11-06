@@ -21,6 +21,8 @@ A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
 
 未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `account-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/v1/account-*`、`/v1/trade-imports` 至账户 API，gateway 自身也不得发布到公共接口。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
 
+本地前后端真实集成使用 [根 README 启动器](../README.md#本地前后端集成)；浏览器从 `http://localhost:3000/api/v1/*` 经 Next rewrite 访问上述同一 gateway。该代理不增加账户业务逻辑，原 `/v1/*` 及 CLI 调用保持不变。前端使用页面内存 access token，刷新/失效后重新设备授权；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
+
 ## 当前净资产
 
 `GET /v1/account-nav` 根据当前认证主体的账户快照与行情计算当前 NAV；不接受用户或账户标识参数。接口使用账户 API 的 OIDC Bearer 认证，身份与数据归属仅来自已验证的 `sub`。无账户快照时返回 `404`，响应标记 `status: unavailable` 且 `nav: null`。
