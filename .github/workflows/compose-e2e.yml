@@ -42,4 +42,6 @@ jobs:
           chromium
 
       - name: 验收真实 Keycloak 授权链路（测试行情）
-        run: uv run --no-sync python scripts/compose-keycloak-device-e2e.py --mock-market-data
+        run: >-
+          uv run --no-sync python scripts/compose-keycloak-device-e2e.py
+          --mock-market-data
