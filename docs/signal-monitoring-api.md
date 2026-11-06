@@ -20,9 +20,9 @@ Keycloak 管理界面为 `http://127.0.0.1:8081`。Realm `a500` 从 `keycloak/re
 
 ### Compose 真实端到端验收
 
-Keycloak 设备授权验收会以随机 Compose 项目名启动 API、网关和独立 Keycloak，临时生成管理员及用户凭据，在 Playwright Chromium 中真实登录并批准设备授权，然后验证 API 访问与 Keycloak 重启后的用户持久性。脚本只在内存和子进程环境中使用这些随机凭据，结束时仅删除本次隔离项目及其命名卷。该验收不依赖设备码过期时间。
+Keycloak 设备授权验收会以随机 Compose 项目名启动 API、网关和独立 Keycloak，临时生成管理员及用户凭据，在 Playwright Chromium headless shell 中真实登录并批准设备授权，然后验证 API 访问与 Keycloak 重启后的用户持久性。脚本只在内存和子进程环境中使用这些随机凭据，结束时仅删除本次隔离项目及其命名卷。该验收不依赖设备码过期时间。
 
-先安装锁定的开发依赖和 Playwright Chromium，再运行脚本；它会构建并启动所需 API Compose 服务，不需提前启动本地 Keycloak：
+先安装锁定的开发依赖和 Playwright Chromium headless shell，再运行脚本；它会构建并启动所需 API Compose 服务，不需提前启动本地 Keycloak：
 
 ```sh
 uv sync --frozen --group dev
