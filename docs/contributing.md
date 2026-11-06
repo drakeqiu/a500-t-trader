@@ -33,6 +33,7 @@ uv run python -m a500_t_trader
 ```
 
 普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试，fixture 驱动的测试仍会正常运行。
+Starlette 测试客户端使用开发依赖 `httpx2`；`uv sync --locked` 会一并安装。
 在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查。
 若本地仓库 `.env` 使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT`，可在当前 shell 中
 安全映射到测试所需变量后运行（命令不会输出变量值）：
