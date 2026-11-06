@@ -37,7 +37,9 @@ jobs:
         run: uv run --no-sync python scripts/compose-market-data-e2e.py
 
       - name: 安装 Playwright Chromium 浏览器
-        run: uv run --no-sync python -m playwright install --with-deps chromium
+        run: >-
+          uv run --no-sync python -m playwright install --with-deps --only-shell
+          chromium
 
       - name: 验收真实 Keycloak 设备授权流程
         run: uv run --no-sync python scripts/compose-keycloak-device-e2e.py
