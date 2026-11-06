@@ -26,7 +26,7 @@ Keycloak 设备授权验收会以随机 Compose 项目名启动 API、网关和�
 
 ```sh
 uv sync --frozen --group dev
-uv run python -m playwright install --with-deps chromium
+uv run python -m playwright install --with-deps --only-shell chromium
 uv run python scripts/compose-keycloak-device-e2e.py
 ```
 
