@@ -4,7 +4,6 @@ import json
 import os
 import secrets
 import shlex
-import socket
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -32,10 +31,16 @@ def _consumer_image(project: str) -> str:
     return f"{project}-consumer:local"
 
 
-def _available_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def _published_port(compose: list[str], environment: dict[str, str]) -> int:
+    result = subprocess.run(
+        [*compose, "port", "rabbitmq", "5672"],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return int(result.stdout.strip().rsplit(":", 1)[1])
 
 
 def _compose_command(project: str) -> list[str]:
@@ -49,15 +54,12 @@ def _compose_command(project: str) -> list[str]:
 
 def main() -> None:
     project = _project_name()
-    port = _available_port()
-    url = f"amqp://guest:guest@localhost:{port}/%2F"
     consumer_image = _consumer_image(project)
     environment = {
         **os.environ,
         "A500_MARKET_DATA_MODE": "tgw",
-        "A500_RABBITMQ_URL": url,
         "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
-        "A500_RABBITMQ_HOST_PORT": str(port),
+        "A500_RABBITMQ_HOST_PORT": "0",
         "A500_OIDC_ISSUER": "https://identity.example.test",
         "A500_OIDC_AUDIENCE": "a500-api",
         "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",
@@ -69,13 +71,21 @@ def main() -> None:
     compose = _compose_command(project)
     try:
         subprocess.run(
+            [*compose, "up", "-d", "rabbitmq", "redis"],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            timeout=300,
+        )
+        port = _published_port(compose, environment)
+        url = f"amqp://guest:guest@localhost:{port}/%2F"
+        environment["A500_RABBITMQ_URL"] = url
+        subprocess.run(
             [
                 *compose,
                 "up",
                 "-d",
                 "--build",
-                "rabbitmq",
-                "redis",
                 "signal-calculator",
                 "consumer-signals",
                 "consumer-audit",
@@ -85,6 +95,7 @@ def main() -> None:
             check=True,
             timeout=300,
         )
+
         connection = None
         for _ in range(60):
             try:

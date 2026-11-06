@@ -12,12 +12,9 @@ SPEC.loader.exec_module(E2E)
 
 def test_each_e2e_run_gets_distinct_compose_resources() -> None:
     projects = [E2E._project_name() for _ in range(2)]
-    ports = [E2E._available_port() for _ in range(2)]
     images = [E2E._consumer_image(project) for project in projects]
 
     assert len(set(projects)) == 2
     assert all(project.startswith("a500-market-data-e2e-") for project in projects)
-    assert len(set(ports)) == 2
-    assert all(1 <= port <= 65535 for port in ports)
     assert len(set(images)) == 2
     assert all(image.endswith("-consumer:local") for image in images)

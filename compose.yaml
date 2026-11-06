@@ -147,6 +147,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+    command: ["a500-market-data-replay"]
     environment: *market-data-env
     volumes:
       - ./data:/app/data:ro
