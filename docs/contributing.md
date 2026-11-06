@@ -59,6 +59,10 @@ uv run pytest -m live
 
 运行 `npm run format` 可格式化 JSON、YAML 和 TOML 文件。
 
+GitHub Actions 分别按 `frontend/bun.lock` 和 `uv.lock` 缓存前端与 Python
+Playwright 浏览器；锁文件变更会触发重新下载。每次运行仍会检查和安装系统依赖，
+缓存未命中时会自动安装 Chromium。
+
 ## Git 提交规范
 
 本仓库使用 Conventional Commits 提交模板。执行 `git commit` 时，Git 会读取

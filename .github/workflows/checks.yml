@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Download wheels
+      - name: Download supplier wheels
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -30,7 +30,7 @@ jobs:
 
           ls -lh wheels/
 
-      - name: Set up Node
+      - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -56,7 +56,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Install locked dependencies
+      - name: Install locked Python dependencies
         run: uv sync --locked
 
       - name: Markdown lint
@@ -83,10 +83,18 @@ jobs:
       - name: pytest
         run: uv run pytest
 
-      - name: Install Playwright Chromium
+      - name: Cache frontend Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: >-
+            playwright-frontend-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('frontend/bun.lock') }}
+
+      - name: Install frontend Playwright Chromium and system dependencies
         run: bunx playwright install --with-deps --only-shell chromium
         working-directory: frontend
 
-      - name: Frontend E2E
+      - name: Run frontend E2E tests
         run: bun run test:e2e
         working-directory: frontend

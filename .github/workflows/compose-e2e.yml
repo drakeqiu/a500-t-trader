@@ -34,15 +34,23 @@ jobs:
       - name: Install locked project and E2E dependencies
         run: uv sync --frozen --group dev
 
-      - name: Run real RabbitMQ Compose E2E
+      - name: Run RabbitMQ market data E2E
         run: uv run --no-sync python scripts/compose-market-data-e2e.py
 
-      - name: 安装 Playwright Chromium 浏览器
+      - name: Cache Python Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: >-
+            playwright-python-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('uv.lock') }}
+
+      - name: Install Python Playwright Chromium and system dependencies
         run: >-
           uv run --no-sync python -m playwright install --with-deps --only-shell
           chromium
 
-      - name: 验收真实 Keycloak 授权链路（测试行情）
+      - name: Run Keycloak device authorization E2E with mock market data
         run: >-
           uv run --no-sync python scripts/compose-keycloak-device-e2e.py
           --mock-market-data
