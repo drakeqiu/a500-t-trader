@@ -98,7 +98,6 @@ services:
       - account-data:/var/lib/a500
     restart: unless-stopped
 
-
   consumer-signals:
     build:
       context: .
