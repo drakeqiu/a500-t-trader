@@ -45,7 +45,9 @@ describe("account API", () => {
     await getSnapshot("token");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/account-snapshot",
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token" }) }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer token" }),
+      }),
     );
   });
   it("uses same-origin API and explicit creation/replacement preconditions", async () => {
