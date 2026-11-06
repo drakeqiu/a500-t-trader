@@ -24,17 +24,21 @@ Keycloak 管理界面为 `http://localhost:8081`。Realm `a500` 从 `keycloak/re
 
 Keycloak 设备授权验收会以随机 Compose 项目名启动 API、网关和独立 Keycloak，临时生成管理员及用户凭据，在 Playwright Chromium headless shell 中真实登录并批准设备授权，然后验证 API 访问与 Keycloak 重启后的用户持久性。脚本只在内存和子进程环境中使用这些随机凭据，结束时仅删除本次隔离项目及其命名卷。该验收不依赖设备码过期时间。
 
-先安装锁定的开发依赖和 Playwright Chromium headless shell，并在运行脚本的环境中设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。这些必须指向账户 API 容器可访问的真实 AmazingData 服务：账户 API 即使在行情 replay 模式下也会在启动时连接该服务。不要将凭据写入仓库或命令历史；缺少或不可用的凭据不能完成真实验收。脚本会构建并启动所需 API 和前端 Compose 服务，不需提前启动本地 Keycloak：
+先安装锁定的开发依赖和 Playwright Chromium headless shell。CI 使用 `--mock-market-data` 显式选择测试专用模拟行情；Keycloak、账户 API、网关和浏览器仍走真实链路，但该模式不验证 TGW，不能用于生产：
 
 ```sh
 uv sync --frozen --group dev
 uv run python -m playwright install --with-deps --only-shell chromium
-uv run python scripts/compose-keycloak-device-e2e.py
+uv run python scripts/compose-keycloak-device-e2e.py --mock-market-data
 ```
 
-默认使用 Docker Compose；如使用 Podman Compose，可运行 `PODMAN_COMPOSE=podman-compose uv run python scripts/compose-keycloak-device-e2e.py`。该脚本随机选择本机 Keycloak 和 gateway host port，并以独立项目名隔离服务与卷。已有的行情 Compose 真实验收可单独运行 `uv run python scripts/compose-market-data-e2e.py`；Podman Compose 使用 `A500_COMPOSE_COMMAND=podman-compose`。
+本地切换真实 TGW：在工作区 `.env` 配置 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT`，使用可从账户 API 容器访问的真实服务地址。以下命令复用本地启动器的安全解析与 `AD_*` 到 `AMAZINGDATA_*` 映射，不执行 `.env` 内容，也不输出凭据；不要将凭据写入仓库或命令历史：
 
-CI 的真实设备授权验收从仓库 Secrets 读取以上四个同名变量；服务必须能从 GitHub Actions runner 及其容器访问。来自 fork 的 pull request 无法获取仓库 Secrets，因而不能执行此真实账户 API 验收；缺失凭据时任务会明确失败，不会以模拟服务代替。原工作区通过 `scripts/start-local.py` 使用的 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 不会由该验收脚本自动加载，须在受保护的执行环境中映射到对应 `AMAZINGDATA_*` 变量。
+```sh
+uv run python -c 'import os, runpy; env = runpy.run_path("scripts/start-local.py")["local_environment"](); os.execvpe("python", ["python", "scripts/compose-keycloak-device-e2e.py"], env)'
+```
+
+也可在受保护的执行环境直接设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT` 后运行 `uv run python scripts/compose-keycloak-device-e2e.py`。不带 `--mock-market-data` 时账户 API 始终连接真实服务，缺少或不可用的凭据不能完成真实验收；生产 Compose 不包含测试覆盖。默认使用 Docker Compose，Podman Compose 通过 `PODMAN_COMPOSE=podman-compose` 选择。该脚本构建所需前端和 API，以独立项目名隔离服务与卷，随机选择本机 Keycloak 和 gateway host port。行情 Compose 验收另运行 `uv run python scripts/compose-market-data-e2e.py`，Podman Compose 使用 `A500_COMPOSE_COMMAND=podman-compose`。
 
 设备授权流程中，应用先向 IdP 的设备授权端点申请设备码和用户码，展示 IdP 返回的验证 URI、用户码及轮询间隔；用户在另一设备打开验证 URI 并登录 Keycloak、确认授权。客户端按 IdP 返回的间隔轮询 token 端点，依照 OAuth 2.0 Device Authorization Grant 处理 `authorization_pending`、`slow_down`、`access_denied` 和过期结果，不得在每次 pending 时加速轮询。Keycloak discovery 地址为 `http://127.0.0.1:8081/realms/a500/.well-known/openid-configuration`；可从 discovery 读取 `device_authorization_endpoint`、`token_endpoint` 与 `jwks_uri`。本地 Keycloak 端点分别为 `/realms/a500/protocol/openid-connect/auth/device` 和 `/realms/a500/protocol/openid-connect/token`。直接使用 OAuth 客户端命令行工具时，参数对应 client ID `a500-device-client`、scope `openid`，并按该工具的设备授权实现展示验证 URI/码及轮询令牌端点；不要把用户密码发送给 A500 API。
 可用 `curl` 观察完整协议交互（以下变量仅为示例配置，不含凭据）：
