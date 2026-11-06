@@ -98,19 +98,6 @@ services:
       - account-data:/var/lib/a500
     restart: unless-stopped
 
-  gateway:
-    ports:
-      - "127.0.0.1:${A500_GATEWAY_HOST_PORT:-8080}:8080"
-    image: nginx:1.27-alpine
-    volumes:
-      - ./deploy/oidc-gateway.conf:/etc/nginx/conf.d/default.conf:ro
-    expose:
-      - "8080"
-    depends_on:
-      - signal-api
-      - account-api
-    restart: unless-stopped
-
   consumer-signals:
     build:
       context: .

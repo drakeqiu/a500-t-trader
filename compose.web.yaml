@@ -1,17 +1,22 @@
-# Local browser integration; combine with compose.yaml and compose.keycloak.yaml.
+# Full application: combine with compose.yaml; Keycloak is optional.
 services:
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_A500_API_BASE_URL: /api
         NEXT_PUBLIC_A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
-        NEXT_PUBLIC_A500_OIDC_CLIENT_ID: a500-device-client
-        A500_INTERNAL_API_URL: http://gateway:8080
-    ports:
-      - "127.0.0.1:3000:3000"
+        NEXT_PUBLIC_A500_OIDC_CLIENT_ID: ${A500_OIDC_CLIENT_ID:-a500-device-client}
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./deploy/oidc-gateway.conf:/etc/nginx/a500-routes.conf:ro
     depends_on:
-      - gateway
-      - keycloak
+      - frontend
+      - signal-api
+      - account-api
     restart: unless-stopped

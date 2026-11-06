@@ -105,6 +105,8 @@ def compose_command(environment: dict[str, str]) -> list[str]:
         str(ROOT / "compose.keycloak.yaml"),
         "-f",
         str(ROOT / "compose.web.yaml"),
+        "-f",
+        str(ROOT / "compose.web-http.yaml"),
     ]
 
 
@@ -151,15 +153,16 @@ def check_configuration(environment: dict[str, str]) -> None:
             raise ValueError(f"Missing wheels/{wheel}; obtain the deps-v1 release")
 
 
-def wait_ready(timeout: int) -> None:
+def wait_ready(timeout: int, gateway_port: str = "8080") -> None:
+    gateway = f"http://localhost:{gateway_port}"
     endpoints = {
         "Keycloak discovery": (
             "http://localhost:8081/realms/a500/.well-known/openid-configuration",
             200,
         ),
-        "frontend": ("http://localhost:3000", 200),
-        "signal API proxy": ("http://localhost:3000/api/v1/signals", 401),
-        "account API proxy": ("http://localhost:3000/api/v1/account-snapshot", 401),
+        "frontend": (gateway, 200),
+        "signal API proxy": (f"{gateway}/api/v1/signals", 401),
+        "account API proxy": (f"{gateway}/api/v1/account-snapshot", 401),
     }
     deadline = time.monotonic() + timeout
     pending = dict(endpoints)
@@ -215,8 +218,11 @@ def main() -> int:
                 env=environment,
                 check=True,
             )
-            wait_ready(arguments.timeout)
-            print("Ready: http://localhost:3000 (Keycloak: http://localhost:8081)")
+            gateway_port = environment.get("A500_GATEWAY_HOST_PORT", "8080")
+            wait_ready(arguments.timeout, gateway_port)
+            print(
+                f"Ready: http://localhost:{gateway_port} (Keycloak: http://localhost:8081)"
+            )
             print(
                 "Provision an enabled user in the a500 realm; no default user exists."
             )

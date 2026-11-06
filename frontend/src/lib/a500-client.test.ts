@@ -37,6 +37,19 @@ describe("account API", () => {
       parseSnapshotDraft({ ...snapshotDraft(snapshot), cost_basis: '{"510500":5.123}' }),
     ).toThrow(/字符串/);
   });
+  it("reads snapshots through the same-origin gateway", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json(snapshot, { headers: { ETag: '"v1"' } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await getSnapshot("token");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/account-snapshot",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer token" }),
+      }),
+    );
+  });
   it("uses same-origin API and explicit creation/replacement preconditions", async () => {
     const fetchMock = vi
       .fn()

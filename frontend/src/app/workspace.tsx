@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ApiError,
   abortableDelay,
@@ -48,8 +48,13 @@ function signalLabel(signal: Signal) {
   if (signal.stale || signal.status === "UNAVAILABLE") return "数据不可用";
   return signal.direction || signal.status || "等待信号";
 }
+// The server-rendered button must not accept clicks before React attaches its handler.
+const subscribeHydration = () => () => {};
+const clientHydrated = () => true;
+const serverHydrated = () => false;
 
 export default function Workspace() {
+  const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
   const [token, setToken] = useState<string | null>(null);
   const [device, setDevice] = useState<Device | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -410,8 +415,8 @@ export default function Workspace() {
             </p>
             {!configurationReady && (
               <div className="config-note login-config" role="status">
-                需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务。 API 默认使用同源{" "}
-                <code>/api</code>；独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
+                需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务。API 使用同源{" "}
+                <code>/api/v1</code>。
               </div>
             )}
             {error && (
@@ -456,7 +461,7 @@ export default function Workspace() {
                 <button
                   className="button primary full auth-action"
                   onClick={() => void connect()}
-                  disabled={busy || !configurationReady}
+                  disabled={!hydrated || busy || !configurationReady}
                 >
                   {busy ? "正在连接…" : "安全连接"}
                   {!busy && <span aria-hidden="true">→</span>}
@@ -545,8 +550,8 @@ export default function Workspace() {
       </header>
       {!configurationReady && (
         <div className="config-note" role="status">
-          需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务； API 默认使用同源{" "}
-          <code>/api</code>，独立运行可配置 <code>NEXT_PUBLIC_A500_API_BASE_URL</code>。
+          需配置 <code>NEXT_PUBLIC_A500_OIDC_ISSUER</code> 后连接身份服务；API 使用同源{" "}
+          <code>/api/v1</code>。
         </div>
       )}
       {error && (

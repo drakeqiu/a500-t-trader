@@ -13,58 +13,33 @@ E2E = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(E2E)
 
 
-@pytest.mark.parametrize(
-    ("compose_env", "expected_prefix"),
-    [
-        ("podman-compose", ["podman-compose"]),
-        (None, ["docker", "compose"]),
-    ],
-)
-def test_compose_startup_builds_api_services_and_cleans_only_its_project(
+def test_main_requires_real_provider_configuration(
     monkeypatch: pytest.MonkeyPatch,
-    compose_env: str | None,
-    expected_prefix: list[str],
 ) -> None:
-    if compose_env is None:
-        monkeypatch.delenv("PODMAN_COMPOSE", raising=False)
-        monkeypatch.delenv("A500_COMPOSE_COMMAND", raising=False)
-    else:
-        monkeypatch.setenv("PODMAN_COMPOSE", compose_env)
-        monkeypatch.delenv("A500_COMPOSE_COMMAND", raising=False)
+    for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
+        monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
+    with pytest.raises(RuntimeError, match="AMAZINGDATA_USERNAME"):
+        E2E.main()
 
-    calls: list[tuple[list[str], dict[str, Any]]] = []
-    monkeypatch.setattr(E2E, "_available_port", iter([8081, 8082]).__next__)
-    monkeypatch.setattr(
-        E2E.subprocess,
-        "run",
-        lambda args, **kwargs: calls.append((args, kwargs)),
-    )
-    monkeypatch.setattr(E2E, "_wait_for_keycloak", lambda _url: None)
-    monkeypatch.setattr(E2E, "_admin_token", lambda *_args: "admin-token")
-    monkeypatch.setattr(E2E, "_create_temporary_user", lambda *_args: None)
-    monkeypatch.setattr(E2E, "_device_authorize", lambda *_args: "access-token")
-    monkeypatch.setattr(E2E, "_check_api", lambda *_args: None)
-    monkeypatch.setattr(E2E, "_verify_user_persisted", lambda *_args: None)
 
-    E2E.main()
+def test_https_rejects_plaintext_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(E2E, "_request", lambda _url: (400, "bad request"))
+    E2E._check_no_plaintext(8443)
+    monkeypatch.setattr(E2E, "_request", lambda _url: (401, "unauthorized"))
+    with pytest.raises(AssertionError, match="明文"):
+        E2E._check_no_plaintext(8443)
 
-    startup, cleanup = calls[0][0], calls[-1][0]
-    assert startup[: len(expected_prefix)] == expected_prefix
-    assert startup[startup.index("up") + 1 :] == [
-        "-d",
-        "--build",
-        "keycloak",
-        "signal-api",
-        "account-api",
-        "gateway",
-    ]
-    assert cleanup[cleanup.index("down") + 1 :] == [
-        "--volumes",
-        "--remove-orphans",
-    ]
-    project_flag = "--project-name"
-    assert (
-        startup[startup.index(project_flag) + 1]
-        == cleanup[cleanup.index(project_flag) + 1]
-    )
-    assert startup[startup.index(project_flag) + 1].startswith("a500-keycloak-e2e-")
+
+def test_https_requests_use_certificate_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = object()
+    monkeypatch.setattr(E2E, "TLS_CONTEXT", context)
+
+    def reject_untrusted(_request: Any, *, timeout: int, context: Any) -> None:
+        assert context is E2E.TLS_CONTEXT
+        raise E2E.URLError("certificate verify failed")
+
+    monkeypatch.setattr(E2E, "urlopen", reject_untrusted)
+    with pytest.raises(E2E.URLError, match="certificate verify failed"):
+        E2E._request("https://localhost:8443/")

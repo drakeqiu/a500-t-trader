@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import shlex
+import socket
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -31,7 +32,51 @@ def _consumer_image(project: str) -> str:
     return f"{project}-consumer:local"
 
 
+def _available_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
 def _published_port(compose: list[str], environment: dict[str, str]) -> int:
+    if "podman" in Path(compose[0]).name:
+        project = compose[compose.index("--project-name") + 1]
+        container = subprocess.run(
+            [
+                "podman",
+                "ps",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=rabbitmq",
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if not container or "\n" in container:
+            raise RuntimeError("无法唯一确定 rabbitmq 容器")
+        result = subprocess.run(
+            [
+                "podman",
+                "inspect",
+                "--format",
+                "{{json .NetworkSettings.Ports}}",
+                container,
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        bindings = json.loads(result.stdout).get("5672/tcp") or []
+        if len(bindings) != 1:
+            raise RuntimeError(f"rabbitmq 端口绑定不唯一: {bindings!r}")
+        return int(bindings[0]["HostPort"])
     result = subprocess.run(
         [*compose, "port", "rabbitmq", "5672"],
         cwd=ROOT,
@@ -59,7 +104,7 @@ def main() -> None:
         **os.environ,
         "A500_MARKET_DATA_MODE": "tgw",
         "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
-        "A500_RABBITMQ_HOST_PORT": "0",
+        "A500_RABBITMQ_HOST_PORT": str(_available_port()),
         "A500_OIDC_ISSUER": "https://identity.example.test",
         "A500_OIDC_AUDIENCE": "a500-api",
         "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",
