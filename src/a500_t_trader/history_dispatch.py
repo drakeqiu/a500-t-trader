@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from .database import database_url
@@ -76,8 +77,8 @@ class HistoryConsumer:
     ) -> None:
         self.repository = repository
         self.retention_days = retention_days
-        self._provider_factory = provider_factory
         self._last_cleanup = 0.0
+        self._executor = ThreadPoolExecutor(max_workers=2)
         self._connection: Any | None = None
         if channel is None:
             import pika  # type: ignore[import-untyped]
@@ -97,13 +98,12 @@ class HistoryConsumer:
         )
         channel.basic_qos(prefetch_count=1)
 
-    def _process(self, job_id: str) -> None:
+    def _process(self, job_id: str) -> bool:
         from .jobs import process_job
 
         if self._provider_factory is None:
-            process_job(self.repository, job_id)
-        else:
-            process_job(self.repository, job_id, self._provider_factory)
+            return process_job(self.repository, job_id)
+        return process_job(self.repository, job_id, self._provider_factory)
 
     def _on_message(
         self, channel: Any, method: Any, properties: Any, body: bytes
@@ -117,26 +117,56 @@ class HistoryConsumer:
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             channel.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
             return
-        try:
-            self._process(job_id)
-        except Exception:
-            _LOG.exception("History notification processing failed; requeueing")
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
-        else:
-            # 已完成、租约仍有效或其他 worker 已领取时均安全确认。
-            channel.basic_ack(delivery_tag=method.delivery_tag)
+
+        delivery_tag = method.delivery_tag
+        connection = channel.connection
+
+        def process() -> None:
+            try:
+                claimed = self._process(job_id)
+                queued = not claimed and self.repository.status(job_id) == "queued"
+                ack = not queued
+            except Exception:
+                _LOG.exception("History notification processing failed; requeueing")
+                ack = False
+
+            def settle() -> None:
+                if not channel.is_open:
+                    return
+                if ack:
+                    channel.basic_ack(delivery_tag=delivery_tag)
+                else:
+                    channel.basic_nack(delivery_tag=delivery_tag, requeue=True)
+
+            if connection.is_open:
+                connection.add_callback_threadsafe(settle)
+
+        self._executor.submit(process)
 
     def _recover_expired(self) -> None:
-        try:
-            for job_id in self.repository.expired_job_ids():
-                self._process(str(job_id))
-            if time.monotonic() - self._last_cleanup >= 3600:
-                self.repository.cleanup(self.retention_days)
-                self._last_cleanup = time.monotonic()
-        except Exception:
-            _LOG.exception("History lease recovery failed")
-        finally:
-            self._channel.connection.call_later(30, self._recover_expired)
+        def recover() -> None:
+            try:
+                for job_id in self.repository.expired_job_ids():
+                    self._process(str(job_id))
+                if time.monotonic() - self._last_cleanup >= 3600:
+                    self.repository.cleanup(self.retention_days)
+                    self._last_cleanup = time.monotonic()
+            except Exception:
+                _LOG.exception("History lease recovery failed")
+            finally:
+                connection = self._channel.connection
+                if connection.is_open:
+                    connection.add_callback_threadsafe(
+                        lambda: connection.call_later(30, self._recover_expired)
+                        if connection.is_open else None
+                    )
+
+        self._executor.submit(recover)
+
+    def close(self) -> None:
+        if self._connection is not None and self._connection.is_open:
+            self._connection.close()
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def run(self) -> None:
         self._channel.basic_consume(
@@ -148,9 +178,6 @@ class HistoryConsumer:
         self._channel.connection.call_later(30, self._recover_expired)
         self._channel.start_consuming()
 
-    def close(self) -> None:
-        if self._connection is not None and self._connection.is_open:
-            self._connection.close()
 
 
 def publisher_main() -> None:

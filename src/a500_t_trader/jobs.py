@@ -301,6 +301,12 @@ class JobRepository:
                 (job_id, job_id, token, _LEASE_SECONDS),
             ).fetchone()
         return row
+    def status(self, job_id: str | uuid.UUID) -> str | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT status FROM daily_history_jobs WHERE id=%s", (job_id,)
+            ).fetchone()
+        return row["status"] if row is not None else None
 
     def expired_job_ids(self, limit: int = 100) -> list[uuid.UUID]:
         """返回可恢复任务，覆盖已确认但 worker 在租约到期前崩溃的情况。"""
