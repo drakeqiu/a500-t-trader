@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import jwt
@@ -55,7 +54,7 @@ def signing_keys() -> tuple[Any, Any]:
 
 
 def _client(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     key: Any,
 ) -> TestClient:
@@ -65,16 +64,16 @@ def _client(
         lambda jwks_uri: StaticJwks(jwks_uri, key),
     )
     authenticator = OIDCAuthenticator(ISSUER, SHARED_AUDIENCE, "https://jwks.test")
-    return TestClient(create_app(tmp_path / "accounts.sqlite3", authenticator))
+    return TestClient(create_app(postgres_url, authenticator))
 
 
 def test_account_api_accepts_signed_shared_audience_token(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
 ) -> None:
     private_key, public_key = signing_keys
-    with _client(tmp_path, monkeypatch, public_key) as client:
+    with _client(postgres_url, monkeypatch, public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
             headers={"Authorization": f"Bearer {_token(private_key)}"},
@@ -83,7 +82,7 @@ def test_account_api_accepts_signed_shared_audience_token(
 
 
 def test_account_snapshot_ownership_uses_verified_subject(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
 ) -> None:
@@ -98,7 +97,7 @@ def test_account_snapshot_ownership_uses_verified_subject(
         "cost_basis": {"510300": "3.8500"},
         "available_cash": "125.50",
     }
-    with _client(tmp_path, monkeypatch, public_key) as client:
+    with _client(postgres_url, monkeypatch, public_key) as client:
         created = client.put(
             "/v1/account-snapshot",
             json=snapshot,
@@ -120,13 +119,13 @@ def test_account_snapshot_ownership_uses_verified_subject(
     ids=["untrusted-issuer", "legacy-audience", "expired"],
 )
 def test_account_api_rejects_invalid_oidc_claims(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
     claims: dict[str, Any],
 ) -> None:
     private_key, public_key = signing_keys
-    with _client(tmp_path, monkeypatch, public_key) as client:
+    with _client(postgres_url, monkeypatch, public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
             headers={"Authorization": f"Bearer {_token(private_key, **claims)}"},
@@ -135,7 +134,7 @@ def test_account_api_rejects_invalid_oidc_claims(
 
 
 def test_account_api_rejects_invalid_signature(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
 ) -> None:
@@ -143,7 +142,7 @@ def test_account_api_rejects_invalid_signature(
     untrusted_private_key = rsa.generate_private_key(
         public_exponent=65537, key_size=2048
     )
-    with _client(tmp_path, monkeypatch, trusted_public_key) as client:
+    with _client(postgres_url, monkeypatch, trusted_public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
             headers={"Authorization": f"Bearer {_token(untrusted_private_key)}"},
@@ -152,12 +151,12 @@ def test_account_api_rejects_invalid_signature(
 
 
 def test_account_api_requires_bearer_credentials(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
 ) -> None:
     _, public_key = signing_keys
-    with _client(tmp_path, monkeypatch, public_key) as client:
+    with _client(postgres_url, monkeypatch, public_key) as client:
         response = client.get("/v1/account-snapshot")
     assert response.status_code == 401
 
@@ -197,12 +196,12 @@ def test_account_api_uses_shared_audience_configuration(
 @pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
 def test_account_api_documentation_requires_valid_bearer_credentials(
     path: str,
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
 ) -> None:
     private_key, public_key = signing_keys
-    client = _client(tmp_path, monkeypatch, public_key)
+    client = _client(postgres_url, monkeypatch, public_key)
     with client:
         unauthenticated = client.get(path)
         assert unauthenticated.status_code == 401

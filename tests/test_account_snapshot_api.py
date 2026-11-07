@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping
-from pathlib import Path
 from typing import cast
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -48,10 +47,8 @@ def _galaxy_csv(*rows: str) -> bytes:
     ).encode("gb18030")
 
 
-def test_trade_import_preview_requires_authentication(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+def test_trade_import_preview_requires_authentication(postgres_url: str) -> None:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.post(
             "/v1/trade-imports/previews",
             files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
@@ -60,9 +57,9 @@ def test_trade_import_preview_requires_authentication(tmp_path: Path) -> None:
 
 
 def test_trade_import_preview_is_owner_scoped_and_does_not_write_fills(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     with TestClient(create_app(database, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
@@ -88,9 +85,7 @@ def test_trade_import_preview_is_owner_scoped_and_does_not_write_fills(
     from a500_t_trader.account_ledger import AccountLedger
 
     assert AccountLedger(database).imported_fills() == []
-    import sqlite3
-
-    with sqlite3.connect(database) as db:
+    with psycopg.connect(database) as db:
         batch = db.execute(
             "SELECT owner,records_json FROM trade_import_batches"
         ).fetchall()
@@ -98,11 +93,9 @@ def test_trade_import_preview_is_owner_scoped_and_does_not_write_fills(
     assert all("PRIVATE-ACCOUNT" not in records for _, records in batch)
 
 
-def test_trade_import_preview_sanitizes_validation_errors(tmp_path: Path) -> None:
+def test_trade_import_preview_sanitizes_validation_errors(postgres_url: str) -> None:
     content = _galaxy_csv("1001").replace(b",8000,1.264,", b",0,1.264,")
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.post(
             "/v1/trade-imports/previews",
             headers={"Authorization": "Bearer alice-token"},
@@ -115,11 +108,9 @@ def test_trade_import_preview_sanitizes_validation_errors(tmp_path: Path) -> Non
 
 
 def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
         oversized = client.post(
             "/v1/trade-imports/previews",
@@ -139,9 +130,9 @@ def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
 
 
 def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     with TestClient(create_app(database, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
@@ -166,11 +157,9 @@ def test_trade_import_confirmation_is_owner_scoped_and_idempotent(
 
 
 def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
         raw_secret = b"PRIVATE-ACCOUNT"
@@ -206,9 +195,9 @@ def test_trade_import_result_is_owner_scoped_and_excludes_raw_file(
 
 
 def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     with TestClient(create_app(database, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
         preview = client.post(
@@ -217,9 +206,9 @@ def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
             files={"file": ("fills.csv", _galaxy_csv("1001"), "text/csv")},
         ).json()
         url = f"/v1/trade-imports/previews/{preview['batch_id']}"
-        with sqlite3.connect(database) as db:
+        with psycopg.connect(database) as db:
             db.execute(
-                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
+                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=%s",
                 (preview["batch_id"],),
             )
         assert client.get(url, headers=alice).status_code == 404
@@ -227,11 +216,9 @@ def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
 
 
 def test_account_nav_requires_auth_and_returns_unavailable_without_snapshot(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         assert client.get("/v1/account-nav").status_code == 401
         response = client.get(
             "/v1/account-nav?subject=bob",
@@ -243,11 +230,11 @@ def test_account_nav_requires_auth_and_returns_unavailable_without_snapshot(
 
 
 def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
     from datetime import UTC, datetime
 
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         store.save_snapshot(
@@ -273,7 +260,7 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
 
 
 def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -298,7 +285,7 @@ def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
             )
 
     quotes = Quotes()
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -346,7 +333,7 @@ def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
 
 
 def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
     from datetime import UTC, datetime, timedelta
     from decimal import Decimal
@@ -358,7 +345,7 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
     )
 
     now = datetime.now(UTC)
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -421,7 +408,7 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
     ids=["zero", "negative", "positive-infinity", "negative-infinity", "nan"],
 )
 def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
-    tmp_path: Path, price: str
+    postgres_url: str, price: str
 ) -> None:
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -440,7 +427,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
                 last_price=decimal_price,
             )
 
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -471,7 +458,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
 
 
 def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import UTC, datetime, timedelta, tzinfo
@@ -506,7 +493,7 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
                 last_price=Decimal("3.25"),
             )
 
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -536,7 +523,7 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
 
 
 def test_account_nav_preserves_decimal_precision_beyond_default_context(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -555,7 +542,7 @@ def test_account_nav_preserves_decimal_precision_beyond_default_context(
                 last_price=price,
             )
 
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -582,9 +569,9 @@ def test_account_nav_preserves_decimal_precision_beyond_default_context(
 
 
 def test_account_nav_marks_stale_or_future_snapshot_unavailable(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         for as_of in (
@@ -610,8 +597,10 @@ def test_account_nav_marks_stale_or_future_snapshot_unavailable(
             assert response.json()["nav"] is None
 
 
-def test_account_nav_read_does_not_change_snapshot_or_history(tmp_path: Path) -> None:
-    database = tmp_path / "accounts.sqlite3"
+def test_account_nav_read_does_not_change_snapshot_or_history(
+    postgres_url: str,
+) -> None:
+    database = postgres_url
     store = AccountSnapshotStore(database)
     snapshot = {
         "as_of": "2026-11-05T11:59:00+08:00",
@@ -628,7 +617,7 @@ def test_account_nav_read_does_not_change_snapshot_or_history(tmp_path: Path) ->
     assert (store.get_snapshot("alice"), store.history_for_subject("alice")) == before
 
 
-def test_account_nav_zero_holdings_requires_no_quotes(tmp_path: Path) -> None:
+def test_account_nav_zero_holdings_requires_no_quotes(postgres_url: str) -> None:
     from datetime import UTC, datetime
 
     from a500_t_trader.market_data import MarketDataService
@@ -637,7 +626,7 @@ def test_account_nav_zero_holdings_requires_no_quotes(tmp_path: Path) -> None:
         def get_snapshot(self, symbol: str) -> None:
             raise AssertionError(f"quote requested for zero holding: {symbol}")
 
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
@@ -663,9 +652,9 @@ def test_account_nav_zero_holdings_requires_no_quotes(tmp_path: Path) -> None:
 
 
 def test_trade_import_expired_confirmed_batch_retains_result_without_records(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     with TestClient(create_app(database, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
         bob = {"Authorization": "Bearer bob-token"}
@@ -678,13 +667,13 @@ def test_trade_import_expired_confirmed_batch_retains_result_without_records(
         result_url = f"/v1/trade-imports/previews/{batch_id}"
         confirm_url = f"{result_url}/confirm"
         confirmed = client.post(confirm_url, headers=alice)
-        with sqlite3.connect(database) as db:
+        with psycopg.connect(database) as db:
             records = db.execute(
-                "SELECT records_json FROM trade_import_batches WHERE batch_id=?",
+                "SELECT records_json FROM trade_import_batches WHERE batch_id=%s",
                 (batch_id,),
             ).fetchone()
             db.execute(
-                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=?",
+                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=%s",
                 (batch_id,),
             )
 
@@ -698,74 +687,11 @@ def test_trade_import_expired_confirmed_batch_retains_result_without_records(
         assert repeated.json() == confirmed.json()
 
 
-def test_trade_import_preview_migrates_legacy_imported_fills(tmp_path: Path) -> None:
-    database = tmp_path / "accounts.sqlite3"
-    with sqlite3.connect(database) as db:
-        db.execute(
-            """CREATE TABLE imported_fills (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-                quantity INTEGER NOT NULL CHECK (quantity > 0),
-                price TEXT NOT NULL,
-                trade_amount TEXT NOT NULL,
-                fees TEXT NOT NULL,
-                stamp_duty TEXT NOT NULL,
-                other_charges TEXT NOT NULL,
-                occurrence_amount TEXT NOT NULL,
-                source TEXT NOT NULL,
-                trade_number TEXT NOT NULL,
-                contract_number TEXT NOT NULL,
-                classification TEXT NOT NULL,
-                UNIQUE(source, trade_number)
-            )"""
-        )
-        db.execute(
-            """INSERT INTO imported_fills(
-                timestamp,symbol,side,quantity,price,trade_amount,fees,
-                stamp_duty,other_charges,occurrence_amount,source,trade_number,
-                contract_number,classification
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                "2026-10-30T10:01:02",
-                "563360",
-                "buy",
-                8000,
-                "1.264",
-                "10112",
-                "0.510",
-                "0.000",
-                "0.000",
-                "-10112.510",
-                "galaxy",
-                "legacy-1001",
-                "legacy-contract",
-                "user-entered; not broker-verified",
-            ),
-        )
-
-    with TestClient(create_app(database, TestAuthenticator())) as client:
-        preview = client.post(
-            "/v1/trade-imports/previews",
-            headers={"Authorization": "Bearer alice-token"},
-            files={"file": ("fills.csv", _galaxy_csv("1002"), "text/csv")},
-        )
-
-    assert preview.status_code == 200
-    with sqlite3.connect(database) as db:
-        legacy_row = db.execute(
-            "SELECT owner,trade_number FROM imported_fills "
-            "WHERE trade_number='legacy-1001'"
-        ).fetchone()
-    assert legacy_row == (None, "legacy-1001")
-
-
 def test_trade_import_confirmation_rejects_validation_error_preview(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
     content = _galaxy_csv("1001").replace(b",8000,1.264,", b",0,1.264,")
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     with TestClient(create_app(database, TestAuthenticator())) as client:
         preview = client.post(
             "/v1/trade-imports/previews",
@@ -782,10 +708,8 @@ def test_trade_import_confirmation_rejects_validation_error_preview(
     assert AccountLedger(database).imported_fills() == []
 
 
-def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+def test_account_snapshot_requires_bearer_credentials(postgres_url: str) -> None:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         assert client.get("/v1/account-snapshot").status_code == 401
         assert (
             client.get(
@@ -803,9 +727,9 @@ def test_account_snapshot_requires_bearer_credentials(tmp_path: Path) -> None:
 
 
 def test_account_snapshot_is_private_and_reports_user_entered_status(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot("alice", SNAPSHOT)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         alice = {"Authorization": "Bearer alice-token"}
@@ -820,10 +744,10 @@ def test_account_snapshot_is_private_and_reports_user_entered_status(
         assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
 
 
-def test_account_snapshot_returns_404_when_no_snapshot_exists(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+def test_account_snapshot_returns_404_when_no_snapshot_exists(
+    postgres_url: str,
+) -> None:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.get(
             "/v1/account-snapshot",
             headers={"Authorization": "Bearer alice-token"},
@@ -832,9 +756,9 @@ def test_account_snapshot_returns_404_when_no_snapshot_exists(tmp_path: Path) ->
 
 
 def test_account_snapshot_does_not_accept_client_owner_identifiers(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     AccountSnapshotStore(database).save_snapshot("alice", SNAPSHOT)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         response = client.get(
@@ -844,11 +768,11 @@ def test_account_snapshot_does_not_accept_client_owner_identifiers(
         assert response.status_code == 404
 
 
-def test_account_snapshot_storage_is_isolated_by_database_file(tmp_path: Path) -> None:
-    AccountSnapshotStore(tmp_path / "first.sqlite3").save_snapshot("alice", SNAPSHOT)
-    with TestClient(
-        create_app(tmp_path / "second.sqlite3", TestAuthenticator())
-    ) as client:
+def test_account_snapshot_storage_is_isolated_by_database_schema(
+    postgres_url: str, postgres_url_other: str
+) -> None:
+    AccountSnapshotStore(postgres_url).save_snapshot("alice", SNAPSHOT)
+    with TestClient(create_app(postgres_url_other, TestAuthenticator())) as client:
         assert (
             client.get(
                 "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
@@ -857,10 +781,8 @@ def test_account_snapshot_storage_is_isolated_by_database_file(tmp_path: Path) -
         )
 
 
-def test_put_requires_create_precondition_and_returns_etag(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+def test_put_requires_create_precondition_and_returns_etag(postgres_url: str) -> None:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
         assert (
             client.put(
@@ -884,9 +806,9 @@ def test_put_requires_create_precondition_and_returns_etag(tmp_path: Path) -> No
 
 
 def test_put_requires_matching_etag_and_keeps_successful_history(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "accounts.sqlite3"
+    database = postgres_url
     store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
@@ -936,11 +858,9 @@ def test_put_requires_matching_etag_and_keeps_successful_history(
 
 
 def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
         assert (
             client.put(
@@ -968,10 +888,8 @@ def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
         assert client.delete("/v1/account-snapshot", headers=headers).status_code == 405
 
 
-def test_put_rejects_invalid_json_with_problem_400(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+def test_put_rejects_invalid_json_with_problem_400(postgres_url: str) -> None:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         for content in ('{"broken":', "NaN"):
             response = client.put(
                 "/v1/account-snapshot",
@@ -990,8 +908,8 @@ def test_put_rejects_invalid_json_with_problem_400(tmp_path: Path) -> None:
             assert response.json()["errors"][0]["code"] == "invalid_json"
 
 
-def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
-    database = tmp_path / "accounts.sqlite3"
+def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
+    database = postgres_url
     store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
         headers = {
@@ -1119,7 +1037,9 @@ def test_put_rejects_invalid_contract_as_problem_422(tmp_path: Path) -> None:
         assert len(store.history_for_subject("alice")) == 1
 
 
-def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) -> None:
+def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(
+    postgres_url: str,
+) -> None:
     snapshot = {
         **SNAPSHOT,
         "as_of": "2001-01-01T00:00:00Z",
@@ -1128,9 +1048,7 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) ->
         "sellable": {"510300": 80},
         "cost_basis": {"510300": "3.85"},
     }
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,
@@ -1142,11 +1060,9 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(tmp_path: Path) ->
     assert response.json()["classification"] == "user-entered; not broker-verified"
 
 
-def test_put_accepts_rfc3339_leap_second_through_api(tmp_path: Path) -> None:
+def test_put_accepts_rfc3339_leap_second_through_api(postgres_url: str) -> None:
     snapshot = {**SNAPSHOT, "as_of": "2016-12-31T23:59:60Z"}
-    with TestClient(
-        create_app(tmp_path / "accounts.sqlite3", TestAuthenticator())
-    ) as client:
+    with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,

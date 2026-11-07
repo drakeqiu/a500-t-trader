@@ -1,17 +1,20 @@
-"""SQLite persistence for user-reported account and fill evidence."""
+"""PostgreSQL persistence for user-reported account and fill evidence."""
 
 from __future__ import annotations
 
 import csv
 import json
-import sqlite3
-from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
+import psycopg
+from psycopg.rows import dict_row
+
+from .database import initialize_database
 from .market_data import normalize_symbol
 from .strategy.premarket import AccountSnapshot
 
@@ -44,47 +47,25 @@ GALAXY_HEADER = (
 class AccountLedger:
     """Store user-reported account records, never broker-verified state."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
-        with sqlite3.connect(self.path) as db:
-            db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS account_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    as_of TEXT NOT NULL,
-                    record_json TEXT NOT NULL,
-                    classification TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS manual_fills (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-                    quantity INTEGER NOT NULL CHECK (quantity > 0),
-                    price TEXT NOT NULL,
-                    notes TEXT NOT NULL,
-                    classification TEXT NOT NULL
-                );
-                """
-            )
-            _create_imported_fills(db)
+    def __init__(self, path: str) -> None:
+        self.path = path
+        initialize_database(self.path)
 
     def record_snapshot(self, snapshot: AccountSnapshot) -> int:
         record = asdict(snapshot)
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.path) as db:
             cursor = db.execute(
                 "INSERT INTO account_snapshots(as_of,record_json,classification) "
-                "VALUES(?,?,?)",
+                "VALUES(%s,%s,%s) RETURNING id",
                 (
                     snapshot.as_of.isoformat(),
                     json.dumps(record, default=_json_default),
                     "user-entered; not broker-verified",
                 ),
             )
-            lastrowid = cursor.lastrowid
-            if lastrowid is None:
-                raise TypeError("SQLite insert did not return a row id")
-            return lastrowid
+            row = cursor.fetchone()
+            assert row is not None
+            return int(row[0])
 
     def record_fill(
         self,
@@ -104,10 +85,10 @@ class AccountLedger:
         if not price.is_finite():
             raise ValueError("manual fill price must be finite")
         code = normalize_symbol(symbol)
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.path) as db:
             cursor = db.execute(
                 "INSERT INTO manual_fills(timestamp,symbol,side,quantity,price,notes,"
-                "classification) VALUES(?,?,?,?,?,?,?)",
+                "classification) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                 (
                     timestamp.isoformat(),
                     code,
@@ -118,27 +99,24 @@ class AccountLedger:
                     "user-entered manual fill; not broker-verified",
                 ),
             )
-            lastrowid = cursor.lastrowid
-            if lastrowid is None:
-                raise TypeError("SQLite insert did not return a row id")
-            return lastrowid
+            row = cursor.fetchone()
+            assert row is not None
+            return int(row[0])
 
     def snapshots(self) -> list[dict[str, object]]:
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(self.path, row_factory=dict_row) as db:
             return [
                 dict(row)
                 for row in db.execute("SELECT * FROM account_snapshots ORDER BY id")
             ]
 
     def fills(self, session_date: str | None = None) -> list[dict[str, object]]:
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(self.path, row_factory=dict_row) as db:
             if session_date is None:
                 rows = db.execute("SELECT * FROM manual_fills ORDER BY timestamp,id")
             else:
                 rows = db.execute(
-                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = ? "
+                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = %s "
                     "ORDER BY timestamp,id",
                     (session_date,),
                 )
@@ -147,15 +125,12 @@ class AccountLedger:
     def imported_fills(
         self, session_date: str | None = None
     ) -> list[dict[str, object]]:
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
-            if not _table_exists(db, "imported_fills"):
-                return []
+        with psycopg.connect(self.path, row_factory=dict_row) as db:
             if session_date is None:
                 rows = db.execute("SELECT * FROM imported_fills ORDER BY timestamp,id")
             else:
                 rows = db.execute(
-                    "SELECT * FROM imported_fills WHERE substr(timestamp,1,10)=? "
+                    "SELECT * FROM imported_fills WHERE substr(timestamp,1,10)=%s "
                     "ORDER BY timestamp,id",
                     (session_date,),
                 )
@@ -163,7 +138,7 @@ class AccountLedger:
 
 
 def import_galaxy_fills(
-    database: str | Path,
+    database: str,
     csv_file: str | Path,
     *,
     confirm: bool = False,
@@ -177,7 +152,7 @@ def import_galaxy_fills(
 
 
 def preview_galaxy_fills(
-    database: str | Path,
+    database: str,
     content: bytes,
     *,
     owner: str,
@@ -191,7 +166,7 @@ def preview_galaxy_fills(
 
 
 def _classify_galaxy_fills(
-    database: str | Path,
+    database: str,
     records: list[dict[str, object]],
     errors: list[dict[str, object]],
     *,
@@ -231,15 +206,16 @@ def _classify_galaxy_fills(
             return [], 0
         return new_records, repeated
 
+    if not errors:
+        initialize_database(database)
     if not errors and confirm:
-        with sqlite3.connect(str(database)) as db:
-            db.row_factory = sqlite3.Row
-            db.execute("BEGIN IMMEDIATE")
-            _create_imported_fills(db)
+        with psycopg.connect(database, row_factory=dict_row) as db:
+            _lock_imports(db, owner)
             existing = {
                 str(row["trade_number"]): dict(row)
                 for row in db.execute(
-                    "SELECT * FROM imported_fills WHERE source=? AND owner IS ?",
+                    "SELECT * FROM imported_fills WHERE source=%s "
+                    "AND owner IS NOT DISTINCT FROM %s",
                     (GALAXY_SOURCE, owner),
                 )
             }
@@ -250,7 +226,8 @@ def _classify_galaxy_fills(
                         owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
                         stamp_duty,other_charges,occurrence_amount,source,
                         trade_number,contract_number,classification
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id""",
                     (owner,)
                     + tuple(
                         record[key]
@@ -272,22 +249,19 @@ def _classify_galaxy_fills(
                         )
                     ),
                 )
-                if cursor.lastrowid is None:
-                    raise TypeError("SQLite insert did not return a row id")
-                inserted_ids.append(cursor.lastrowid)
+                row = cursor.fetchone()
+                assert row is not None
+                inserted_ids.append(int(row["id"]))
     elif not errors:
-        preview_existing: dict[str, dict[str, object]] = {}
-        if Path(database).exists():
-            with closing(_readonly_database(database)) as db:
-                if _table_exists(db, "imported_fills"):
-                    preview_existing = {
-                        str(row["trade_number"]): dict(row)
-                        for row in db.execute(
-                            "SELECT * FROM imported_fills "
-                            "WHERE source=? AND owner IS ?",
-                            (GALAXY_SOURCE, owner),
-                        )
-                    }
+        with psycopg.connect(database, row_factory=dict_row) as db:
+            preview_existing = {
+                str(row["trade_number"]): dict(row)
+                for row in db.execute(
+                    "SELECT * FROM imported_fills "
+                    "WHERE source=%s AND owner IS NOT DISTINCT FROM %s",
+                    (GALAXY_SOURCE, owner),
+                )
+            }
         candidates, duplicates = classify(preview_existing)
 
     return {
@@ -481,69 +455,12 @@ def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
     )
 
 
-def _create_imported_fills(db: sqlite3.Connection) -> None:
-    if not _table_exists(db, "imported_fills"):
-        _create_imported_fills_table(db)
-    else:
-        columns = {
-            str(row[1]) for row in db.execute("PRAGMA table_info(imported_fills)")
-        }
-        if "owner" not in columns:
-            db.execute("ALTER TABLE imported_fills RENAME TO imported_fills_legacy")
-            _create_imported_fills_table(db)
-            db.execute(
-                """INSERT INTO imported_fills(
-                    id,owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
-                    stamp_duty,other_charges,occurrence_amount,source,trade_number,
-                    contract_number,classification
-                ) SELECT id,NULL,timestamp,symbol,side,quantity,price,trade_amount,fees,
-                    stamp_duty,other_charges,occurrence_amount,source,trade_number,
-                    contract_number,classification FROM imported_fills_legacy"""
-            )
-            db.execute("DROP TABLE imported_fills_legacy")
+def _lock_imports(db: psycopg.Connection[Any], owner: str | None) -> None:
+    """Serialize classification and insertion for an import owner."""
     db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS imported_fills_owner_trade "
-        "ON imported_fills(COALESCE(owner,''),source,trade_number)"
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        ("account-import:" + (owner or ""),),
     )
-
-
-def _create_imported_fills_table(db: sqlite3.Connection) -> None:
-    db.execute(
-        """CREATE TABLE imported_fills (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            owner TEXT,
-            timestamp TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
-            quantity INTEGER NOT NULL CHECK (quantity > 0),
-            price TEXT NOT NULL,
-            trade_amount TEXT NOT NULL,
-            fees TEXT NOT NULL,
-            stamp_duty TEXT NOT NULL,
-            other_charges TEXT NOT NULL,
-            occurrence_amount TEXT NOT NULL,
-            source TEXT NOT NULL,
-            trade_number TEXT NOT NULL,
-            contract_number TEXT NOT NULL,
-            classification TEXT NOT NULL,
-            UNIQUE(owner, source, trade_number)
-        )"""
-    )
-
-
-def _table_exists(db: sqlite3.Connection, name: str) -> bool:
-    return (
-        db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone()
-        is not None
-    )
-
-
-def _readonly_database(path: str | Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    return connection
 
 
 def _json_default(value: object) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from decimal import Decimal
@@ -22,7 +23,10 @@ def register_commands(
         "--account", required=True, help="user-entered account snapshot JSON"
     )
     account_record.add_argument(
-        "--database", required=True, help="SQLite account ledger"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
     fill_record = commands.add_parser(
         "manual-fill", help="record a user-entered manual fill"
@@ -33,19 +37,34 @@ def register_commands(
     fill_record.add_argument("--quantity", required=True, type=int)
     fill_record.add_argument("--price", required=True, type=Decimal)
     fill_record.add_argument("--notes", default="")
-    fill_record.add_argument("--database", required=True, help="SQLite account ledger")
+    fill_record.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
+    )
     fill_import = commands.add_parser(
         "import-fills", help="preview or import Galaxy Securities CSV fills"
     )
     fill_import.add_argument("--file", required=True, help="GB18030 Galaxy CSV file")
-    fill_import.add_argument("--database", required=True, help="SQLite account ledger")
+    fill_import.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
+    )
     fill_import.add_argument(
         "--confirm", action="store_true", help="persist valid new imported fills"
     )
     ledger_show = commands.add_parser(
         "account-ledger", help="show saved account snapshots and fills"
     )
-    ledger_show.add_argument("--database", required=True, help="SQLite account ledger")
+    ledger_show.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
+    )
 
 
 def handle(args: argparse.Namespace) -> int:

@@ -118,6 +118,7 @@ def check_configuration(environment: dict[str, str]) -> None:
         "AMAZINGDATA_PORT",
         "KEYCLOAK_ADMIN_USERNAME",
         "KEYCLOAK_ADMIN_PASSWORD",
+        "A500_POSTGRES_PASSWORD",
     )
     missing = [name for name in required if not environment.get(name)]
     if missing:

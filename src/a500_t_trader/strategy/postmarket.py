@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
@@ -11,6 +10,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, cast
 
+import psycopg
+from psycopg.rows import dict_row
+
+from ..database import initialize_database
 from ..market_data import CapabilityUnavailableError, MinuteBar
 from .premarket import AccountSnapshot, Plan, plan_json
 
@@ -56,7 +59,7 @@ def save_plan(path: str | Path, plan: Plan, account: AccountSnapshot) -> None:
 def generate_review(
     session_date: date,
     plan_path: str | Path,
-    evidence_path: str | Path,
+    evidence_path: str,
     market_data: ReviewMarketData | None,
     market_data_error: str | None = None,
 ) -> PostMarketReview:
@@ -111,18 +114,15 @@ def generate_review(
     imported_fills: dict[str, object] = {"status": "not recorded", "records": []}
     triggers: list[dict[str, object]] = []
     try:
-        with sqlite3.connect(
-            f"file:{Path(evidence_path).resolve()}?mode=ro", uri=True
-        ) as db:
-            db.row_factory = sqlite3.Row
+        initialize_database(evidence_path)
+        with psycopg.connect(evidence_path, row_factory=dict_row) as db:
             has_snapshots = db.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='account_snapshots'"
+                "SELECT 1 WHERE to_regclass('account_snapshots') IS NOT NULL"
             ).fetchone()
             if has_snapshots and account_record.get("source") == "unavailable":
                 snapshot_row = db.execute(
                     "SELECT as_of,record_json,classification FROM account_snapshots "
-                    "WHERE substr(as_of,1,10)=? ORDER BY as_of DESC,id DESC LIMIT 1",
+                    "WHERE substr(as_of,1,10)=%s ORDER BY as_of DESC,id DESC LIMIT 1",
                     (session_date.isoformat(),),
                 ).fetchone()
                 if snapshot_row is not None:
@@ -135,23 +135,22 @@ def generate_review(
                         if "account snapshot unavailable" not in item
                     ]
             has_triggers = db.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='trigger_evidence'"
+                "SELECT 1 WHERE to_regclass('trigger_evidence') IS NOT NULL"
             ).fetchone()
             if has_triggers:
                 rows = db.execute(
                     "SELECT * FROM trigger_evidence "
-                    "WHERE substr(bar_timestamp, 1, 10) = ? "
+                    "WHERE substr(bar_timestamp, 1, 10) = %s "
                     "ORDER BY bar_timestamp, symbol, direction",
                     (session_date.isoformat(),),
                 )
                 triggers = [dict(row) for row in rows]
             has_manual_fills = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='manual_fills'"
+                "SELECT 1 WHERE to_regclass('manual_fills') IS NOT NULL"
             ).fetchone()
             if has_manual_fills:
                 fills = db.execute(
-                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = ? "
+                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = %s "
                     "ORDER BY timestamp, id",
                     (session_date.isoformat(),),
                 )
@@ -162,13 +161,12 @@ def generate_review(
                     "classification": "user-entered manual fills; not broker-verified",
                 }
             has_imported_fills = db.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='imported_fills'"
+                "SELECT 1 WHERE to_regclass('imported_fills') IS NOT NULL"
             ).fetchone()
             if has_imported_fills:
                 imported_rows = db.execute(
                     "SELECT * FROM imported_fills "
-                    "WHERE substr(timestamp,1,10)=? ORDER BY timestamp,id",
+                    "WHERE substr(timestamp,1,10)=%s ORDER BY timestamp,id",
                     (session_date.isoformat(),),
                 )
                 imported_records = [dict(row) for row in imported_rows]
@@ -190,7 +188,7 @@ def generate_review(
                     and suggestion.get("symbol") == trigger.get("symbol")
                     and suggestion.get("direction") == trigger.get("direction")
                 ]
-    except (sqlite3.Error, OSError) as error:
+    except (psycopg.Error, OSError) as error:
         missing.append(f"trigger evidence unavailable: {error}")
     if not triggers and not any(
         "trigger evidence unavailable" in item for item in missing

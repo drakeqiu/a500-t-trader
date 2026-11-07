@@ -1,6 +1,6 @@
-import sqlite3
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from a500_t_trader.account_ledger import AccountLedger, import_galaxy_fills
@@ -25,8 +25,10 @@ def _write_source(path: Path, *rows: str) -> None:
     path.write_bytes((HEADER + "".join(rows)).encode("gb18030"))
 
 
-def test_invalid_row_rejects_batch_without_writes(tmp_path: Path) -> None:
-    database = tmp_path / "account.sqlite3"
+def test_invalid_row_rejects_batch_without_writes(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    database = postgres_url
     AccountLedger(database)
     source = tmp_path / "fills.csv"
     _write_source(source, _row("1001"), _row("1002", quantity="0"))
@@ -38,8 +40,10 @@ def test_invalid_row_rejects_batch_without_writes(tmp_path: Path) -> None:
     assert AccountLedger(database).imported_fills() == []
 
 
-def test_consistent_duplicates_and_conflicts_are_atomic(tmp_path: Path) -> None:
-    database = tmp_path / "account.sqlite3"
+def test_consistent_duplicates_and_conflicts_are_atomic(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    database = postgres_url
     AccountLedger(database)
     source = tmp_path / "fills.csv"
     _write_source(source, _row("1001"))
@@ -64,19 +68,30 @@ def test_consistent_duplicates_and_conflicts_are_atomic(tmp_path: Path) -> None:
     assert len(AccountLedger(database).imported_fills()) == 1
 
 
-def test_database_write_failure_rolls_back_every_new_fill(tmp_path: Path) -> None:
-    database = tmp_path / "account.sqlite3"
+def test_database_write_failure_rolls_back_every_new_fill(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    database = postgres_url
     AccountLedger(database)
-    with sqlite3.connect(database) as db:
-        db.execute(
-            "CREATE TRIGGER reject_second_fill BEFORE INSERT ON imported_fills "
-            "WHEN NEW.trade_number = '1002' "
-            "BEGIN SELECT RAISE(ABORT, 'write failed'); END"
-        )
+    with psycopg.connect(database) as db:
+        db.execute("""
+            CREATE FUNCTION reject_second_fill() RETURNS trigger AS $$
+            BEGIN
+                IF NEW.trade_number = '1002' THEN
+                    RAISE EXCEPTION 'write failed' USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+        db.execute("""
+            CREATE TRIGGER reject_second_fill BEFORE INSERT ON imported_fills
+            FOR EACH ROW EXECUTE FUNCTION reject_second_fill()
+        """)
     source = tmp_path / "fills.csv"
     _write_source(source, _row("1001"), _row("1002"))
 
-    with pytest.raises(sqlite3.IntegrityError, match="write failed"):
+    with pytest.raises(psycopg.IntegrityError, match="write failed"):
         import_galaxy_fills(database, source, confirm=True)
 
     assert AccountLedger(database).imported_fills() == []

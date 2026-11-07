@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from a500_t_trader.cli.main import main
 
 HEADER = (
@@ -12,10 +14,10 @@ HEADER = (
 
 
 def test_import_preserves_exact_decimal_values_and_ignores_blank_rows(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
     source = tmp_path / "precise.csv"
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     row = (
         "20261030,09:01:02,000001,示例,卖出,1,0.123456789012345678901,"
         "12345678901234567890.123456789,contract,trade,0.000000000000000001,"
@@ -60,9 +62,9 @@ def test_import_preserves_exact_decimal_values_and_ignores_blank_rows(
 
 
 def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     source = tmp_path / "unsupported.csv"
     source.write_bytes(
         (HEADER.replace("成交时间", "时间", 1) + "private row\n").encode("gb18030")
@@ -73,7 +75,8 @@ def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
     output = capsys.readouterr()
     assert "unsupported Galaxy CSV header" in output.out
     assert "private row" not in output.out + output.err
-    assert not database.exists()
+    with psycopg.connect(database) as db:
+        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)
 
     source.write_bytes(HEADER.encode("gb18030") + b"\xff\n")
     assert (
@@ -82,13 +85,14 @@ def test_import_rejects_unsupported_structure_and_strict_encoding_without_echo(
     output = capsys.readouterr()
     assert "cannot read strict GB18030 CSV" in output.out
     assert "\\xff" not in output.out + output.err
-    assert not database.exists()
+    with psycopg.connect(database) as db:
+        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)
 
 
 def test_import_rejects_noncanonical_timestamp_and_malformed_row_privately(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     source = tmp_path / "invalid.csv"
     row = (
         "2026103,09:01:02,000001,名称,买入,1,1.25,1.25,contract,trade,"
@@ -114,13 +118,14 @@ def test_import_rejects_noncanonical_timestamp_and_malformed_row_privately(
     assert report["error_details"][0]["field"] == "成交日期/成交时间"
     assert "SENSITIVE_BALANCE" not in output.out + output.err
     assert "SENSITIVE_ACCOUNT" not in output.out + output.err
-    assert not database.exists()
+    with psycopg.connect(database) as db:
+        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)
 
 
 def test_import_rejects_nonfinite_values_and_invalid_security_codes(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     source = tmp_path / "invalid-values.csv"
     rows = (
         "20261030,09:01:02,000001,名称,买入,1,NaN,1,contract,trade1,"
@@ -153,4 +158,5 @@ def test_import_rejects_nonfinite_values_and_invalid_security_codes(
     assert "NaN" not in output.out + output.err
     assert "SENSITIVE_BALANCE" not in output.out + output.err
     assert "SENSITIVE_ACCOUNT" not in output.out + output.err
-    assert not database.exists()
+    with psycopg.connect(database) as db:
+        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)

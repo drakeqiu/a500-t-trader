@@ -1,9 +1,9 @@
-import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import psycopg
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
 
@@ -88,10 +88,10 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidence(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config, account = _inputs(tmp_path)
-    database = tmp_path / "signals.sqlite3"
+    database = postgres_url
     data = Bars()
     command = [
         "monitor",
@@ -115,7 +115,7 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
     assert "09:00:00+08:00" not in output.out
     assert data.calls == [("510300", 1)]
 
-    with sqlite3.connect(database) as connection:
+    with psycopg.connect(database) as connection:
         rows = connection.execute(
             "SELECT symbol, direction, condition, bar_timestamp, bar_close, "
             "bar_completed, risk_or_invalidation, account_as_of, account_source "
@@ -148,7 +148,7 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
 
 
 def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config, account = _inputs(tmp_path)
     config.write_text(
@@ -165,7 +165,7 @@ def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(
                 "--account",
                 str(account),
                 "--database",
-                str(tmp_path / "both.sqlite3"),
+                postgres_url,
                 "--once",
             ],
             market_data=Bars(),
@@ -179,10 +179,10 @@ def test_monitor_records_both_directions_when_one_bar_crosses_both_levels(
 
 
 def test_monitor_requery_does_not_duplicate_a_trigger(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config, account = _inputs(tmp_path)
-    database = tmp_path / "signals.sqlite3"
+    database = postgres_url
     command = [
         "monitor",
         "--config",
@@ -199,15 +199,18 @@ def test_monitor_requery_does_not_duplicate_a_trigger(
     assert main(command, market_data=Bars(), as_of=NOW) == 0
     assert "No new trigger" in capsys.readouterr().out
 
-    with sqlite3.connect(database) as connection:
-        count = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()[
-            0
-        ]
+    with psycopg.connect(database) as connection:
+        row = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()
+        assert row is not None
+        count = row[0]
     assert count == 2
 
 
 def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
-    tmp_path: Path, capsys: CaptureFixture[str], monkeypatch: MonkeyPatch
+    tmp_path: Path,
+    capsys: CaptureFixture[str],
+    monkeypatch: MonkeyPatch,
+    postgres_url: str,
 ) -> None:
 
     class LiveBars(Bars):
@@ -226,7 +229,7 @@ def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
         "--account",
         str(account),
         "--database",
-        str(tmp_path / "signals.sqlite3"),
+        postgres_url,
     ]
 
     assert main(command, market_data=LiveBars()) == 0
@@ -234,7 +237,7 @@ def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
 
 
 def test_monitor_reports_stale_bars_without_creating_trigger_evidence(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
 
     class StaleBars(Bars):
@@ -244,7 +247,7 @@ def test_monitor_reports_stale_bars_without_creating_trigger_evidence(
             return (super().get_intraday_bars(symbol, interval_minutes)[0],)
 
     config, account = _inputs(tmp_path)
-    database = tmp_path / "signals.sqlite3"
+    database = postgres_url
     command = [
         "monitor",
         "--config",
@@ -260,8 +263,7 @@ def test_monitor_reports_stale_bars_without_creating_trigger_evidence(
     result = capsys.readouterr()
     assert "stale or future-dated" in result.err
     assert "SUGGESTION" not in result.out
-    with sqlite3.connect(database) as connection:
-        assert (
-            connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()[0]
-            == 0
-        )
+    with psycopg.connect(database) as connection:
+        row = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()
+        assert row is not None
+        assert row[0] == 0

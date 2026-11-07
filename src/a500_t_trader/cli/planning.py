@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import date, datetime
 from typing import cast
@@ -41,7 +42,11 @@ def register_premarket(
     premarket.add_argument(
         "--output", help="save the plan and account snapshot as JSON"
     )
-    premarket.add_argument("--database", help="SQLite account ledger")
+    premarket.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        help="PostgreSQL connection URL",
+    )
 
 
 def register_monitor_review(
@@ -55,7 +60,10 @@ def register_monitor_review(
         "--account", required=True, help="user-entered account snapshot JSON"
     )
     monitor.add_argument(
-        "--database", required=True, help="SQLite trigger-evidence file"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
     monitor.add_argument(
         "--poll-seconds", type=float, default=5.0, help="foreground polling interval"
@@ -73,7 +81,10 @@ def register_monitor_review(
         "--plan", required=True, help="saved pre-market plan JSON"
     )
     review_parser.add_argument(
-        "--database", required=True, help="SQLite trigger-evidence file"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
 
 
@@ -157,7 +168,7 @@ def handle(
         try:
             snapshot_id = AccountLedger(args.database).record_snapshot(account)
             print(
-                f"Account snapshot saved to SQLite ledger (id {snapshot_id}).",
+                f"Account snapshot saved to PostgreSQL ledger (id {snapshot_id}).",
                 file=sys.stderr,
             )
         except Exception as error:

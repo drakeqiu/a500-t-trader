@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -532,9 +531,9 @@ def test_paired_targets_do_not_bypass_source_candidate_rules() -> None:
     (("TAKE_PROFIT", "buy"), ("BUYBACK", "sell")),
 )
 def test_valid_open_pair_id_is_returned_for_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, candidate: str, first_side: str
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch, candidate: str, first_side: str
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     pair_id = f"open-{candidate.lower()}"
     _seed_pair(store, pair_id, first_side=first_side)
 
@@ -558,14 +557,14 @@ def test_valid_open_pair_id_is_returned_for_candidate(
     ),
 )
 def test_invalid_pair_provenance_or_status_blocks_pair_id(
-    tmp_path: Path,
+    postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
     candidate: str,
     first_side: str,
     symbol: str,
     close_pair: bool,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     pair_id = f"invalid-{candidate.lower()}-{first_side}-{symbol}-{close_pair}"
     _seed_pair(
         store,
@@ -589,9 +588,9 @@ def test_invalid_pair_provenance_or_status_blocks_pair_id(
 
 @pytest.mark.parametrize("pair_id", ("unknown-pair", None))
 def test_missing_or_unknown_pair_id_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pair_id: str | None
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch, pair_id: str | None
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
 
     result = _paired_api_result(monkeypatch, store, "TAKE_PROFIT", pair_id)
 
@@ -604,8 +603,8 @@ def test_missing_or_unknown_pair_id_fails_closed(
     )
 
 
-def test_evaluation_requires_existing_persistent_state(tmp_path: Path) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+def test_evaluation_requires_existing_persistent_state(postgres_url: str) -> None:
+    store = IntradayStrategyStateStore(postgres_url)
     result = _evaluate(state_store=store)["510300"]
 
     _assert_blocked(

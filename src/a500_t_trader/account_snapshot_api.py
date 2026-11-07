@@ -6,29 +6,30 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 import time
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
-from pathlib import Path
-from typing import Annotated, Protocol, cast
+from typing import Annotated, Any, Protocol, cast
 
 import jwt
+import psycopg
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from jwt import PyJWKClient
+from psycopg.rows import dict_row
 
 from .account_ledger import (
     GALAXY_CLASSIFICATION,
     GALAXY_SOURCE,
     AccountLedger,
-    _create_imported_fills,
+    _lock_imports,
     _same_trade,
     preview_galaxy_fills,
 )
+from .database import database_url, initialize_database
 from .market_data import (
     CapabilityUnavailableError,
     MarketDataService,
@@ -81,34 +82,17 @@ class OIDCAuthenticator:
 
 
 class AccountSnapshotStore:
-    """SQLite-backed per-subject current snapshot store."""
+    """PostgreSQL-backed per-subject current snapshot store."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
-        with sqlite3.connect(self.path) as db:
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS account_snapshot_current (
-                    subject TEXT PRIMARY KEY,
-                    snapshot_json TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )"""
-            )
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS account_snapshot_history (
-                    id INTEGER PRIMARY KEY,
-                    subject TEXT NOT NULL,
-                    snapshot_json TEXT NOT NULL,
-                    as_of TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    classification TEXT NOT NULL
-                )"""
-            )
+    def __init__(self, path: str) -> None:
+        self.path = path
+        initialize_database(self.path)
 
     def get_snapshot(self, subject: str) -> dict[str, object] | None:
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.path) as db:
             row = db.execute(
                 "SELECT snapshot_json, updated_at FROM account_snapshot_current "
-                "WHERE subject = ?",
+                "WHERE subject = %s",
                 (subject,),
             ).fetchone()
         if row is None:
@@ -120,13 +104,12 @@ class AccountSnapshotStore:
 
     def history_for_subject(self, subject: str) -> list[dict[str, object]]:
         """Return retained audit records for persistence-boundary consumers."""
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(self.path, row_factory=dict_row) as db:
             rows = db.execute(
                 "SELECT snapshot_json,updated_at,classification FROM "
-                "account_snapshot_history WHERE subject=? ORDER BY id",
+                "account_snapshot_history WHERE subject=%s ORDER BY id",
                 (subject,),
-            )
+            ).fetchall()
         return [
             {
                 "snapshot": json.loads(row["snapshot_json"]),
@@ -145,11 +128,15 @@ class AccountSnapshotStore:
     ) -> None:
         """Persist a snapshot for service integration and test setup."""
         written_at = updated_at or datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.path) as db:
+            db.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("account-snapshot:" + subject,),
+            )
             db.execute(
                 "INSERT INTO account_snapshot_current("
                 "subject,snapshot_json,updated_at) "
-                "VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET "
+                "VALUES(%s,%s,%s) ON CONFLICT(subject) DO UPDATE SET "
                 "snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at",
                 (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
             )
@@ -165,11 +152,14 @@ class AccountSnapshotStore:
     ) -> tuple[bool, dict[str, object], str]:
         """Conditionally replace the current snapshot and append its audit record."""
         written_at = updated_at or datetime.now(UTC).isoformat()
-        with sqlite3.connect(self.path, timeout=30) as db:
-            db.execute("BEGIN IMMEDIATE")
+        with psycopg.connect(self.path) as db:
+            db.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("account-snapshot:" + subject,),
+            )
             row = db.execute(
                 "SELECT snapshot_json,updated_at "
-                "FROM account_snapshot_current WHERE subject=?",
+                "FROM account_snapshot_current WHERE subject=%s",
                 (subject,),
             ).fetchone()
             current = None
@@ -200,14 +190,14 @@ class AccountSnapshotStore:
             db.execute(
                 "INSERT INTO account_snapshot_current("
                 "subject,snapshot_json,updated_at) "
-                "VALUES(?,?,?) ON CONFLICT(subject) DO UPDATE SET "
+                "VALUES(%s,%s,%s) ON CONFLICT(subject) DO UPDATE SET "
                 "snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at",
                 (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
             )
             db.execute(
                 "INSERT INTO account_snapshot_history("
                 "subject,snapshot_json,as_of,updated_at,classification) "
-                "VALUES(?,?,?,?,?)",
+                "VALUES(%s,%s,%s,%s,%s)",
                 (
                     subject,
                     json.dumps(snapshot, separators=(",", ":")),
@@ -463,13 +453,13 @@ TRADE_IMPORT_BATCH_TTL_SECONDS = 15 * 60
 
 
 def create_app(
-    database: str | Path | None = None,
+    database: str | None = None,
     authenticator: Authenticator | None = None,
     *,
     market_data: MarketDataService | None = None,
 ) -> FastAPI:
     """Create the account read API with replaceable auth and isolated storage."""
-    path = database or os.environ.get("A500_ACCOUNT_DATABASE", "accounts.sqlite3")
+    path = database or database_url()
     auth = authenticator or OIDCAuthenticator.from_environment()
     store = AccountSnapshotStore(path)
     ledger = AccountLedger(path)
@@ -510,26 +500,6 @@ def create_app(
             title=f"{app.title} - ReDoc",
         )
 
-    with sqlite3.connect(str(path)) as db:
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS trade_import_batches (
-                batch_id TEXT PRIMARY KEY,
-                owner TEXT NOT NULL,
-                records_json TEXT NOT NULL,
-                errors_json TEXT NOT NULL,
-                summary_json TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                expires_at REAL NOT NULL
-            )"""
-        )
-        columns = {
-            row[1] for row in db.execute("PRAGMA table_info(trade_import_batches)")
-        }
-        if "confirmed_json" not in columns:
-            db.execute(
-                "ALTER TABLE trade_import_batches ADD COLUMN confirmed_json TEXT"
-            )
-
     @app.post("/v1/trade-imports/previews")
     async def preview_trade_import(
         file: Annotated[UploadFile, File()],
@@ -550,17 +520,17 @@ def create_app(
         records = result.pop("_records")
         batch_id = str(uuid.uuid4())
         now = time.time()
-        with sqlite3.connect(str(path)) as db:
+        with psycopg.connect(str(path)) as db:
             db.execute(
                 """DELETE FROM trade_import_batches
-                   WHERE expires_at<=? AND confirmed_json IS NULL""",
+                   WHERE expires_at<=%s AND confirmed_json IS NULL""",
                 (now,),
             )
             db.execute(
                 """INSERT INTO trade_import_batches(
                     batch_id,owner,records_json,errors_json,summary_json,
                     created_at,expires_at,confirmed_json
-                ) VALUES(?,?,?,?,?,?,?,NULL)""",
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,NULL)""",
                 (
                     batch_id,
                     subject,
@@ -593,11 +563,10 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        with sqlite3.connect(str(path)) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(str(path), row_factory=dict_row) as db:
             batch = db.execute(
                 """SELECT summary_json,errors_json,confirmed_json,expires_at
-                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                   FROM trade_import_batches WHERE batch_id=%s AND owner=%s""",
                 (batch_id, subject),
             ).fetchone()
         if batch is None or (
@@ -624,12 +593,11 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        with sqlite3.connect(str(path)) as db:
-            db.row_factory = sqlite3.Row
-            db.execute("BEGIN IMMEDIATE")
+        with psycopg.connect(str(path), row_factory=dict_row) as db:
             batch = db.execute(
                 """SELECT records_json,errors_json,expires_at,confirmed_json
-                   FROM trade_import_batches WHERE batch_id=? AND owner=?""",
+                   FROM trade_import_batches
+                   WHERE batch_id=%s AND owner=%s FOR UPDATE""",
                 (batch_id, subject),
             ).fetchone()
             if batch is None:
@@ -647,7 +615,7 @@ def create_app(
             )
             db.execute(
                 """UPDATE trade_import_batches
-                   SET confirmed_json=?,records_json='[]' WHERE batch_id=?""",
+                   SET confirmed_json=%s,records_json='[]' WHERE batch_id=%s""",
                 (json.dumps(result), batch_id),
             )
         return JSONResponse(result)
@@ -805,13 +773,13 @@ def create_app(
 
 
 def _confirm_trade_import_records(
-    db: sqlite3.Connection, records: list[dict[str, object]], owner: str
+    db: psycopg.Connection[dict[str, Any]], records: list[dict[str, object]], owner: str
 ) -> dict[str, object]:
-    _create_imported_fills(db)
+    _lock_imports(db, owner)
     existing = {
         str(row["trade_number"]): dict(row)
         for row in db.execute(
-            "SELECT * FROM imported_fills WHERE source=? AND owner=?",
+            "SELECT * FROM imported_fills WHERE source=%s AND owner=%s",
             (GALAXY_SOURCE, owner),
         )
     }
@@ -837,7 +805,7 @@ def _confirm_trade_import_records(
                 owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
                 stamp_duty,other_charges,occurrence_amount,source,trade_number,
                 contract_number,classification
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (owner,)
             + tuple(
                 record[key]
@@ -859,10 +827,9 @@ def _confirm_trade_import_records(
             )
             + (GALAXY_CLASSIFICATION,),
         )
-        inserted_id = cursor.lastrowid
-        if inserted_id is None:
-            raise RuntimeError("SQLite did not return an imported fill ID")
-        ids.append(inserted_id)
+        row = cursor.fetchone()
+        assert row is not None
+        ids.append(int(row["id"]))
     return {
         "valid": len(records),
         "new": len(ids),

@@ -41,11 +41,10 @@ def bar(day: int, minute: int, price: str, *, completed: bool = True) -> MinuteB
 
 
 def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
-    database = tmp_path / "history.sqlite"
     config.write_text(
         '{"etfs":[{"symbol":"510300","buy_below":"9.50",'
         '"sell_above":"10.50","max_buy_cash":"10000",'
@@ -80,7 +79,7 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
         "--end-date",
         "2026-10-31",
         "--database",
-        str(database),
+        postgres_url,
         "--cost-bps",
         "10",
         "--slippage-bps",
@@ -113,11 +112,10 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
 
 
 def test_backtest_reuses_exactly_covered_shared_history(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
-    database = tmp_path / "history.sqlite"
     config.write_text(
         '{"etfs":[{"symbol":"510300","buy_below":"9.50",'
         '"sell_above":"10.50","max_buy_cash":"10000","minimum_holding":100}]}',
@@ -140,7 +138,7 @@ def test_backtest_reuses_exactly_covered_shared_history(
         "--end-date",
         "2026-10-31",
         "--database",
-        str(database),
+        postgres_url,
         "--confirm-history-persistence-permitted",
     ]
     data = HistoricalData([bar(30, 0, "10"), bar(31, 0, "11")])
@@ -158,7 +156,7 @@ def test_backtest_reuses_exactly_covered_shared_history(
 
 
 def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
@@ -193,7 +191,7 @@ def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
         "--end-date",
         "2026-10-30",
         "--database",
-        str(tmp_path / "history.sqlite"),
+        postgres_url,
         "--confirm-history-persistence-permitted",
     ]
     assert main(args, market_data=Unavailable()) == 2
@@ -201,7 +199,7 @@ def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
 
 
 def test_cleanup_preserves_backtest_referenced_minute_snapshot(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
@@ -216,7 +214,6 @@ def test_cleanup_preserves_backtest_referenced_minute_snapshot(
         encoding="utf-8",
     )
     data = HistoricalData([bar(30, 0, "10"), bar(30, 1, "10")])
-    db = tmp_path / "history.sqlite"
     args = [
         "backtest",
         "--config",
@@ -228,15 +225,23 @@ def test_cleanup_preserves_backtest_referenced_minute_snapshot(
         "--end-date",
         "2026-10-30",
         "--database",
-        str(db),
+        postgres_url,
         "--confirm-history-persistence-permitted",
     ]
     assert main(args, market_data=data) == 0
     run = json.loads(capsys.readouterr().out)
-    assert main(["history-cleanup", "--database", str(db)], market_data=data) == 0
+    assert main(["history-cleanup", "--database", postgres_url], market_data=data) == 0
     assert '"deleted_shared_bars": 2' in capsys.readouterr().out
     assert (
-        main(["backtest-show", "--database", str(db), "--run-id", str(run["run_id"])])
+        main(
+            [
+                "backtest-show",
+                "--database",
+                postgres_url,
+                "--run-id",
+                str(run["run_id"]),
+            ]
+        )
         == 0
     )
     shown = json.loads(capsys.readouterr().out)
@@ -245,7 +250,7 @@ def test_cleanup_preserves_backtest_referenced_minute_snapshot(
 
 
 def test_backtest_requires_explicit_history_persistence_permission(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
@@ -271,7 +276,7 @@ def test_backtest_requires_explicit_history_persistence_permission(
         "--end-date",
         "2026-10-30",
         "--database",
-        str(tmp_path / "history.sqlite"),
+        postgres_url,
     ]
 
     assert main(args, market_data=data) == 2
@@ -280,7 +285,7 @@ def test_backtest_requires_explicit_history_persistence_permission(
 
 
 def test_backtest_rejects_account_snapshot_after_first_history_bar(
-    tmp_path: Path, capsys: CaptureFixture[str]
+    tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
@@ -306,7 +311,7 @@ def test_backtest_rejects_account_snapshot_after_first_history_bar(
         "--end-date",
         "2026-10-30",
         "--database",
-        str(tmp_path / "history.sqlite"),
+        postgres_url,
         "--confirm-history-persistence-permitted",
     ]
 
