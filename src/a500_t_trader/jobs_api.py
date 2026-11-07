@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
@@ -14,7 +13,11 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from .account_snapshot_api import OIDCAuthenticator, _authenticated_subject
+from .account_snapshot_api import (
+    Authenticator,
+    OIDCAuthenticator,
+    _authenticated_subject,
+)
 from .database import database_url
 from .jobs import JobRepository
 from .market_data import normalize_symbol
@@ -31,7 +34,7 @@ class DailyHistoryRequest(BaseModel):
 
 def create_app(
     database: str | None = None,
-    authenticator: Callable[[str], str] | None = None,
+    authenticator: Authenticator | None = None,
     *,
     persistence_permitted: bool | None = None,
 ) -> FastAPI:

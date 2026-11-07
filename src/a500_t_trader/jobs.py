@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import date, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -335,13 +335,18 @@ class JobRepository:
 
 
 def _bar_payload(bar: DailyBar) -> dict[str, Any]:
-    return json.loads(
-        json.dumps(
-            asdict(bar),
-            default=lambda value: (
-                value.isoformat() if isinstance(value, (date, datetime)) else str(value)
-            ),
-        )
+    return cast(
+        dict[str, Any],
+        json.loads(
+            json.dumps(
+                asdict(bar),
+                default=lambda value: (
+                    value.isoformat()
+                    if isinstance(value, (date, datetime))
+                    else str(value)
+                ),
+            )
+        ),
     )
 
 
