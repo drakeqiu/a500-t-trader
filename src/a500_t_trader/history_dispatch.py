@@ -46,7 +46,7 @@ class HistoryPublisher:
         channel.confirm_delivery()
 
     def publish(self, job_id: str) -> None:
-        import pika  # type: ignore[import-untyped]
+        import pika
 
         confirmed = self._channel.basic_publish(
             exchange=HISTORY_EXCHANGE,
@@ -83,7 +83,7 @@ class HistoryConsumer:
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._connection: Any | None = None
         if channel is None:
-            import pika  # type: ignore[import-untyped]
+            import pika
 
             rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
             if not rabbit_url:

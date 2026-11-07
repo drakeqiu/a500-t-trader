@@ -284,7 +284,11 @@ class JobRepository:
                 FROM daily_history_job_outbox WHERE published_at IS NULL"""
             ).fetchone()
         assert row is not None
-        return row
+        return {
+            "pending": row["pending"],
+            "ready": row["ready"],
+            "oldest_created_at": row["oldest_created_at"],
+        }
 
     def claim(self, job_id: str | uuid.UUID | None = None) -> dict[str, Any] | None:
         token = uuid.uuid4()

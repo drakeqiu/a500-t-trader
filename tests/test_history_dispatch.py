@@ -34,11 +34,13 @@ def test_confirmed_dispatch_marks_outbox_published(postgres_url: str) -> None:
             pass
 
         def basic_publish(self, **kwargs: object) -> bool:
+            body = kwargs["body"]
+            assert isinstance(body, bytes)
             self.messages.append(
                 (
                     str(kwargs["exchange"]),
                     str(kwargs["routing_key"]),
-                    json.loads(kwargs["body"]),
+                    json.loads(body),
                 )
             )
             return True
@@ -82,12 +84,10 @@ def test_failed_outbox_insert_rolls_back_task(postgres_url: str) -> None:
         repository.create("alice", "563360", "2020-01-01", "2020-12-31")
 
     with psycopg.connect(postgres_url) as db:
-        assert (
-            db.execute(
-                "SELECT count(*) FROM daily_history_jobs WHERE subject='alice'"
-            ).fetchone()[0]
-            == 0
-        )
+        result = db.execute(
+            "SELECT count(*) FROM daily_history_jobs WHERE subject='alice'"
+        ).fetchone()
+    assert result is not None and result[0] == 0
 
 
 def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) -> None:
@@ -116,12 +116,14 @@ def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) 
 def test_publisher_backfills_legacy_queued_jobs(postgres_url: str) -> None:
     repository = JobRepository(postgres_url)
     with psycopg.connect(postgres_url) as db:
-        job_id = db.execute(
+        inserted = db.execute(
             """INSERT INTO daily_history_jobs
             (id, subject, symbol, start_date, end_date, status, total_chunks)
             VALUES (gen_random_uuid(), 'legacy', '563360', '2020-01-01',
                 '2020-12-31', 'queued', 1) RETURNING id"""
-        ).fetchone()[0]
+        ).fetchone()
+    assert inserted is not None
+    job_id = inserted[0]
 
     class RecordingPublisher:
         def __init__(self) -> None:
@@ -138,6 +140,8 @@ def test_publisher_backfills_legacy_queued_jobs(postgres_url: str) -> None:
 def test_consumer_processes_only_notified_job_and_acks_duplicate(
     postgres_url: str,
 ) -> None:
+    from collections.abc import Callable
+    from threading import Event
     from types import SimpleNamespace
 
     from a500_t_trader.history_dispatch import HistoryConsumer
@@ -156,8 +160,8 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     class Connection:
         is_open = True
 
-        def add_callback_threadsafe(self, callback: object) -> None:
-            callback()  # type: ignore[operator]
+        def add_callback_threadsafe(self, callback: Callable[[], None]) -> None:
+            callback()
 
     class Channel:
         def __init__(self) -> None:
@@ -165,6 +169,11 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
             self.nacks: list[int] = []
             self.connection = Connection()
             self.is_open = True
+            self.settled = Event()
+
+        def _finish_delivery(self) -> None:
+            if len(self.acks) + len(self.nacks) == 3:
+                self.settled.set()
 
         def exchange_declare(self, **kwargs: object) -> None:
             pass
@@ -180,35 +189,20 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
 
         def basic_ack(self, *, delivery_tag: int) -> None:
             self.acks.append(delivery_tag)
+            self._finish_delivery()
 
         def basic_nack(self, *, delivery_tag: int, requeue: bool) -> None:
             self.nacks.append(delivery_tag)
+            self._finish_delivery()
 
         def basic_reject(self, *, delivery_tag: int, requeue: bool) -> None:
             self.nacks.append(delivery_tag)
+            self._finish_delivery()
 
     held_lease = repository.claim(unrelated["id"])
     assert held_lease is not None
     channel = Channel()
     consumer = HistoryConsumer(repository, channel=channel, provider_factory=Provider)
-    from threading import Event
-
-    settled = Event()
-    original_ack = channel.basic_ack
-    original_nack = channel.basic_nack
-
-    def ack(*, delivery_tag: int) -> None:
-        original_ack(delivery_tag=delivery_tag)
-        if len(channel.acks) + len(channel.nacks) == 3:
-            settled.set()
-
-    def nack(*, delivery_tag: int, requeue: bool) -> None:
-        original_nack(delivery_tag=delivery_tag, requeue=requeue)
-        if len(channel.acks) + len(channel.nacks) == 3:
-            settled.set()
-
-    channel.basic_ack = ack
-    channel.basic_nack = nack
     consumer._on_message(
         channel,
         SimpleNamespace(delivery_tag=1),
@@ -227,7 +221,7 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
         None,
         json.dumps({"job_id": unrelated["id"]}).encode(),
     )
-    assert settled.wait(5)
+    assert channel.settled.wait(5)
     consumer.close()
 
     assert sorted(channel.acks + channel.nacks) == [1, 2, 3]
