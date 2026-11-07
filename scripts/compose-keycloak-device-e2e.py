@@ -135,16 +135,19 @@ def _create_temporary_user(
 
 def _allow_browser_origin(base_url: str, admin_token: str, origin: str) -> None:
     url = f"{base_url}/admin/realms/{REALM}/clients"
-    status, clients = _request(f"{url}?clientId={CLIENT_ID}", bearer=admin_token)
+    status, clients = _request(
+        f"{url}?clientId=a500-browser-client", bearer=admin_token
+    )
     if status != 200 or not isinstance(clients, list) or len(clients) != 1:
-        raise RuntimeError("无法查询设备客户端")
+        raise RuntimeError("无法查询浏览器客户端")
     client = clients[0]
     client["webOrigins"] = [origin]
+    client["redirectUris"] = [f"{origin}/"]
     status, _ = _request(
         f"{url}/{client['id']}", bearer=admin_token, method="PUT", json_data=client
     )
     if status != 204:
-        raise RuntimeError(f"无法配置设备客户端浏览器来源: HTTP {status}")
+        raise RuntimeError(f"无法配置浏览器客户端回调地址: HTTP {status}")
 
 
 def _check_browser_login(
@@ -156,23 +159,9 @@ def _check_browser_login(
             page = browser.new_page(ignore_https_errors=https)
             page.goto(gateway_url, wait_until="domcontentloaded", timeout=30000)
             page.get_by_role("button", name="安全连接", exact=True).click()
-            page.locator(".user-code").wait_for(state="visible", timeout=30000)
-            code = page.locator(".user-code").inner_text()
-            with page.expect_popup() as popup_info:
-                page.get_by_role("link", name="打开验证页面").click()
-            popup = popup_info.value
-            popup.wait_for_load_state("domcontentloaded", timeout=30000)
-            code_field = popup.locator("input[name='user_code']")
-            if code_field.count() and code_field.is_visible():
-                code_field.fill(code)
-                popup.locator(
-                    "button[type='submit'], input[type='submit']"
-                ).first.click()
-            popup.locator("input[name='username']").fill(username, timeout=30000)
-            popup.locator("input[name='password']").fill(password)
-            popup.locator("button[type='submit'], input[type='submit']").first.click()
-            popup.locator("#kc-oauth").wait_for(state="visible", timeout=30000)
-            popup.locator("#kc-login").click()
+            page.locator("input[name='username']").fill(username, timeout=30000)
+            page.locator("input[name='password']").fill(password)
+            page.locator("button[type='submit'], input[type='submit']").first.click()
             page.get_by_role("heading", name="实时信号", exact=True).wait_for(
                 state="visible", timeout=90000
             )
