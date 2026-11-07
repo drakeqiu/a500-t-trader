@@ -3,15 +3,17 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import psycopg
+
 from a500_t_trader.cli.main import main
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def test_manual_fill_cli_persists_user_record_separately(
-    tmp_path: Path, capsys: Any
+    postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     result = main(
         [
             "manual-fill",
@@ -43,13 +45,13 @@ def test_manual_fill_cli_persists_user_record_separately(
 
 
 def test_manual_fill_requires_timezone_and_positive_order_values(
-    tmp_path: Path, capsys: Any
+    postgres_url: str, capsys: Any
 ) -> None:
     result = main(
         [
             "manual-fill",
             "--database",
-            str(tmp_path / "invalid.sqlite3"),
+            str(postgres_url),
             "--timestamp",
             "2026-10-30T10:01:00",
             "--symbol",
@@ -67,9 +69,9 @@ def test_manual_fill_requires_timezone_and_positive_order_values(
 
 
 def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     source = tmp_path / "galaxy.csv"
     source.write_bytes(
         (
@@ -90,7 +92,6 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
     assert preview["new"] == 1
     assert preview["duplicates"] == 0
     assert preview["errors"] == 0
-    assert not database.exists()
     assert main(["account-ledger", "--database", str(database)]) == 0
     empty_ledger = json.loads(capsys.readouterr().out)
     assert empty_ledger["imported_fills"] == []
@@ -188,9 +189,9 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
 
 
 def test_galaxy_import_rejects_whole_batch_without_echoing_sensitive_fields(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, postgres_url: str, capsys: Any
 ) -> None:
-    database = tmp_path / "account.sqlite3"
+    database = postgres_url
     source = tmp_path / "invalid.csv"
     header = (
         "成交日期,成交时间,证券代码,证券名称,操作,成交数量,成交均价,成交金额,"
@@ -229,4 +230,5 @@ def test_galaxy_import_rejects_whole_batch_without_echoing_sensitive_fields(
     assert report["error_details"][0]["field"] == "成交数量"
     assert "SECRET_BALANCE" not in output.out + output.err
     assert "SECRET_ACCOUNT" not in output.out + output.err
-    assert not database.exists()
+    with psycopg.connect(database) as db:
+        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)

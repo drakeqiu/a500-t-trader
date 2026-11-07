@@ -152,22 +152,22 @@ python -m a500_t_trader premarket \
   --config strategy.json --account account.json --output plan-2026-10-30.json
 ```
 
-监控仍使用同一 SQLite 证据库。盘后按交易日生成复盘：
+监控仍使用同一 PostgreSQL 证据库。以下命令假定已设置 `A500_DATABASE_URL`；也可使用 `--database` 显式指定 PostgreSQL URL。配置方法见[根 README](../README.md#本地前后端集成)。盘后按交易日生成复盘：
 
 ```bash
 python -m a500_t_trader postmarket \
-  --date 2026-10-30 --plan plan-2026-10-30.json --database signals.sqlite3
+  --date 2026-10-30 --plan plan-2026-10-30.json
 ```
 
-复盘读取该日期保存的盘前建议、SQLite 触发证据，并查询该 ETF 当日可用的规范化 1 分钟历史行情；最后一根可用分钟线仅标作最新可用线，不保证是官方收盘价。输出分别列出账户快照、建议、触发、手工录入成交、Galaxy 导入成交和模拟成交。导入成交按成交时间单独展示，并标记为用户提供、未经系统验证；导入不会更新账户现金、持仓或快照。未提供或不可用的计划、触发证据、历史行情会列入 `missing_data`，不会补造。建议和触发是参考证据，不是订单或成交。
+复盘读取该日期保存的盘前建议、PostgreSQL 触发证据，并查询该 ETF 当日可用的规范化 1 分钟历史行情；最后一根可用分钟线仅标作最新可用线，不保证是官方收盘价。输出分别列出账户快照、建议、触发、手工录入成交、Galaxy 导入成交和模拟成交。导入成交按成交时间单独展示，并标记为用户提供、未经系统验证；导入不会更新账户现金、持仓或快照。未提供或不可用的计划、触发证据、历史行情会列入 `missing_data`，不会补造。建议和触发是参考证据，不是订单或成交。
 
 Galaxy 成交 CSV 首先以预览模式检查，不会创建或修改数据库。文件必须是 GB18030 编码且匹配支持的完整 Galaxy 导出表头。确认后才将有效新成交写入独立的导入成交记录；错误会阻止整批写入，重复成交编号不会重复导入：
 
 ```bash
 python -m a500_t_trader import-fills \
-  --file galaxy-fills.csv --database signals.sqlite3
+  --file galaxy-fills.csv
 python -m a500_t_trader import-fills \
-  --file galaxy-fills.csv --database signals.sqlite3 --confirm
+  --file galaxy-fills.csv --confirm
 ```
 
 导入及复盘不会显示或保存文件中的股东账户、资金余额或原始行。`account-ledger` 可分别查询手工成交和导入成交。
@@ -181,17 +181,16 @@ python -m a500_t_trader backtest \
   --config strategy.json --account account.json --symbol 510300 \
   --start-date 2026-10-01 --end-date 2026-10-31 --interval-minutes 1 \
   --cost-bps 0.5 --minimum-commission 0.1 --slippage-bps 5 \
-  --database backtest.sqlite \
   --confirm-history-persistence-permitted
 ```
 
 历史行情样例可离线查阅，无需连接 AmazingData：`data/market-history/563360_1m_20261030.json` 包含 2026-10-30 全天 242 条 1 分钟记录（上海时间 09:30 至 15:00，含午间休市区间）；`data/market-history/563360_1m_20261102.json` 是 2026-11-02 截至 11:28 的 119 条部分交易日记录。
 
-仅当数据服务条款允许本地保存分钟历史时，才提供最后的确认选项；未确认时程序在查询和写入之前退出。SQLite 共用历史按证券/周期/时间复用；每次回测另存内容寻址的不可变 bar 快照、初始参数、实现版本、费用/滑点假设、模拟成交、策略结果和持有基线。返回的 `run_id` 可用于复核该次记录及其准确输入：
+仅当数据服务条款允许保存分钟历史时，才提供最后的确认选项；未确认时程序在查询和写入之前退出。PostgreSQL 共用历史按证券/周期/时间复用；每次回测另存内容寻址的不可变 bar 快照、初始参数、实现版本、费用/滑点假设、模拟成交、策略结果和持有基线。返回的 `run_id` 可用于复核该次记录及其准确输入：
 
 ```bash
-python -m a500_t_trader backtest-show --database backtest.sqlite --run-id 1
-python -m a500_t_trader history-cleanup --database backtest.sqlite
+python -m a500_t_trader backtest-show --run-id 1
+python -m a500_t_trader history-cleanup
 ```
 
 `backtest-show --latest` 可显示最新运行；`history-cleanup` 只清除可复用的共用历史，不删除回测引用的快照或记录。模拟成交明确标记为非实际成交。本工具不连接券商、不下单，也不提供投资建议。

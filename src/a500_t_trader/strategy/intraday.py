@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import sqlite3
 import sys
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Protocol, TextIO
 from zoneinfo import ZoneInfo
 
+import psycopg
+
+from ..database import initialize_database
 from ..market_data import CapabilityUnavailableError, MinuteBar
 from ..market_data.trading_calendar import SessionState
 from .premarket import MAX_INPUT_AGE, AccountSnapshot, EtfRule, PlanConfig
@@ -39,46 +40,24 @@ class Trigger:
 
 
 class TriggerEvidenceStore:
-    """Append-only local evidence for each rule match and normalized minute bar."""
+    """Append-only evidence for each rule match and normalized minute bar."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as connection:
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS trigger_evidence (
-                    symbol TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    condition TEXT NOT NULL,
-                    bar_timestamp TEXT NOT NULL,
-                    bar_interval_minutes INTEGER NOT NULL,
-                    bar_open TEXT NOT NULL,
-                    bar_high TEXT NOT NULL,
-                    bar_low TEXT NOT NULL,
-                    bar_close TEXT NOT NULL,
-                    bar_volume INTEGER NOT NULL,
-                    bar_amount TEXT,
-                    bar_completed INTEGER NOT NULL,
-                    bar_source TEXT,
-                    session_state TEXT NOT NULL,
-                    evaluated_at TEXT NOT NULL,
-                    risk_or_invalidation TEXT NOT NULL,
-                    account_as_of TEXT NOT NULL,
-                    account_source TEXT NOT NULL,
-                    PRIMARY KEY (symbol, direction, bar_interval_minutes, bar_timestamp)
-                )"""
-            )
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        initialize_database(dsn)
 
     def record(self, trigger: Trigger, session: SessionState) -> bool:
         bar = trigger.bar
-        with sqlite3.connect(self.path) as connection:
+        with psycopg.connect(self.dsn) as connection:
             result = connection.execute(
-                """INSERT OR IGNORE INTO trigger_evidence (
+                """INSERT INTO trigger_evidence (
                     symbol, direction, condition, bar_timestamp,
                     bar_interval_minutes, bar_open, bar_high, bar_low, bar_close,
                     bar_volume, bar_amount, bar_completed, bar_source, session_state,
                     evaluated_at, risk_or_invalidation, account_as_of, account_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
+                          %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING""",
                 (
                     trigger.symbol,
                     trigger.direction,
@@ -210,7 +189,7 @@ def run_monitor(
     config: PlanConfig,
     account: AccountSnapshot,
     market_data: MonitorMarketData,
-    database: str | Path,
+    database: str,
     *,
     poll_seconds: float = 5.0,
     once: bool = False,

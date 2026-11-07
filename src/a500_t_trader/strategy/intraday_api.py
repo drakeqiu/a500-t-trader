@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
+
+import psycopg
 
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
@@ -168,7 +169,7 @@ def evaluate_intraday_strategy(
                     if state_store is not None and isinstance(pair_id, str)
                     else None
                 )
-            except sqlite3.Error, TypeError, ValueError:
+            except psycopg.Error, TypeError, ValueError:
                 persisted_pair = None
             valid_pair = (
                 isinstance(pair_id, str)
@@ -240,7 +241,7 @@ def evaluate_intraday_strategy(
                     max_daily_turnover=max_daily_turnover,
                     min_same_direction_bars=min_same_direction_bars,
                 )
-            except ValueError, TypeError, ArithmeticError, sqlite3.Error:
+            except ValueError, TypeError, ArithmeticError, psycopg.Error:
                 state_reasons = (
                     "persistent strategy state unavailable or unconfigured",
                 )
@@ -350,7 +351,7 @@ def evaluate_intraday_strategy(
                         grid_round,
                     )
                 )
-            except ValueError, TypeError, sqlite3.Error:
+            except ValueError, TypeError, psycopg.Error:
                 reasons.append(
                     "persistent strategy recommendation could not be recorded"
                 )

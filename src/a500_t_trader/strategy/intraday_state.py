@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import psycopg
+from psycopg.rows import dict_row
+
+from ..database import initialize_database
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,105 +72,20 @@ _SETTLED_ORDER_STATES = frozenset({"none", "filled", "cancelled", "rejected"})
 class IntradayStrategyStateStore:
     """Persist advisory strategy state without treating it as account truth."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
-        with sqlite3.connect(self.path) as db:
-            db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS intraday_strategy_state (
-                    symbol TEXT NOT NULL,
-                    session_date TEXT NOT NULL,
-                    grid_version INTEGER NOT NULL,
-                    grid_layer INTEGER NOT NULL,
-                    grid_round INTEGER NOT NULL,
-                    spacing TEXT NOT NULL,
-                    same_direction_bars INTEGER NOT NULL,
-                    cooldown_until TEXT,
-                    reset_anchor_crossings INTEGER NOT NULL,
-                    daily_trade_count INTEGER NOT NULL,
-                    daily_add_count INTEGER NOT NULL,
-                    daily_turnover TEXT NOT NULL,
-                    PRIMARY KEY(symbol, session_date)
-                );
-                CREATE TABLE IF NOT EXISTS strategy_initial_holdings (
-                    symbol TEXT PRIMARY KEY,
-                    record_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS strategy_recommendations (
-                    recommendation_id TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK(side IN ('buy','sell')),
-                    created_at TEXT NOT NULL,
-                    grid_version INTEGER NOT NULL,
-                    grid_layer INTEGER NOT NULL,
-                    grid_round INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS strategy_trade_pairs (
-                    trade_pair_id TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL,
-                    grid_version INTEGER NOT NULL,
-                    buy_fill_id TEXT,
-                    sell_fill_id TEXT,
-                    buy_quantity INTEGER NOT NULL,
-                    sell_quantity INTEGER NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('open','closed'))
-                );
-                CREATE TABLE IF NOT EXISTS strategy_actual_fills (
-                    fill_id TEXT PRIMARY KEY,
-                    recommendation_id TEXT NOT NULL,
-                    trade_pair_id TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK(side IN ('buy','sell')),
-                    quantity INTEGER NOT NULL CHECK(quantity > 0),
-                    price TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    FOREIGN KEY(recommendation_id)
-                        REFERENCES strategy_recommendations(recommendation_id),
-                    FOREIGN KEY(trade_pair_id)
-                        REFERENCES strategy_trade_pairs(trade_pair_id)
-                );
-                CREATE TABLE IF NOT EXISTS consumed_grid_slots (
-                    symbol TEXT NOT NULL,
-                    session_date TEXT NOT NULL,
-                    grid_version INTEGER NOT NULL,
-                    grid_layer INTEGER NOT NULL,
-                    grid_round INTEGER NOT NULL,
-                    side TEXT NOT NULL CHECK(side IN ('buy','sell')),
-                    PRIMARY KEY(
-                        symbol,session_date,grid_version,grid_layer,grid_round,side
-                    )
-                );
-                """
-            )
-            state_columns = {
-                row[1]
-                for row in db.execute("PRAGMA table_info(intraday_strategy_state)")
-            }
-            for name in ("grid_layer", "grid_round"):
-                if name not in state_columns:
-                    db.execute(
-                        f"ALTER TABLE intraday_strategy_state ADD COLUMN {name} "
-                        "INTEGER NOT NULL DEFAULT 0"
-                    )
-            recommendation_columns = {
-                row[1]
-                for row in db.execute("PRAGMA table_info(strategy_recommendations)")
-            }
-            for name in ("grid_layer", "grid_round"):
-                if name not in recommendation_columns:
-                    db.execute(
-                        f"ALTER TABLE strategy_recommendations ADD COLUMN {name} "
-                        "INTEGER NOT NULL DEFAULT 0"
-                    )
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        initialize_database(dsn)
 
     def save_state(self, state: StrategyState) -> None:
         _validate_state(state)
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
+            db.execute("SELECT pg_advisory_xact_lock(500021)")
             db.execute(
                 """INSERT INTO intraday_strategy_state (
                     symbol,session_date,grid_version,grid_layer,grid_round,spacing,
                     same_direction_bars,cooldown_until,reset_anchor_crossings,
                     daily_trade_count,daily_add_count,daily_turnover
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(symbol,session_date) DO UPDATE SET
                     grid_version=excluded.grid_version,
                     grid_layer=excluded.grid_layer,
@@ -196,12 +114,12 @@ class IntradayStrategyStateStore:
             )
 
     def state(self, symbol: str, session_date: date) -> StrategyState | None:
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
             row = db.execute(
                 """SELECT symbol,session_date,grid_version,grid_layer,grid_round,
                     spacing,same_direction_bars,cooldown_until,reset_anchor_crossings,
                     daily_trade_count,daily_add_count,daily_turnover
-                    FROM intraday_strategy_state WHERE symbol=? AND session_date=?""",
+                    FROM intraday_strategy_state WHERE symbol=%s AND session_date=%s""",
                 (symbol, session_date.isoformat()),
             ).fetchone()
         if row is None:
@@ -231,17 +149,18 @@ class IntradayStrategyStateStore:
             "total_quantity": holdings.total_quantity,
             "sellable_quantity": holdings.sellable_quantity,
         }
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
+            db.execute("SELECT pg_advisory_xact_lock(500021)")
             db.execute(
-                "INSERT INTO strategy_initial_holdings VALUES(?,?) "
+                "INSERT INTO strategy_initial_holdings VALUES(%s,%s) "
                 "ON CONFLICT(symbol) DO UPDATE SET record_json=excluded.record_json",
                 (holdings.symbol, json.dumps(payload, separators=(",", ":"))),
             )
 
     def initial_holdings(self, symbol: str) -> InitialHoldings | None:
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
             row = db.execute(
-                "SELECT record_json FROM strategy_initial_holdings WHERE symbol=?",
+                "SELECT record_json FROM strategy_initial_holdings WHERE symbol=%s",
                 (symbol,),
             ).fetchone()
         if row is None:
@@ -298,11 +217,11 @@ class IntradayStrategyStateStore:
             return tuple(reasons)
         if state.grid_version != grid_version:
             reasons.append("grid version mismatch")
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
             used = db.execute(
                 """SELECT 1 FROM consumed_grid_slots
-                WHERE symbol=? AND session_date=? AND grid_version=?
-                    AND grid_layer=? AND grid_round=? AND side=?""",
+                WHERE symbol=%s AND session_date=%s AND grid_version=%s
+                    AND grid_layer=%s AND grid_round=%s AND side=%s""",
                 (
                     symbol,
                     session_date.isoformat(),
@@ -343,11 +262,11 @@ class IntradayStrategyStateStore:
                 "recommendation id, symbol and non-negative grid coordinates "
                 "are required"
             )
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
             db.execute(
-                """INSERT OR IGNORE INTO strategy_recommendations (
+                """INSERT INTO strategy_recommendations (
                     recommendation_id,symbol,side,created_at,grid_version,grid_layer,grid_round
-                ) VALUES(?,?,?,?,?,?,?)""",
+                ) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                 (
                     recommendation.recommendation_id,
                     recommendation.symbol,
@@ -372,9 +291,10 @@ class IntradayStrategyStateStore:
         _validate_side(side)
         if not symbol.strip() or grid_version < 1 or grid_layer < 0 or grid_round < 0:
             raise ValueError("symbol and non-negative grid coordinates are required")
-        with sqlite3.connect(self.path) as db:
+        with psycopg.connect(self.dsn) as db:
             cursor = db.execute(
-                "INSERT OR IGNORE INTO consumed_grid_slots VALUES(?,?,?,?,?,?)",
+                "INSERT INTO consumed_grid_slots VALUES(%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT DO NOTHING",
                 (
                     symbol,
                     session_date.isoformat(),
@@ -415,11 +335,11 @@ class IntradayStrategyStateStore:
                 "fill id, pair id, positive quantity and price are required"
             )
         session_date = fill.timestamp.astimezone(ZoneInfo("Asia/Shanghai")).date()
-        with sqlite3.connect(self.path) as db:
-            db.execute("PRAGMA foreign_keys=ON")
+        with psycopg.connect(self.dsn) as db:
+            db.execute("SELECT pg_advisory_xact_lock(500021)")
             recommendation = db.execute(
                 "SELECT symbol,side,grid_version,grid_layer,grid_round "
-                "FROM strategy_recommendations WHERE recommendation_id=?",
+                "FROM strategy_recommendations WHERE recommendation_id=%s",
                 (fill.recommendation_id,),
             ).fetchone()
             if recommendation is None:
@@ -428,7 +348,8 @@ class IntradayStrategyStateStore:
             if side != fill.side:
                 raise ValueError("fill side must match its recommendation")
             consumed = db.execute(
-                "INSERT OR IGNORE INTO consumed_grid_slots VALUES(?,?,?,?,?,?)",
+                "INSERT INTO consumed_grid_slots VALUES(%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT DO NOTHING",
                 (
                     symbol,
                     session_date.isoformat(),
@@ -443,14 +364,14 @@ class IntradayStrategyStateStore:
             pair = db.execute(
                 "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,buy_quantity,"
                 "sell_quantity "
-                "FROM strategy_trade_pairs WHERE trade_pair_id=?",
+                "FROM strategy_trade_pairs WHERE trade_pair_id=%s",
                 (fill.trade_pair_id,),
             ).fetchone()
             if pair is None:
                 if fill.side == "buy":
                     db.execute(
                         "INSERT INTO strategy_trade_pairs "
-                        "VALUES(?,?,?,?,NULL,?,0,'open')",
+                        "VALUES(%s,%s,%s,%s,NULL,%s,0,'open')",
                         (
                             fill.trade_pair_id,
                             symbol,
@@ -462,7 +383,7 @@ class IntradayStrategyStateStore:
                 else:
                     holdings_row = db.execute(
                         "SELECT record_json FROM strategy_initial_holdings "
-                        "WHERE symbol=?",
+                        "WHERE symbol=%s",
                         (symbol,),
                     ).fetchone()
                     if holdings_row is None:
@@ -474,21 +395,22 @@ class IntradayStrategyStateStore:
                     allocated = db.execute(
                         "SELECT COALESCE(SUM(p.sell_quantity),0) "
                         "FROM strategy_trade_pairs p "
-                        "WHERE p.symbol=? AND EXISTS ("
+                        "WHERE p.symbol=%s AND EXISTS ("
                         "SELECT 1 FROM strategy_actual_fills first_fill "
                         "WHERE first_fill.trade_pair_id=p.trade_pair_id "
                         "AND first_fill.side='sell' "
                         "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
                         "WHERE earlier.trade_pair_id=p.trade_pair_id "
-                        "AND earlier.rowid<first_fill.rowid))",
+                        "AND earlier.fill_sequence<first_fill.fill_sequence))",
                         (symbol,),
-                    ).fetchone()[0]
+                    ).fetchall()[0][0]
                     if allocated + fill.quantity > sellable_quantity:
                         raise ValueError(
                             "sell fill exceeds unallocated initial sellable inventory"
                         )
                     db.execute(
-                        "INSERT INTO strategy_trade_pairs VALUES(?,?,?,?,?,?,?,'open')",
+                        "INSERT INTO strategy_trade_pairs "
+                        "VALUES(%s,%s,%s,%s,%s,%s,%s,'open')",
                         (
                             fill.trade_pair_id,
                             symbol,
@@ -507,8 +429,8 @@ class IntradayStrategyStateStore:
                     if sell_fill is None and buy_fill is not None:
                         db.execute(
                             "UPDATE strategy_trade_pairs "
-                            "SET buy_quantity=buy_quantity+? "
-                            "WHERE trade_pair_id=?",
+                            "SET buy_quantity=buy_quantity+%s "
+                            "WHERE trade_pair_id=%s",
                             (fill.quantity, fill.trade_pair_id),
                         )
                     else:
@@ -519,10 +441,10 @@ class IntradayStrategyStateStore:
                             )
                         db.execute(
                             "UPDATE strategy_trade_pairs "
-                            "SET buy_fill_id=COALESCE(buy_fill_id,?),"
-                            "buy_quantity=buy_quantity+?,"
-                            "status=CASE WHEN buy_quantity+?=sell_quantity "
-                            "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=?",
+                            "SET buy_fill_id=COALESCE(buy_fill_id,%s),"
+                            "buy_quantity=buy_quantity+%s,"
+                            "status=CASE WHEN buy_quantity+%s=sell_quantity "
+                            "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=%s",
                             (
                                 fill.fill_id,
                                 fill.quantity,
@@ -544,7 +466,7 @@ class IntradayStrategyStateStore:
                             )
                         holdings_row = db.execute(
                             "SELECT record_json FROM strategy_initial_holdings "
-                            "WHERE symbol=?",
+                            "WHERE symbol=%s",
                             (symbol,),
                         ).fetchone()
                         if holdings_row is None:
@@ -558,16 +480,16 @@ class IntradayStrategyStateStore:
                         allocated = db.execute(
                             "SELECT COALESCE(SUM(p.sell_quantity),0) "
                             "FROM strategy_trade_pairs p "
-                            "WHERE p.symbol=? AND p.trade_pair_id<>? AND EXISTS ("
+                            "WHERE p.symbol=%s AND p.trade_pair_id<>%s AND EXISTS ("
                             "SELECT 1 FROM strategy_actual_fills first_fill "
                             "WHERE first_fill.trade_pair_id=p.trade_pair_id "
                             "AND first_fill.side='sell' "
                             "AND NOT EXISTS (SELECT 1 FROM "
                             "strategy_actual_fills earlier "
                             "WHERE earlier.trade_pair_id=p.trade_pair_id "
-                            "AND earlier.rowid<first_fill.rowid))",
+                            "AND earlier.fill_sequence<first_fill.fill_sequence))",
                             (symbol, fill.trade_pair_id),
-                        ).fetchone()[0]
+                        ).fetchall()[0][0]
                         if allocated + sell_qty + fill.quantity > sellable_quantity:
                             raise ValueError(
                                 "sell fill exceeds unallocated initial "
@@ -575,10 +497,10 @@ class IntradayStrategyStateStore:
                             )
                     db.execute(
                         "UPDATE strategy_trade_pairs "
-                        "SET sell_fill_id=COALESCE(sell_fill_id,?),"
-                        "sell_quantity=sell_quantity+?,"
-                        "status=CASE WHEN buy_quantity=sell_quantity+? "
-                        "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=?",
+                        "SET sell_fill_id=COALESCE(sell_fill_id,%s),"
+                        "sell_quantity=sell_quantity+%s,"
+                        "status=CASE WHEN buy_quantity=sell_quantity+%s "
+                        "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=%s",
                         (
                             fill.fill_id,
                             fill.quantity,
@@ -587,7 +509,10 @@ class IntradayStrategyStateStore:
                         ),
                     )
             db.execute(
-                "INSERT INTO strategy_actual_fills VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO strategy_actual_fills "
+                "(fill_id,recommendation_id,trade_pair_id,side,quantity,price,"
+                "timestamp) "
+                "VALUES(%s,%s,%s,%s,%s,%s,%s)",
                 (
                     fill.fill_id,
                     fill.recommendation_id,
@@ -600,7 +525,7 @@ class IntradayStrategyStateStore:
             )
             existing = db.execute(
                 "SELECT daily_turnover FROM intraday_strategy_state "
-                "WHERE symbol=? AND session_date=?",
+                "WHERE symbol=%s AND session_date=%s",
                 (symbol, session_date.isoformat()),
             ).fetchone()
             if existing is not None:
@@ -608,9 +533,9 @@ class IntradayStrategyStateStore:
                 cooldown_until = fill.timestamp + timedelta(minutes=cooldown_minutes)
                 db.execute(
                     """UPDATE intraday_strategy_state SET same_direction_bars=0,
-                        cooldown_until=?,daily_trade_count=daily_trade_count+1,
-                        daily_add_count=daily_add_count+?,daily_turnover=?
-                    WHERE symbol=? AND session_date=?""",
+                        cooldown_until=%s,daily_trade_count=daily_trade_count+1,
+                        daily_add_count=daily_add_count+%s,daily_turnover=%s
+                    WHERE symbol=%s AND session_date=%s""",
                     (
                         _timestamp(cooldown_until),
                         int(fill.side == "buy"),
@@ -623,8 +548,7 @@ class IntradayStrategyStateStore:
         return True
 
     def trade_pairs(self) -> list[dict[str, object]]:
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(self.dsn, row_factory=dict_row) as db:
             rows = db.execute(
                 "SELECT trade_pair_id,symbol,grid_version,buy_fill_id,"
                 "sell_fill_id,status "
@@ -636,12 +560,11 @@ class IntradayStrategyStateStore:
         """Return persisted fill linkage and outstanding quantities for one pair."""
         if not isinstance(trade_pair_id, str) or not trade_pair_id.strip():
             return None
-        with sqlite3.connect(self.path) as db:
-            db.row_factory = sqlite3.Row
+        with psycopg.connect(self.dsn, row_factory=dict_row) as db:
             row = db.execute(
                 """SELECT trade_pair_id,symbol,grid_version,buy_fill_id,sell_fill_id,
                     buy_quantity,sell_quantity,status
-                FROM strategy_trade_pairs WHERE trade_pair_id=?""",
+                FROM strategy_trade_pairs WHERE trade_pair_id=%s""",
                 (trade_pair_id,),
             ).fetchone()
         return None if row is None else dict(row)

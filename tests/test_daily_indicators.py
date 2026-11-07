@@ -1,7 +1,6 @@
 import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -45,7 +44,7 @@ def test_indicators_reject_duplicate_or_out_of_order_daily_observations() -> Non
 
 
 def test_daily_indicators_cli_returns_calculated_values(
-    tmp_path: Path, capsys: Any
+    capsys: Any, postgres_url: str
 ) -> None:
     class DailyData:
         def get_daily_history(
@@ -55,7 +54,6 @@ def test_daily_indicators_cli_returns_calculated_values(
             assert (start_date, end_date) == (date(2026, 1, 1), date(2026, 1, 21))
             return _bars([str(value) for value in range(1, 22)])
 
-    database = tmp_path / "history.sqlite3"
     args = [
         "daily-indicators",
         "--symbol",
@@ -65,7 +63,7 @@ def test_daily_indicators_cli_returns_calculated_values(
         "--end-date",
         "2026-01-21",
         "--database",
-        str(database),
+        postgres_url,
         "--confirm-history-persistence-permitted",
     ]
     assert main(args, market_data=DailyData()) == 0

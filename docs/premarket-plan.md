@@ -69,35 +69,35 @@ python -m a500_t_trader premarket \
   --config strategy.json --account account.json --output plan-2026-10-30.json
 ```
 
-使用 `monitor` 时将 `--database` 指向需复用的同一触发证据库。收盘后运行：
+使用 `monitor` 时将 `--database` 指向需复用的同一 PostgreSQL 数据库 URL，或设置 `A500_DATABASE_URL` 并省略该选项。以下例子使用已配置的 `A500_DATABASE_URL`；配置方法见[根 README](../README.md#本地前后端集成)。收盘后运行：
 
 ```bash
 python -m a500_t_trader postmarket \
-  --date 2026-10-30 --plan plan-2026-10-30.json --database signals.sqlite3
+  --date 2026-10-30 --plan plan-2026-10-30.json
 ```
 
-`--date` 必须与保存计划的交易日相同。JSON 复盘单独呈现盘前建议、用户录入且非券商验证的账户快照、监控触发证据、手工录入成交和模拟成交；建议不会转成订单。手工成交可通过 `manual-fill` 写入同一 SQLite 证据库，账户快照可使用 `account-snapshot` 持久化，且复盘会读取当天最新快照及手工成交；未记录的类别显示为 `not recorded`，不推断已执行。按计划 ETF 查询当日历史 1 分钟线；若数据源没有该能力、没有可用数据、没有对应触发库/记录或保存计划不匹配，`missing_data` 会说明缺项。最后一根历史分钟线不保证是官方收盘价。
+`--date` 必须与保存计划的交易日相同。JSON 复盘单独呈现盘前建议、用户录入且非券商验证的账户快照、监控触发证据、手工录入成交和模拟成交；建议不会转成订单。手工成交可通过 `manual-fill` 写入同一 PostgreSQL 证据库，账户快照可使用 `account-snapshot` 持久化，且复盘会读取当天最新快照及手工成交；未记录的类别显示为 `not recorded`，不推断已执行。按计划 ETF 查询当日历史 1 分钟线；若数据源没有该能力、没有可用数据、没有对应触发库/记录或保存计划不匹配，`missing_data` 会说明缺项。最后一根历史分钟线不保证是官方收盘价。
 账户快照及手工成交的独立录入命令：
 
 ```bash
-python -m a500_t_trader account-snapshot --account account.json --database signals.sqlite3
+python -m a500_t_trader account-snapshot --account account.json
 python -m a500_t_trader manual-fill --timestamp 2026-10-30T10:02:00+08:00 \
-  --symbol 510300 --side buy --quantity 100 --price 3.80 --database signals.sqlite3
-python -m a500_t_trader account-ledger --database signals.sqlite3
+  --symbol 510300 --side buy --quantity 100 --price 3.80
+python -m a500_t_trader account-ledger
 ```
 
 ## 用户启动盘中监控
 
-监控只在用户前台启动的进程中运行。提供本地账户快照、规则配置及用于保存触发证据的 SQLite 路径：
+监控只在用户前台启动的进程中运行。提供本地账户快照、规则配置及用于保存触发证据的 PostgreSQL 数据库连接：
 
 ```bash
 python -m a500_t_trader monitor \
-  --config strategy.json --account account.json --database signals.sqlite3
+  --config strategy.json --account account.json
 ```
 
 监控默认每 5 秒查询一次各规则 ETF 的规范化 1 分钟线，按交易日历状态决定是否评估。每轮仅检查最新的已完成分钟线和最新的未完成分钟线，不回放当天较早的历史触发。`buy_below` 在分钟线最低价达到或低于阈值时触发；`sell_above` 在最高价达到或高于阈值时触发。监控会标示未完成分钟线产生的提醒为暂定，并与已完成分钟线分别记录。提醒包含方向、条件、行情时间和风险/失效信息，并明确标注不是订单；不计算或显示可交易数量，也不执行交易。
 
-每次触发会写入 SQLite 的 `trigger_evidence` 表，保存规则条件、规范化分钟线 OHLC/成交量/成交额、来源、交易日状态、评估时间、完成状态、风险说明及用户输入的账户快照时间和来源。证据保留账户快照时间以便区分账户输入与行情信号；不会将账户快照、手工录入成交或模拟成交合并为建议或触发记录。同一证券、方向、周期和分钟时间的同一触发不会重复保存。
+每次触发会写入 PostgreSQL 的 `trigger_evidence` 表，保存规则条件、规范化分钟线 OHLC/成交量/成交额、来源、交易日状态、评估时间、完成状态、风险说明及用户输入的账户快照时间和来源。证据保留账户快照时间以便区分账户输入与行情信号；不会将账户快照、手工录入成交或模拟成交合并为建议或触发记录。同一证券、方向、周期和分钟时间的同一触发不会重复保存。
 
 按 `Ctrl-C` 停止当前监控进程；进程退出后不再监控。用 `--once` 只运行一轮后退出，可用于手动检查数据能力、提醒及证据持久化；用 `--poll-seconds N` 指定正数轮询间隔。交易日历未知/过期、分钟线能力不可用/未授权或无分钟线时会明确报告，且不会伪造行情或数量建议。
 
@@ -107,9 +107,9 @@ python -m a500_t_trader monitor \
 
 ```bash
 python -m a500_t_trader daily-history --symbol 510300 \
-  --start-date 2026-10-01 --end-date 2026-10-30 --database history.sqlite3 \
+  --start-date 2026-10-01 --end-date 2026-10-30 \
   --confirm-history-persistence-permitted
 python -m a500_t_trader daily-indicators --symbol 510300 \
-  --start-date 2026-10-01 --end-date 2026-10-30 --database history.sqlite3 \
+  --start-date 2026-10-01 --end-date 2026-10-30 \
   --confirm-history-persistence-permitted
 ```

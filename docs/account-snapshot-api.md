@@ -6,7 +6,7 @@
 
 格式错误或非标准 JSON（包括 `NaN`、`Infinity`）返回 `400 application/problem+json`；合法 JSON 但不符合快照契约返回 `422 application/problem+json`。错误响应的 `errors` 数组提供稳定的 `path` 和 `code`，例如 `{"path":"holdings.510300","code":"invalid_quantity"}`。校验失败不会修改当前快照或追加历史记录。成功响应保留规范化证券 key，并包含 `user-entered; not broker-verified` classification。
 
-首次创建必须带 `If-None-Match: *`，成功返回 `201` 和 `ETag`。资源已存在时必须带当前响应的 `If-Match`；匹配时替换成功返回 `200` 和新的 `ETag`。已有资源但缺少 `If-Match`、或新建时缺少 `If-None-Match`，返回 `428`；当前资源缺失/旧 ETag 或创建前置条件不匹配，返回 `412`。每次成功写入都在与当前状态同一个 SQLite 事务中追加内部历史记录；失败写入不产生历史。没有删除或历史查询路由。
+首次创建必须带 `If-None-Match: *`，成功返回 `201` 和 `ETag`。资源已存在时必须带当前响应的 `If-Match`；匹配时替换成功返回 `200` 和新的 `ETag`。已有资源但缺少 `If-Match`、或新建时缺少 `If-None-Match`，返回 `428`；当前资源缺失/旧 ETag 或创建前置条件不匹配，返回 `412`。每次成功写入都在与当前状态同一个 PostgreSQL 事务中追加内部历史记录；失败写入不产生历史。没有删除或历史查询路由。
 
 身份只来自 OIDC Bearer JWT 的已验证 `sub`；不接受客户端用户或账户标识作为 ownership。
 
@@ -16,10 +16,10 @@
 A500_OIDC_ISSUER=https://identity.example.internal/
 A500_OIDC_AUDIENCE=a500-api
 A500_OIDC_JWKS_URI=https://identity.example.internal/.well-known/jwks.json
-A500_ACCOUNT_DATABASE=/var/lib/a500/accounts.sqlite3
+A500_DATABASE_URL=postgresql://a500:password@127.0.0.1:5432/a500
 ```
 
-未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需将 SQLite 数据库放在持久化、受限访问的存储中；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `account-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/api/v1/account-*`、`/api/v1/trade-imports` 至账户 API。测试可通过 `create_app(database, authenticator, market_data=...)` 使用临时数据库、确定性身份验证替身及可控行情服务。
+未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需保护 PostgreSQL 凭据并使用持久化、受限访问的数据库；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `postgres-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/api/v1/account-*`、`/api/v1/trade-imports` 至账户 API。测试可通过 `create_app(database, authenticator, market_data=...)` 使用独立数据库、确定性身份验证替身及可控行情服务。
 
 本地前后端真实集成使用 [根 README 启动器](../README.md#本地前后端集成)；浏览器与直接 API 调用均通过 `http://localhost:8080/api/v1/*` 访问 Nginx gateway，旧 `/v1/*` 网关路径不再提供。该代理不增加账户业务逻辑。前端使用页面内存 access token，刷新/失效后重新设备授权；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
 

@@ -1,7 +1,7 @@
 """Explicit browser-test fixtures around the real account and signal HTTP routes.
 
 Not a live IdP or market feed: device authorization and Redis are deterministic
-fixtures. SQLite and tokens exist only for this loopback process's lifetime.
+fixtures. PostgreSQL test data and tokens exist only for this process's lifetime.
 Run only through Playwright, or: uv run python scripts/frontend-integration-fixture.py
 --test-mode --port 38100. There is no production configuration fallback.
 """
@@ -14,16 +14,18 @@ import contextlib
 import html
 import os
 import secrets
-import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import fakeredis.aioredis
+import psycopg
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from psycopg import sql
 
 from a500_t_trader.account_snapshot_api import create_app as create_account_app
 from a500_t_trader.signal_monitor import STREAM_KEY
@@ -32,7 +34,27 @@ from a500_t_trader.strategy.intraday_v1_config import LiveSignalConfig
 
 
 def create_fixture(port: int) -> FastAPI:
-    temporary = tempfile.TemporaryDirectory(prefix="a500-browser-fixture-")
+    base_url = os.environ.get("A500_TEST_DATABASE_URL")
+    if not base_url:
+        raise RuntimeError(
+            "A500_TEST_DATABASE_URL must point to a PostgreSQL test database"
+        )
+    parts = urlsplit(base_url)
+    if parts.scheme not in ("postgres", "postgresql"):
+        raise ValueError("A500_TEST_DATABASE_URL must be a PostgreSQL URL")
+    schema = "a500_browser_" + uuid.uuid4().hex
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    options = [value for key, value in params if key == "options"]
+    params = [(key, value) for key, value in params if key != "options"]
+    params.append(("options", " ".join([*options, f"-csearch_path={schema}"])))
+    database_url = urlunsplit(parts._replace(query=urlencode(params)))
+    with psycopg.connect(base_url, autocommit=True) as db:
+        db.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+
+    def drop_schema() -> None:
+        with psycopg.connect(base_url, autocommit=True) as db:
+            db.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     tokens: dict[str, str] = {}
     devices: dict[str, dict[str, str]] = {}
@@ -45,17 +67,23 @@ def create_fixture(port: int) -> FastAPI:
             raise ValueError("Unknown fixture bearer token")
         return tokens[token]
 
-    account = create_account_app(
-        Path(temporary.name) / "accounts.sqlite3", authenticate, market_data=None
-    )
-    signals = create_signal_app(redis, config, authenticator=authenticate)
-    store = signals.state.signal_store
+    try:
+        account = create_account_app(database_url, authenticate, market_data=None)
+        signals = create_signal_app(redis, config, authenticator=authenticate)
+        store = signals.state.signal_store
+    except BaseException:
+        drop_schema()
+        raise
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        yield
-        await redis.aclose()
-        temporary.cleanup()
+        try:
+            yield
+        finally:
+            try:
+                await redis.aclose()
+            finally:
+                drop_schema()
 
     app = FastAPI(title="Explicit A500 browser-test fixture", lifespan=lifespan)
     app.add_middleware(

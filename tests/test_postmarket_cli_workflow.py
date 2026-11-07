@@ -59,7 +59,7 @@ class Data:
 
 
 def test_recorded_fixture_premarket_then_postmarket_is_advisory(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, capsys: Any, postgres_url: str
 ) -> None:
     fixture = json.loads(
         (
@@ -139,7 +139,7 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     plan_file = tmp_path / "plan.json"
-    database = tmp_path / "review.sqlite3"
+    database = postgres_url
     config.write_text(
         '{"etfs":[{"symbol":"563360","buy_below":"1.10",'
         '"max_buy_cash":"10000","minimum_holding":100}]}',
@@ -209,12 +209,12 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
 
 
 def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, capsys: Any, postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"
     plan_file = tmp_path / "plan.json"
-    database = tmp_path / "signals.sqlite3"
+    database = postgres_url
     config.write_text(
         '{"etfs":[{"symbol":"510300","buy_below":"3.85",'
         '"max_buy_cash":"4000","minimum_holding":100}]}',
@@ -320,10 +320,10 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
 
 
 def test_postmarket_reports_missing_plan_trigger_and_market_data(
-    tmp_path: Path, capsys: Any
+    tmp_path: Path, capsys: Any, postgres_url: str
 ) -> None:
     plan_file = tmp_path / "plan.json"
-    database = tmp_path / "signals.sqlite3"
+    database = postgres_url
     assert (
         main(
             [
@@ -346,10 +346,10 @@ def test_postmarket_reports_missing_plan_trigger_and_market_data(
     assert any("market" in item.lower() for item in review["missing_data"])
 
 
-def test_postmarket_reads_snapshot_and_manual_fill_from_sqlite(
-    tmp_path: Path, capsys: Any
+def test_postmarket_reads_snapshot_and_manual_fill_from_postgres(
+    tmp_path: Path, capsys: Any, postgres_url: str
 ) -> None:
-    database = tmp_path / "evidence.sqlite3"
+    database = postgres_url
     plan_file = tmp_path / "plan.json"
     config = tmp_path / "rules.json"
     account = tmp_path / "account.json"

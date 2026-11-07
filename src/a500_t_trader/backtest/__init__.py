@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime
 from decimal import ROUND_DOWN, Decimal
-from pathlib import Path
 from typing import Protocol
 
+import psycopg
+
+from ..database import initialize_database
 from ..market_data import DailyBar, MinuteBar
 from ..strategy.premarket import AccountSnapshot, PlanConfig
 from .certification import (
@@ -324,43 +325,11 @@ def snapshot_digest(bars: tuple[MinuteBar, ...]) -> str:
 
 
 class BacktestRepository:
-    """SQLite-backed shared history and immutable snapshots for backtest evidence."""
+    """PostgreSQL-backed shared history and immutable backtest snapshots."""
 
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
-        with self._connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS shared_bars (
-                    symbol TEXT NOT NULL, interval_minutes INTEGER NOT NULL,
-                    timestamp TEXT NOT NULL, bar_json TEXT NOT NULL,
-                    PRIMARY KEY (symbol, interval_minutes, timestamp)
-                );
-                CREATE TABLE IF NOT EXISTS shared_history_ranges (
-                    symbol TEXT NOT NULL, interval_minutes INTEGER NOT NULL,
-                    start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-                    PRIMARY KEY (symbol, interval_minutes, start_date, end_date)
-                );
-                CREATE TABLE IF NOT EXISTS minute_snapshots (
-                    snapshot_id TEXT PRIMARY KEY, bars_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS backtests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    snapshot_id TEXT NOT NULL REFERENCES minute_snapshots(snapshot_id),
-                    result_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS shared_daily_bars (
-                    symbol TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    bar_json TEXT NOT NULL,
-                    PRIMARY KEY (symbol, timestamp)
-                );
-                CREATE TABLE IF NOT EXISTS shared_daily_history_ranges (
-                    symbol TEXT NOT NULL,
-                    start_date TEXT NOT NULL,
-                    end_date TEXT NOT NULL,
-                    PRIMARY KEY (symbol, start_date, end_date)
-                );
-            """)
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+        initialize_database(dsn)
 
     def save(
         self, bars: tuple[MinuteBar, ...], result: BacktestResult
@@ -370,10 +339,10 @@ class BacktestRepository:
         if digest != result.snapshot_id:
             raise ValueError("result snapshot does not match supplied minute bars")
         with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
                 db.execute(
-                    "INSERT INTO shared_bars VALUES (?, ?, ?, ?) "
+                    "INSERT INTO shared_bars VALUES (%s, %s, %s, %s) "
                     "ON CONFLICT(symbol, interval_minutes, timestamp) DO UPDATE SET "
                     "bar_json=excluded.bar_json",
                     (
@@ -384,7 +353,8 @@ class BacktestRepository:
                     ),
                 )
             db.execute(
-                "INSERT OR IGNORE INTO shared_history_ranges VALUES (?, ?, ?, ?)",
+                "INSERT INTO shared_history_ranges VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT DO NOTHING",
                 (
                     result.symbol,
                     result.interval_minutes,
@@ -393,19 +363,19 @@ class BacktestRepository:
                 ),
             )
             db.execute(
-                "INSERT OR IGNORE INTO minute_snapshots VALUES (?, ?)",
+                "INSERT INTO minute_snapshots VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (digest, content),
             )
             cursor = db.execute(
-                "INSERT INTO backtests(snapshot_id, result_json) VALUES (?, '')",
+                "INSERT INTO backtests(snapshot_id, result_json) "
+                "VALUES (%s, '') RETURNING id",
                 (digest,),
             )
-            lastrowid = cursor.lastrowid
-            if lastrowid is None:
-                raise TypeError("SQLite insert did not return a row id")
-            result = replace(result, run_id=lastrowid)
+            row = cursor.fetchone()
+            assert row is not None
+            result = replace(result, run_id=row[0])
             db.execute(
-                "UPDATE backtests SET result_json=? WHERE id=?",
+                "UPDATE backtests SET result_json=%s WHERE id=%s",
                 (_json(asdict(result)), result.run_id),
             )
         return result
@@ -414,9 +384,10 @@ class BacktestRepository:
         self, symbol: str, start_date: date, end_date: date, interval_minutes: int
     ) -> tuple[MinuteBar, ...] | None:
         with self._connect() as db:
+            db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
             covered = db.execute(
-                "SELECT 1 FROM shared_history_ranges WHERE symbol=? "
-                "AND interval_minutes=? AND start_date=? AND end_date=?",
+                "SELECT 1 FROM shared_history_ranges WHERE symbol=%s "
+                "AND interval_minutes=%s AND start_date=%s AND end_date=%s",
                 (
                     symbol,
                     interval_minutes,
@@ -427,8 +398,8 @@ class BacktestRepository:
             if covered is None:
                 return None
             rows = db.execute(
-                "SELECT bar_json FROM shared_bars WHERE symbol=? "
-                "AND interval_minutes=? AND timestamp>=? AND timestamp<? "
+                "SELECT bar_json FROM shared_bars WHERE symbol=%s "
+                "AND interval_minutes=%s AND timestamp>=%s AND timestamp<%s "
                 "ORDER BY timestamp",
                 (
                     symbol,
@@ -445,18 +416,18 @@ class BacktestRepository:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
         with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
                 db.execute(
-                    "INSERT INTO shared_daily_bars VALUES (?, ?, ?) "
+                    "INSERT INTO shared_daily_bars VALUES (%s, %s, %s) "
                     "ON CONFLICT(symbol, timestamp) "
                     "DO UPDATE SET bar_json=excluded.bar_json",
                     (bar.symbol, bar.timestamp.isoformat(), _daily_bar_json(bar)),
                 )
             if bars:
                 db.execute(
-                    "INSERT OR IGNORE INTO shared_daily_history_ranges "
-                    "VALUES (?, ?, ?)",
+                    "INSERT INTO shared_daily_history_ranges "
+                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                     (bars[0].symbol, start_date.isoformat(), end_date.isoformat()),
                 )
 
@@ -464,16 +435,17 @@ class BacktestRepository:
         self, symbol: str, start_date: date, end_date: date
     ) -> tuple[DailyBar, ...] | None:
         with self._connect() as db:
+            db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
             covered = db.execute(
-                "SELECT 1 FROM shared_daily_history_ranges WHERE symbol=? "
-                "AND start_date=? AND end_date=?",
+                "SELECT 1 FROM shared_daily_history_ranges WHERE symbol=%s "
+                "AND start_date=%s AND end_date=%s",
                 (symbol, start_date.isoformat(), end_date.isoformat()),
             ).fetchone()
             if covered is None:
                 return None
             rows = db.execute(
-                "SELECT bar_json FROM shared_daily_bars WHERE symbol=? "
-                "AND timestamp>=? AND timestamp<? ORDER BY timestamp",
+                "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
+                "AND timestamp>=%s AND timestamp<%s ORDER BY timestamp",
                 (
                     symbol,
                     start_date.isoformat(),
@@ -484,11 +456,13 @@ class BacktestRepository:
 
     def cleanup_shared_history(self) -> int:
         with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            count = (
-                db.execute("SELECT count(*) FROM shared_bars").fetchone()[0]
-                + db.execute("SELECT count(*) FROM shared_daily_bars").fetchone()[0]
-            )
+            db.execute("SELECT pg_advisory_xact_lock(500001)")
+            minute_count = db.execute("SELECT count(*) FROM shared_bars").fetchone()
+            daily_count = db.execute(
+                "SELECT count(*) FROM shared_daily_bars"
+            ).fetchone()
+            assert minute_count is not None and daily_count is not None
+            count = minute_count[0] + daily_count[0]
             db.execute("DELETE FROM shared_bars")
             db.execute("DELETE FROM shared_daily_bars")
             db.execute("DELETE FROM shared_daily_history_ranges")
@@ -508,7 +482,7 @@ class BacktestRepository:
             else:
                 row = db.execute(
                     "SELECT result_json, bars_json FROM backtests "
-                    "JOIN minute_snapshots USING(snapshot_id) WHERE id=?",
+                    "JOIN minute_snapshots USING(snapshot_id) WHERE id=%s",
                     (run_id,),
                 ).fetchone()
         if row is None:
@@ -517,10 +491,8 @@ class BacktestRepository:
         result["bars"] = json.loads(row[1])
         return result
 
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path)
-        db.execute("PRAGMA foreign_keys = ON")
-        return db
+    def _connect(self) -> psycopg.Connection:
+        return psycopg.connect(self.dsn)
 
 
 def _daily_bar_json(bar: DailyBar) -> str:

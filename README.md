@@ -20,9 +20,11 @@
 
 ## 本地前后端集成
 
-统一入口为 **<http://localhost:8080>**；使用真实 Python API、Keycloak、RabbitMQ 和 Redis，不是 mock 后端。需要 Python 3、可用的 Docker Engine + Compose 或 rootless Podman + `podman-compose`，以及 `wheels/` 中项目 `deps-v1` release 的两个锁定供应商 wheel。前端依赖在容器中使用 Bun 构建，Python 在容器中使用 uv 构建；无需宿主机安装 Bun/uv。首次构建还需能拉取 Node、Bun、Python、Keycloak、Nginx、RabbitMQ、Redis 镜像及依赖。
+统一入口为 **<http://localhost:8080>**；使用真实 Python API、PostgreSQL、Keycloak、RabbitMQ 和 Redis，不是 mock 后端。需要 Python 3、可用的 Docker Engine + Compose 或 rootless Podman + `podman-compose`，以及 `wheels/` 中项目 `deps-v1` release 的两个锁定供应商 wheel。前端依赖在容器中使用 Bun 构建，Python 在容器中使用 uv 构建；无需宿主机安装 Bun/uv。首次构建还需能拉取 Node、Bun、Python、PostgreSQL、Keycloak、Nginx、RabbitMQ、Redis 镜像及依赖。
 
 AmazingData 账号、密码、主机和端口使用现有未提交 `.env` 的 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`；启动器也支持现有 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 别名。shell 环境优先，不修改 `.env`，不输出配置值；`.env` 支持字面值、引号、注释和可选 `export`，不执行 shell 或展开变量。缺少配置时只提示字段名。账户服务必须能实际连接 AmazingData，否则启动不会被报告为成功。
+
+持久化使用 PostgreSQL。Compose 必须设置 `A500_POSTGRES_PASSWORD`，可选的 `A500_POSTGRES_DB`、`A500_POSTGRES_USER` 和 `A500_POSTGRES_PORT` 默认分别为 `a500`、`a500` 和 `5432`。数据库端口只绑定主机回环地址，数据保存在 `postgres-data` 卷。首次使用空数据库，应用创建所需表；不会迁移旧 SQLite 数据，也不会删除旧数据库文件或卷。独立运行 CLI 或 API 时设置 `A500_DATABASE_URL`，例如 `postgresql://a500:密码@127.0.0.1:5432/a500`；CLI 的 `--database` 可显式指定 URL 并覆盖环境变量。URL 中的特殊字符需百分号编码，凭据应妥善保管。
 
 在 Bash 中输入自行选择的本地管理员凭据（不写源码、命令历史或应用 `.env`）：
 
@@ -30,6 +32,8 @@ AmazingData 账号、密码、主机和端口使用现有未提交 `.env` 的 `A
 read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
 read -r -s -p 'Keycloak admin password: ' KEYCLOAK_ADMIN_PASSWORD; printf '\n'
 export KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD
+read -r -s -p 'PostgreSQL password: ' A500_POSTGRES_PASSWORD; printf '\n'
+export A500_POSTGRES_PASSWORD
 # 必须显式选择；tgw 需外部采集器，replay 仅为历史数据回放
 export A500_MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
@@ -49,7 +53,7 @@ python3 scripts/start-local.py logs
 python3 scripts/start-local.py down
 ```
 
-后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（账户、身份和 Redis 数据保留），不要加 `down -v`。HTTP gateway 默认绑定 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`；可通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 分别设置绑定地址和端口。Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用 HTTP 和本地 Keycloak；完整生产、HTTPS、证书维护和迁移步骤见[统一 Web 部署指南](docs/web-deployment.md)。独立行情消费者无需前端或 Web 配置，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
+后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（PostgreSQL、身份和 Redis 数据保留），不要加 `down -v`。HTTP gateway 默认绑定 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`；可通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 分别设置绑定地址和端口。Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用 HTTP 和本地 Keycloak；完整生产、HTTPS、证书维护和迁移步骤见[统一 Web 部署指南](docs/web-deployment.md)。独立行情消费者无需前端或 Web 配置，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
 
 `tgw` 模式不会自动启动 TGW 采集器；没有外部规范化行情事件时信号可显示不可用。`replay` 模式需另行显式运行下列命令，使用同一 `a500-local` 项目及配置，不能误连另一个 Compose 项目的 broker：
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, replace
 from datetime import date
@@ -32,7 +33,10 @@ def register_commands(
     daily.add_argument("--start-date", required=True, type=date.fromisoformat)
     daily.add_argument("--end-date", required=True, type=date.fromisoformat)
     daily.add_argument(
-        "--database", required=True, help="local SQLite history database"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
     daily.add_argument("--confirm-history-persistence-permitted", action="store_true")
     indicators = commands.add_parser(
@@ -42,7 +46,10 @@ def register_commands(
     indicators.add_argument("--symbol", required=True)
     indicators.add_argument("--start-date", required=True, type=date.fromisoformat)
     indicators.add_argument(
-        "--database", required=True, help="local SQLite history database"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
     indicators.add_argument(
         "--confirm-history-persistence-permitted", action="store_true"
@@ -62,7 +69,10 @@ def register_commands(
     backtest.add_argument("--end-date", required=True, type=date.fromisoformat)
     backtest.add_argument("--interval-minutes", type=int, choices=(1, 5), default=1)
     backtest.add_argument(
-        "--database", required=True, help="local SQLite history/backtest database"
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        help="PostgreSQL connection URL",
     )
     backtest.add_argument("--cost-bps", type=Decimal, default=Decimal(0))
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal(0))
@@ -81,11 +91,19 @@ def register_commands(
     cleanup = commands.add_parser(
         "history-cleanup", help="remove reusable shared daily and minute history"
     )
-    cleanup.add_argument("--database", required=True)
+    cleanup.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+    )
     show = commands.add_parser(
         "backtest-show", help="show one run and its exact bar snapshot"
     )
-    show.add_argument("--database", required=True)
+    show.add_argument(
+        "--database",
+        default=os.environ.get("A500_DATABASE_URL"),
+        required=not bool(os.environ.get("A500_DATABASE_URL")),
+    )
     selected_run = show.add_mutually_exclusive_group(required=True)
     selected_run.add_argument("--latest", action="store_true")
     selected_run.add_argument("--run-id", type=int)

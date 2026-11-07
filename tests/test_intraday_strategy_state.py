@@ -1,6 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -15,8 +14,8 @@ from a500_t_trader.strategy.intraday_state import (
 NOW = datetime(2026, 11, 2, 2, 0, tzinfo=UTC)
 
 
-def test_strategy_constraints_survive_store_reopen(tmp_path: Path) -> None:
-    database = tmp_path / "strategy.sqlite"
+def test_strategy_constraints_survive_store_reopen(postgres_url: str) -> None:
+    database = postgres_url
     state = StrategyState(
         symbol="510300",
         session_date=date(2026, 11, 2),
@@ -39,9 +38,9 @@ def test_strategy_constraints_survive_store_reopen(tmp_path: Path) -> None:
 
 
 def test_explicit_initial_holdings_do_not_create_strategy_pairs(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     holdings = InitialHoldings(
         symbol="510300",
         as_of=NOW,
@@ -58,9 +57,9 @@ def test_explicit_initial_holdings_do_not_create_strategy_pairs(
 
 
 def test_only_confirmed_linked_actual_fills_change_pair_state(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     recommendation = StrategyRecommendation(
         recommendation_id="rec-1",
         symbol="510300",
@@ -119,9 +118,9 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(
 
 
 def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     store.record_initial_holdings(
         InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 300)
     )
@@ -178,9 +177,9 @@ def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(
 
 
 def test_recommendations_and_strategy_fills_do_not_change_account_snapshot(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     holdings = InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 2000)
     store.record_initial_holdings(holdings)
     store.record_recommendation(
@@ -197,8 +196,8 @@ def test_recommendations_and_strategy_fills_do_not_change_account_snapshot(
     assert store.initial_holdings("510300") == holdings
 
 
-def test_invalid_fill_pairing_is_rejected(tmp_path: Path) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+def test_invalid_fill_pairing_is_rejected(postgres_url: str) -> None:
+    store = IntradayStrategyStateStore(postgres_url)
     store.record_recommendation(
         StrategyRecommendation("rec-1", "510300", "buy", NOW, grid_version=1)
     )
@@ -222,8 +221,8 @@ def test_invalid_fill_pairing_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_grid_layer_round_use_is_durable_and_directional(tmp_path: Path) -> None:
-    path = tmp_path / "strategy.sqlite"
+def test_grid_layer_round_use_is_durable_and_directional(postgres_url: str) -> None:
+    path = postgres_url
     store = IntradayStrategyStateStore(path)
 
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 1, 2, 1, "buy")
@@ -236,9 +235,9 @@ def test_grid_layer_round_use_is_durable_and_directional(tmp_path: Path) -> None
 
 
 def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    database = tmp_path / "strategy.sqlite"
+    database = postgres_url
     store = IntradayStrategyStateStore(database)
     state = StrategyState(
         symbol="510300",
@@ -281,8 +280,8 @@ def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(
     )
 
 
-def test_unknown_or_pending_order_status_fails_closed(tmp_path: Path) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+def test_unknown_or_pending_order_status_fails_closed(postgres_url: str) -> None:
+    store = IntradayStrategyStateStore(postgres_url)
     store.record_recommendation(
         StrategyRecommendation("rec-1", "510300", "buy", NOW, grid_version=1)
     )
@@ -305,8 +304,8 @@ def test_unknown_or_pending_order_status_fails_closed(tmp_path: Path) -> None:
     assert store.trade_pairs() == []
 
 
-def test_grid_slot_is_consumed_only_by_confirmed_fill(tmp_path: Path) -> None:
-    database = tmp_path / "strategy.sqlite"
+def test_grid_slot_is_consumed_only_by_confirmed_fill(postgres_url: str) -> None:
+    database = postgres_url
     store = IntradayStrategyStateStore(database)
     store.save_state(
         StrategyState(
@@ -427,9 +426,9 @@ def test_grid_slot_is_consumed_only_by_confirmed_fill(tmp_path: Path) -> None:
 
 
 def test_grid_reset_reuses_slots_only_under_new_grid_version(
-    tmp_path: Path,
+    postgres_url: str,
 ) -> None:
-    store = IntradayStrategyStateStore(tmp_path / "strategy.sqlite")
+    store = IntradayStrategyStateStore(postgres_url)
     store.save_state(
         StrategyState(
             "510300",
