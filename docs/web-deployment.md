@@ -125,6 +125,7 @@ docker compose up -d --build history-dispatcher jobs-worker
 ```bash
 docker compose logs -f history-dispatcher jobs-worker
 ```
+
 提交仅支持日线，日期为包含端点的 ISO 日期且都必须早于上海的今天，跨度不限。使用上文的 `A500_WEB_URL` 并重新安全取得 `ACCESS_TOKEN`：
 
 ```bash
