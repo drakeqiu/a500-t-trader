@@ -75,7 +75,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 async function login() {
-  vi.mocked(oidc.completeAuthorization).mockReturnValue(Promise.resolve({ token: "memory-token", expiresIn: 300 }));
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(
+    Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+  );
   render(<Workspace />);
   await screen.findByRole("heading", { name: "账户快照" });
   await waitFor(() =>
@@ -102,7 +104,9 @@ it("reports callback errors without displaying the workspace", async () => {
 });
 
 it("clears the in-memory session when the access token expires", async () => {
-  vi.mocked(oidc.completeAuthorization).mockReturnValue(Promise.resolve({ token: "memory-token", expiresIn: 0.1 }));
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(
+    Promise.resolve({ token: "memory-token", expiresIn: 0.1 }),
+  );
   render(<Workspace />);
   await screen.findByRole("heading", { name: "账户快照" });
   expect((await screen.findByRole("alert")).textContent).toContain("授权已过期");
@@ -145,7 +149,9 @@ describe("snapshot workflows", () => {
   it("creates with an absent-snapshot precondition and refreshes NAV after save", async () => {
     vi.mocked(client.getSnapshot).mockResolvedValue(null);
     vi.mocked(client.saveSnapshot).mockResolvedValue({ snapshot, etag: '"created"' });
-    vi.mocked(oidc.completeAuthorization).mockReturnValue(Promise.resolve({ token: "memory-token", expiresIn: 300 }));
+    vi.mocked(oidc.completeAuthorization).mockReturnValue(
+      Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+    );
     render(<Workspace />);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "保存账户快照" })).toHaveProperty(
@@ -231,7 +237,9 @@ describe("identity and import recovery", () => {
     expect(screen.queryByDisplayValue("PRIVATE-CASH")).toBeNull();
     await screen.findByRole("alert");
     cleanup();
-    vi.mocked(oidc.completeAuthorization).mockReturnValue(Promise.resolve({ token: "memory-token", expiresIn: 300 }));
+    vi.mocked(oidc.completeAuthorization).mockReturnValue(
+      Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+    );
     render(<Workspace />);
     await waitFor(() =>
       expect(screen.getByLabelText("可用现金")).toHaveProperty("value", "123.4500"),

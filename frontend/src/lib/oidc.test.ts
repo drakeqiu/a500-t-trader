@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const issuer = "http://identity.example/realm";
-const metadata = { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token` };
+const metadata = {
+  issuer,
+  authorization_endpoint: `${issuer}/authorize`,
+  token_endpoint: `${issuer}/token`,
+};
 const key = "a500.oidc.transaction";
 // Dynamic imports exercise build-time public configuration with a fresh module per test.
 
@@ -22,15 +26,18 @@ afterEach(() => {
 describe("authorization code with PKCE", () => {
   it("computes the RFC 7636 S256 vector without crypto.subtle", async () => {
     const { pkceChallenge } = await import("./oidc");
-    expect(pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"))
-      .toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    expect(pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe(
+      "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    );
   });
 
   it("rejects untrusted discovery endpoints and unavailable secure randomness", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({
-      ...metadata,
-      authorization_endpoint: "http://attacker.example/authorize",
-    }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        ...metadata,
+        authorization_endpoint: "http://attacker.example/authorize",
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const { beginAuthorization } = await import("./oidc");
     await expect(beginAuthorization()).rejects.toThrow(/端点无效/);
@@ -42,7 +49,8 @@ describe("authorization code with PKCE", () => {
   });
 
   it("uses random state and S256, consumes the callback before exchanging and never stores the token", async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(Response.json(metadata))
       .mockResolvedValueOnce(Response.json(metadata))
       .mockResolvedValueOnce(Response.json({ access_token: "secret-token", expires_in: 120 }));
@@ -54,9 +62,15 @@ describe("authorization code with PKCE", () => {
     expect(authorization.searchParams.get("redirect_uri")).toBe(`${location.origin}/`);
     expect(authorization.searchParams.get("response_type")).toBe("code");
     expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(authorization.searchParams.get("code_challenge")).toBe(pkceChallenge(transaction.verifier));
+    expect(authorization.searchParams.get("code_challenge")).toBe(
+      pkceChallenge(transaction.verifier),
+    );
     expect(authorization.searchParams.get("state")).toBe(transaction.state);
-    history.replaceState(null, "", `/?code=auth-code&state=${transaction.state}&session_state=other`);
+    history.replaceState(
+      null,
+      "",
+      `/?code=auth-code&state=${transaction.state}&session_state=other`,
+    );
     const pending = completeAuthorization();
     expect(location.search).toBe("");
     expect(sessionStorage.getItem(key)).toBeNull();
@@ -70,33 +84,60 @@ describe("authorization code with PKCE", () => {
     expect(JSON.stringify(localStorage)).not.toContain("secret-token");
   });
 
-  it.each(["mismatch", "expired", "missing", "duplicate"]) ("rejects %s state without exchanging", async (kind) => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const { completeAuthorization } = await import("./oidc");
-    if (kind !== "missing") sessionStorage.setItem(key, JSON.stringify({ state: "valid", verifier: "v".repeat(43), created: Date.now() - (kind === "expired" ? 600001 : 0) }));
-    const state = kind === "mismatch" ? "wrong" : "valid";
-    history.replaceState(null, "", `/?code=secret-code&state=${state}${kind === "duplicate" ? "&state=valid" : ""}`);
-    await expect(completeAuthorization()).rejects.toThrow(/授权会话/);
-    expect(location.search).toBe("");
-    expect(sessionStorage.getItem(key)).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-    history.replaceState(null, "", `/?code=secret-code&state=${state}`);
-    await expect(completeAuthorization()).rejects.toThrow(/授权会话/);
-  });
+  it.each(["mismatch", "expired", "missing", "duplicate"])(
+    "rejects %s state without exchanging",
+    async (kind) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const { completeAuthorization } = await import("./oidc");
+      if (kind !== "missing")
+        sessionStorage.setItem(
+          key,
+          JSON.stringify({
+            state: "valid",
+            verifier: "v".repeat(43),
+            created: Date.now() - (kind === "expired" ? 600001 : 0),
+          }),
+        );
+      const state = kind === "mismatch" ? "wrong" : "valid";
+      history.replaceState(
+        null,
+        "",
+        `/?code=secret-code&state=${state}${kind === "duplicate" ? "&state=valid" : ""}`,
+      );
+      await expect(completeAuthorization()).rejects.toThrow(/授权会话/);
+      expect(location.search).toBe("");
+      expect(sessionStorage.getItem(key)).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      history.replaceState(null, "", `/?code=secret-code&state=${state}`);
+      await expect(completeAuthorization()).rejects.toThrow(/授权会话/);
+    },
+  );
 
   it("clears a denied callback and reports a safe error", async () => {
     const { completeAuthorization } = await import("./oidc");
-    sessionStorage.setItem(key, JSON.stringify({ state: "valid", verifier: "v".repeat(43), created: Date.now() }));
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ state: "valid", verifier: "v".repeat(43), created: Date.now() }),
+    );
     history.replaceState(null, "", "/?error=access_denied&error_description=private&state=valid");
     await expect(completeAuthorization()).rejects.toThrow("授权已拒绝");
     expect(location.search).toBe("");
   });
 
   it("does not expose an expired authorization code or token endpoint error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(metadata)).mockResolvedValueOnce(Response.json({ error_description: "sensitive" }, { status: 400 })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json(metadata))
+        .mockResolvedValueOnce(Response.json({ error_description: "sensitive" }, { status: 400 })),
+    );
     const { completeAuthorization } = await import("./oidc");
-    sessionStorage.setItem(key, JSON.stringify({ state: "valid", verifier: "v".repeat(43), created: Date.now() }));
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ state: "valid", verifier: "v".repeat(43), created: Date.now() }),
+    );
     history.replaceState(null, "", "/?code=expired&state=valid");
     await expect(completeAuthorization()).rejects.toThrow(/授权码可能已过期/);
     expect(location.search).toBe("");

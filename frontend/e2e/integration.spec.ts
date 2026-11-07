@@ -14,7 +14,9 @@ async function connect(page: Page, subject: string) {
   await page.waitForURL(`${fixture}/fixture-idp/authorize**`);
   const authorization = new URL(page.url());
   expect(authorization.searchParams.get("client_id")).toBe("a500-browser-client");
-  expect(authorization.searchParams.get("redirect_uri")).toBe(`${new URL(test.info().project.use.baseURL!).origin}/`);
+  expect(authorization.searchParams.get("redirect_uri")).toBe(
+    `${new URL(test.info().project.use.baseURL!).origin}/`,
+  );
   expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
   expect(authorization.searchParams.get("state")).toBeTruthy();
   expect(authorization.searchParams.get("code_challenge")).toBeTruthy();
@@ -76,7 +78,9 @@ test("serves the UI and API from one origin without the legacy API route", async
   expect((await request.get("/v1/account-snapshot")).status()).toBe(404);
 });
 
-test("rejects unsolicited callbacks and removes authorization data from the address bar", async ({ page }) => {
+test("rejects unsolicited callbacks and removes authorization data from the address bar", async ({
+  page,
+}) => {
   let tokenRequests = 0;
   page.on("request", (request) => {
     if (request.url() === `${fixture}/fixture-idp/token`) tokenRequests++;

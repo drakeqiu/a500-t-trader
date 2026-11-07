@@ -25,7 +25,6 @@ const STREAM_NO_SYMBOLS = "当前没有可订阅的标的";
 const STREAM_LIVE = "实时订阅";
 const STREAM_RECONNECT_DELAY_MS = 5000;
 
-
 function formatTime(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -111,22 +110,27 @@ export default function Workspace() {
     void Promise.resolve().then(() => {
       if (generation === identity.current) setBusy(true);
     });
-    void pending.then(({ token: accessToken, expiresIn }) => {
-      if (generation !== identity.current) return;
-      setSnapshotBusy(true);
-      setToken(accessToken);
-      setNotice("数据服务已连接。");
-      expiryTimer.current = window.setTimeout(() => {
-        clearSession();
-        setError("授权已过期，请重新安全连接。");
-      }, Math.min(expiresIn * 1000, 2147483647));
-    }).catch((reason) => {
-      if (generation === identity.current) fail(reason);
-    }).finally(() => {
-      if (generation === identity.current) setBusy(false);
-    });
+    void pending
+      .then(({ token: accessToken, expiresIn }) => {
+        if (generation !== identity.current) return;
+        setSnapshotBusy(true);
+        setToken(accessToken);
+        setNotice("数据服务已连接。");
+        expiryTimer.current = window.setTimeout(
+          () => {
+            clearSession();
+            setError("授权已过期，请重新安全连接。");
+          },
+          Math.min(expiresIn * 1000, 2147483647),
+        );
+      })
+      .catch((reason) => {
+        if (generation === identity.current) fail(reason);
+      })
+      .finally(() => {
+        if (generation === identity.current) setBusy(false);
+      });
   }, [clearSession, fail]);
-
 
   useEffect(() => {
     if (!token) return;
