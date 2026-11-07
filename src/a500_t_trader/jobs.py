@@ -100,12 +100,6 @@ class JobRepository:
                 ON daily_history_job_outbox (available_at, created_at)
                 WHERE published_at IS NULL"""
             )
-            # Older poller deployments created jobs without transactional outbox rows.
-            # Queued jobs are safe to notify; running jobs recover via their lease.
-            db.execute("""INSERT INTO daily_history_job_outbox (id, job_id)
-                SELECT gen_random_uuid(), j.id FROM daily_history_jobs j
-                WHERE j.status='queued'
-                ON CONFLICT (job_id) DO NOTHING""")
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_bars (
                 job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
                     ON DELETE CASCADE,
@@ -225,8 +219,24 @@ class JobRepository:
             "bars": [row["bar_json"] for row in rows],
         }
 
+    def backfill_queued_jobs(self) -> int:
+        """Create dispatch records for queued jobs written by older API versions."""
+        with self._connect() as db:
+            rows = db.execute(
+                """INSERT INTO daily_history_job_outbox (id, job_id)
+                SELECT gen_random_uuid(), j.id FROM daily_history_jobs j
+                WHERE j.status='queued'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM daily_history_job_outbox o WHERE o.job_id=j.id
+                    )
+                ON CONFLICT (job_id) DO NOTHING
+                RETURNING job_id"""
+            ).fetchall()
+        return len(rows)
+
     def publish_pending(self, publisher: Any, limit: int = 100) -> int:
         """Publish a batch from the transactional outbox and mark confirmed rows."""
+        self.backfill_queued_jobs()
         with self._connect() as db:
             rows = db.execute(
                 """SELECT id, job_id FROM daily_history_job_outbox

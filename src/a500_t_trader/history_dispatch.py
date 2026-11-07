@@ -154,16 +154,18 @@ class HistoryConsumer:
 
 
 def publisher_main() -> None:
+    logging.basicConfig(level=logging.INFO)
     repository = JobRepository(database_url())
     while True:
         publisher: HistoryPublisher | None = None
         try:
-            publisher = HistoryPublisher()
+            repository.backfill_queued_jobs()
             pending = repository.outbox_backlog()
             _LOG.info(
                 "History dispatch backlog pending=%s ready=%s oldest=%s",
                 pending["pending"], pending["ready"], pending["oldest_created_at"],
             )
+            publisher = HistoryPublisher()
             count = repository.publish_pending(publisher)
             if count == 0:
                 time.sleep(2)

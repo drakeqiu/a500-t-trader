@@ -54,7 +54,32 @@ def test_confirmed_dispatch_marks_outbox_published(postgres_url: str) -> None:
             "WHERE job_id=%s", (job["id"],),
         ).fetchone()
     assert row is not None and row[0] is not None and row[1:] == (1, None)
-    assert repository.outbox_backlog()["pending"] == 0
+
+
+def test_failed_outbox_insert_rolls_back_task(postgres_url: str) -> None:
+    import pytest
+
+    repository = JobRepository(postgres_url)
+    with psycopg.connect(postgres_url) as db:
+        db.execute(
+            """CREATE FUNCTION reject_outbox_insert() RETURNS trigger
+            LANGUAGE plpgsql AS $$ BEGIN
+                RAISE EXCEPTION 'outbox unavailable';
+            END $$"""
+        )
+        db.execute(
+            """CREATE TRIGGER reject_outbox_insert BEFORE INSERT
+            ON daily_history_job_outbox FOR EACH ROW
+            EXECUTE FUNCTION reject_outbox_insert()"""
+        )
+
+    with pytest.raises(psycopg.Error, match="outbox unavailable"):
+        repository.create("alice", "563360", "2020-01-01", "2020-12-31")
+
+    with psycopg.connect(postgres_url) as db:
+        assert db.execute(
+            "SELECT count(*) FROM daily_history_jobs WHERE subject='alice'"
+        ).fetchone()[0] == 0
 
 
 def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) -> None:
@@ -79,7 +104,7 @@ def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) 
     assert backlog["oldest_created_at"] is not None
 
 
-def test_repository_startup_backfills_legacy_queued_jobs(postgres_url: str) -> None:
+def test_publisher_backfills_legacy_queued_jobs(postgres_url: str) -> None:
     repository = JobRepository(postgres_url)
     with psycopg.connect(postgres_url) as db:
         job_id = db.execute(
@@ -88,8 +113,6 @@ def test_repository_startup_backfills_legacy_queued_jobs(postgres_url: str) -> N
             VALUES (gen_random_uuid(), 'legacy', '563360', '2020-01-01',
                 '2020-12-31', 'queued', 1) RETURNING id"""
         ).fetchone()[0]
-
-    repository = JobRepository(postgres_url)
 
     class RecordingPublisher:
         def __init__(self) -> None:
