@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import psycopg
 from fastapi.testclient import TestClient
 
 from a500_t_trader.jobs import JobRepository, process_one
@@ -56,6 +57,36 @@ def test_submission_requires_persistence_permission(postgres_url: str) -> None:
             },
         )
     assert response.status_code == 503
+
+
+def test_submission_persists_queued_job_with_pending_outbox(
+    postgres_url: str,
+) -> None:
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers={"Authorization": "Bearer alice"},
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2020-01-01",
+                "end_date": "2020-12-31",
+            },
+        )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "queued"
+    with psycopg.connect(postgres_url) as db:
+        persisted = db.execute(
+            """SELECT j.status, o.published_at
+            FROM daily_history_jobs j
+            JOIN daily_history_job_outbox o ON o.job_id = j.id
+            WHERE j.id = %s""",
+            (job["id"],),
+        ).fetchone()
+    assert persisted == ("queued", None)
 
 
 def test_job_returns_paginated_snapshot_after_worker_execution(

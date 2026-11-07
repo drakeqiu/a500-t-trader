@@ -30,6 +30,7 @@ a500-signal-calculator = "a500_t_trader.signal_calculator_cli:main"
 a500-account-api = "a500_t_trader.account_api:main"
 a500-jobs-api = "a500_t_trader.jobs_api:main"
 a500-jobs-worker = "a500_t_trader.jobs:worker_main"
+a500-history-dispatcher = "a500_t_trader.history_dispatch:publisher_main"
 
 [dependency-groups]
 dev = [

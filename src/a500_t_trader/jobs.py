@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import threading
-import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
@@ -82,10 +81,31 @@ class JobRepository:
                 error TEXT, lease_token UUID, lease_until TIMESTAMPTZ,
                 cancel_requested BOOLEAN NOT NULL DEFAULT false
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_outbox (
+                id UUID PRIMARY KEY,
+                job_id UUID NOT NULL UNIQUE REFERENCES daily_history_jobs(id)
+                    ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                published_at TIMESTAMPTZ,
+                last_error TEXT
+            )""")
             db.execute("""ALTER TABLE daily_history_jobs
                 ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'queued'""")
             db.execute("""CREATE INDEX IF NOT EXISTS daily_history_jobs_claim_idx
                 ON daily_history_jobs (status, lease_until, created_at)""")
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS daily_history_job_outbox_pending_idx
+                ON daily_history_job_outbox (available_at, created_at)
+                WHERE published_at IS NULL"""
+            )
+            # Older poller deployments created jobs without transactional outbox rows.
+            # Queued jobs are safe to notify; running jobs recover via their lease.
+            db.execute("""INSERT INTO daily_history_job_outbox (id, job_id)
+                SELECT gen_random_uuid(), j.id FROM daily_history_jobs j
+                WHERE j.status='queued'
+                ON CONFLICT (job_id) DO NOTHING""")
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_bars (
                 job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
                     ON DELETE CASCADE,
@@ -114,12 +134,24 @@ class JobRepository:
             raise ValueError("end_date must be before today in Asia/Shanghai")
         symbol = normalize_symbol(symbol)
         with self._connect() as db:
+            identifier = uuid.uuid4()
             row = db.execute(
                 f"INSERT INTO daily_history_jobs (id, subject, symbol, start_date, "
                 f"end_date, status, total_chunks) VALUES (%s,%s,%s,%s,%s,'queued',%s) "
                 f"RETURNING {_COLUMNS}",
-                (uuid.uuid4(), subject, symbol, start, end, end.year - start.year + 1),
+                (
+                    identifier,
+                    subject,
+                    symbol,
+                    start,
+                    end,
+                    end.year - start.year + 1,
+                ),
             ).fetchone()
+            db.execute(
+                "INSERT INTO daily_history_job_outbox (id, job_id) VALUES (%s, %s)",
+                (uuid.uuid4(), identifier),
+            )
         assert row is not None
         return _job(row)  # type: ignore[return-value]
 
@@ -193,19 +225,62 @@ class JobRepository:
             "bars": [row["bar_json"] for row in rows],
         }
 
-    def claim(self) -> dict[str, Any] | None:
+    def publish_pending(self, publisher: Any, limit: int = 100) -> int:
+        """Publish a batch from the transactional outbox and mark confirmed rows."""
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT id, job_id FROM daily_history_job_outbox
+                WHERE published_at IS NULL AND available_at <= now()
+                ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT %s""",
+                (limit,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    publisher.publish(str(row["job_id"]))
+                except Exception as error:
+                    db.execute(
+                        """UPDATE daily_history_job_outbox SET attempts=attempts+1,
+                        last_error=%s, available_at=now() +
+                        (LEAST(300, power(2, LEAST(attempts, 8))) * interval '1 second')
+                        WHERE id=%s""",
+                        (str(error)[:1000], row["id"]),
+                    )
+                else:
+                    db.execute(
+                        """UPDATE daily_history_job_outbox SET published_at=now(),
+                        attempts=attempts+1, last_error=NULL WHERE id=%s""",
+                        (row["id"],),
+                    )
+        return len(rows)
+
+    def outbox_backlog(self) -> dict[str, Any]:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT count(*) AS pending,
+                count(*) FILTER (WHERE available_at <= now()) AS ready,
+                min(created_at) AS oldest_created_at
+                FROM daily_history_job_outbox WHERE published_at IS NULL"""
+            ).fetchone()
+        assert row is not None
+        return row
+
+    def claim(self, job_id: str | uuid.UUID | None = None) -> dict[str, Any] | None:
         token = uuid.uuid4()
         with self._connect() as db:
             # A cancelled task with a dead worker is finalized on recovery.
             db.execute("""UPDATE daily_history_jobs SET status='cancelled',
                 stage='finished', finished_at=now(), updated_at=now(),
                 lease_token=NULL, lease_until=NULL
-                WHERE status='running' AND cancel_requested AND lease_until < now()""")
+                WHERE status='running' AND cancel_requested
+                    AND (lease_until < now() OR lease_until IS NULL)
+                    AND (%s::uuid IS NULL OR id=%s)""", (job_id, job_id))
             row = db.execute(
                 """WITH candidate AS (
                 SELECT id FROM daily_history_jobs
-                WHERE status='queued' OR (status='running' AND lease_until < now()
-                    AND NOT cancel_requested)
+                WHERE (status='queued' OR (status='running'
+                    AND (lease_until < now() OR lease_until IS NULL)
+                    AND NOT cancel_requested))
+                    AND (%s::uuid IS NULL OR id=%s)
                 ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
             ) UPDATE daily_history_jobs j SET status='running', stage='checking_cache',
                 lease_token=%s, lease_until=now() + (%s * interval '1 second'),
@@ -213,9 +288,21 @@ class JobRepository:
                 FROM candidate WHERE j.id=candidate.id
                 RETURNING j.id, j.symbol, j.start_date, j.end_date,
                     j.completed_chunks, j.total_chunks, j.lease_token""",
-                (token, _LEASE_SECONDS),
+                (job_id, job_id, token, _LEASE_SECONDS),
             ).fetchone()
         return row
+
+    def expired_job_ids(self, limit: int = 100) -> list[uuid.UUID]:
+        """返回可恢复任务，覆盖已确认但 worker 在租约到期前崩溃的情况。"""
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT id FROM daily_history_jobs
+                WHERE status='running'
+                    AND (lease_until < now() OR lease_until IS NULL)
+                ORDER BY lease_until NULLS FIRST, id LIMIT %s""",
+                (limit,),
+            ).fetchall()
+        return [row["id"] for row in rows]
 
     def heartbeat(self, job_id: uuid.UUID, token: uuid.UUID) -> bool:
         with self._connect() as db:
@@ -453,33 +540,33 @@ def process_one(
     return True
 
 
+def process_job(
+    repository: JobRepository,
+    job_id: str | uuid.UUID,
+    provider_factory: Callable[[], DailyHistoryProvider] = create_provider_from_env,
+) -> bool:
+    """按通知中的任务 ID 领取并处理任务。"""
+    job = repository.claim(job_id)
+    if job is None:
+        return False
+    _run_job(repository, job, provider_factory)
+    return True
+
+
 def worker_main() -> None:
     if os.environ.get("A500_HISTORY_PERSISTENCE_PERMITTED", "").lower() != "true":
         _LOG.info("History worker disabled: persistence permission not configured")
         return
-    dsn = database_url()
+    from .history_dispatch import HistoryConsumer
+
     try:
         retention_days = int(os.environ.get("A500_JOB_RETENTION_DAYS", "30"))
         if retention_days < 1:
             raise ValueError
     except ValueError:
         raise SystemExit("A500_JOB_RETENTION_DAYS must be a positive integer") from None
-    repository = JobRepository(dsn)
-    last_cleanup = 0.0
-    while True:
-        try:
-            if time.monotonic() - last_cleanup >= 3600:
-                repository.cleanup(retention_days)
-                last_cleanup = time.monotonic()
-            if not process_one(repository):
-                time.sleep(2)
-        except psycopg.Error:
-            _LOG.warning("History worker database operation failed; retrying")
-            time.sleep(2)
-        except Exception:
-            # Do not print vendor errors or database connection strings.
-            _LOG.error("History worker operation failed; retrying")
-            time.sleep(2)
+    repository = JobRepository(database_url())
+    HistoryConsumer(repository, retention_days=retention_days).run()
 
 
 if __name__ == "__main__":
