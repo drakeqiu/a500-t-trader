@@ -24,6 +24,7 @@ SERVICES = (
     "signal-calculator",
     "signal-api",
     "account-api",
+    "jobs-api",
     "gateway",
     "frontend",
 )
