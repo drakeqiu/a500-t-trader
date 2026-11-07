@@ -105,6 +105,8 @@ def main() -> None:
         "A500_MARKET_DATA_MODE": "tgw",
         "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
         "A500_RABBITMQ_HOST_PORT": str(_available_port()),
+        "A500_POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+        "A500_POSTGRES_PORT": str(_available_port()),
         "A500_OIDC_ISSUER": "https://identity.example.test",
         "A500_OIDC_AUDIENCE": "a500-api",
         "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",

@@ -519,6 +519,8 @@ def main(*, mock_market_data: bool = False) -> None:
         "KEYCLOAK_ADMIN_PASSWORD": admin_password,
         "KEYCLOAK_HOSTNAME": base_url,
         "KEYCLOAK_HOST_PORT": str(keycloak_port),
+        "A500_POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+        "A500_POSTGRES_PORT": str(_available_port()),
         "A500_OIDC_ISSUER": f"{base_url}/realms/{REALM}",
         "A500_OIDC_AUDIENCE": API_AUDIENCE,
         "A500_OIDC_JWKS_URI": (
