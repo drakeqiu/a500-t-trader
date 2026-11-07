@@ -85,7 +85,7 @@ async function login() {
   );
 }
 
-it("disables connection in server HTML until the client has hydrated", () => {
+it("disables connection in server HTML until the client has hydrated", async () => {
   const html = renderToString(<Workspace />);
   const document = new DOMParser().parseFromString(html, "text/html");
   const button = [...document.querySelectorAll("button")].find((item) =>
@@ -93,7 +93,9 @@ it("disables connection in server HTML until the client has hydrated", () => {
   );
   expect(button?.disabled).toBe(true);
   render(<Workspace />);
-  expect(screen.getByRole("button", { name: "安全连接" })).toHaveProperty("disabled", false);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "安全连接" })).toHaveProperty("disabled", false),
+  );
 });
 
 it("reports callback errors without displaying the workspace", async () => {
