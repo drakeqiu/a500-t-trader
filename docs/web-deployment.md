@@ -109,9 +109,22 @@ unset ACCESS_TOKEN
 
 ### 异步历史日线任务
 
-历史任务通过独立 `jobs-api` 接受请求，`jobs-worker` 在后台处理；两者使用 PostgreSQL，API 和 worker 不对宿主机发布端口。统一入口将 `/api/v1/jobs` 转发到内部 `/v1/jobs`。所有操作均需要与其他 API 相同的 OIDC Bearer **access token**，任务和结果按已验证的主体隔离；不是自己的任务不可访问。
+历史任务通过独立 `jobs-api` 接受请求，`jobs-worker` 在后台处理，`history-dispatcher` 从 PostgreSQL outbox 发布通知；三个服务连接同一 PostgreSQL，worker 与 dispatcher 连接现有 RabbitMQ，不对宿主机发布端口。统一入口将 `/api/v1/jobs` 转发到内部 `/v1/jobs`。所有操作均需要与其他 API 相同的 OIDC Bearer **access token**，任务和结果按已验证的主体隔离；不是自己的任务不可访问。
 
-历史数据持久化默认关闭：仅在确认 AmazingData 许可允许获取、缓存和持久化所请求的历史数据后，设置 `A500_HISTORY_PERSISTENCE_PERMITTED=true` 并重建相关容器。该开关不是许可授权本身。`A500_JOB_RETENTION_DAYS` 默认 `30`，用于控制任务及结果保留天数；请按数据许可和备份策略配置。PostgreSQL 卷必须受到访问控制并纳入备份与恢复方案。
+升级从旧数据库轮询 worker 切换到 RabbitMQ 通知 worker 时，**先停止旧 worker，API 保持运行，再升级并启动 dispatcher 和新 worker**。不要让旧轮询 worker 与新 worker 并行，以免竞争领取任务。切换期间 `jobs-api` 可持续接受请求，任务保存在 PostgreSQL 并保持 `queued`。通过 Compose 可单独控制服务：
+
+```bash
+# 先停止旧版本的 jobs-worker；不要停止 jobs-api
+docker compose stop jobs-worker
+# 部署包含新 dispatcher/consumer 的版本，并启动这两个独立服务
+docker compose up -d --build history-dispatcher jobs-worker
+```
+
+新版本初始化会为没有 outbox 记录的旧 `queued` 任务补建通知记录；dispatcher 随后发布存量和新任务。旧 `running` 任务由租约到期恢复机制接管。检查 `history-dispatcher` 日志中的 `History dispatch backlog pending=... ready=... oldest=...`：`pending` 是未确认 outbox 总数，`ready` 是到重试时间的数量，`oldest` 是最早积压时间。持续积压时检查 RabbitMQ 与 dispatcher 日志；同时查看 `jobs-worker` 日志及任务状态。
+
+```bash
+docker compose logs -f history-dispatcher jobs-worker
+```
 
 提交仅支持日线，日期为包含端点的 ISO 日期且都必须早于上海的今天，跨度不限。使用上文的 `A500_WEB_URL` 并重新安全取得 `ACCESS_TOKEN`：
 
@@ -158,7 +171,7 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml up 
 
 ```bash
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
-docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml logs -f gateway frontend signal-api account-api jobs-api jobs-worker signal-calculator
+docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml logs -f gateway frontend signal-api account-api jobs-api jobs-worker history-dispatcher signal-calculator
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml restart gateway
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml down
 ```

@@ -155,6 +155,7 @@ services:
       A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
       A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
       A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
       AMAZINGDATA_USERNAME: ${AMAZINGDATA_USERNAME:?AMAZINGDATA_USERNAME is required}
       AMAZINGDATA_PASSWORD: ${AMAZINGDATA_PASSWORD:?AMAZINGDATA_PASSWORD is required}
       AMAZINGDATA_HOST: ${AMAZINGDATA_HOST:?AMAZINGDATA_HOST is required}
@@ -164,7 +165,28 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: on-failure
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+  history-dispatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
+    command: ["python", "-m", "a500_t_trader.history_dispatch"]
+    environment:
+      A500_POSTGRES_HOST: postgres
+      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
+      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
+      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
 
   consumer-signals:
     build:
