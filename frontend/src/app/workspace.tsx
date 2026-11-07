@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   abortableDelay,
@@ -41,13 +41,18 @@ function signalLabel(signal: Signal) {
   if (signal.stale || signal.status === "UNAVAILABLE") return "数据不可用";
   return signal.direction || signal.status || "等待信号";
 }
-// The server-rendered button must not accept clicks before React attaches its handler.
-const subscribeHydration = () => () => {};
-const clientHydrated = () => true;
-const serverHydrated = () => false;
+// Keep the server-rendered button inert until React has attached its handler.
+const useHydrated = () => {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setHydrated(true), 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+  return hydrated;
+};
 
 export default function Workspace() {
-  const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
+  const hydrated = useHydrated();
   const [token, setToken] = useState<string | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [nav, setNav] = useState<AccountNav | null>(null);
