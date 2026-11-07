@@ -4,10 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/a500-client", async (importOriginal) => ({
   ...(await importOriginal<typeof client>()),
-  configurationReady: true,
-  discover: vi.fn(),
-  requestDeviceCode: vi.fn(),
-  pollDeviceToken: vi.fn(),
   getNav: vi.fn(),
   getSignals: vi.fn(),
   getSnapshot: vi.fn(),
@@ -17,6 +13,12 @@ vi.mock("@/lib/a500-client", async (importOriginal) => ({
   confirmPreview: vi.fn(),
   streamSignals: vi.fn(),
 }));
+vi.mock("@/lib/oidc", () => ({
+  configurationReady: true,
+  beginAuthorization: vi.fn(),
+  completeAuthorization: vi.fn(),
+}));
+import * as oidc from "@/lib/oidc";
 import * as client from "@/lib/a500-client";
 import Workspace from "@/app/workspace";
 
@@ -57,14 +59,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   window.localStorage.clear();
   stream = Promise.withResolvers<void>();
-  vi.mocked(client.discover).mockResolvedValue({ device: "/device", token: "/token" });
-  vi.mocked(client.requestDeviceCode).mockResolvedValue({
-    device_code: "code",
-    user_code: "ABCD",
-    verification_uri: "/verify",
-    expires_in: 600,
-  });
-  vi.mocked(client.pollDeviceToken).mockResolvedValue("memory-token");
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(null);
   vi.mocked(client.getSignals).mockResolvedValue([signal]);
   vi.mocked(client.getNav).mockResolvedValue({
     status: "unavailable",
@@ -80,8 +75,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 async function login() {
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(
+    Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+  );
   render(<Workspace />);
-  fireEvent.click(screen.getByRole("button", { name: "安全连接" }));
   await screen.findByRole("heading", { name: "账户快照" });
   await waitFor(() =>
     expect(screen.getByLabelText("可用现金")).toHaveProperty("value", "123.4500"),
@@ -97,6 +94,23 @@ it("disables connection in server HTML until the client has hydrated", () => {
   expect(button?.disabled).toBe(true);
   render(<Workspace />);
   expect(screen.getByRole("button", { name: "安全连接" })).toHaveProperty("disabled", false);
+});
+
+it("reports callback errors without displaying the workspace", async () => {
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(Promise.reject(new Error("授权已拒绝。")));
+  render(<Workspace />);
+  expect((await screen.findByRole("alert")).textContent).toContain("授权已拒绝");
+  expect(screen.queryByRole("heading", { name: "账户快照" })).toBeNull();
+});
+
+it("clears the in-memory session when the access token expires", async () => {
+  vi.mocked(oidc.completeAuthorization).mockReturnValue(
+    Promise.resolve({ token: "memory-token", expiresIn: 0.1 }),
+  );
+  render(<Workspace />);
+  await screen.findByRole("heading", { name: "账户快照" });
+  expect((await screen.findByRole("alert")).textContent).toContain("授权已过期");
+  expect(screen.queryByRole("heading", { name: "账户快照" })).toBeNull();
 });
 
 describe("snapshot workflows", () => {
@@ -135,8 +149,10 @@ describe("snapshot workflows", () => {
   it("creates with an absent-snapshot precondition and refreshes NAV after save", async () => {
     vi.mocked(client.getSnapshot).mockResolvedValue(null);
     vi.mocked(client.saveSnapshot).mockResolvedValue({ snapshot, etag: '"created"' });
+    vi.mocked(oidc.completeAuthorization).mockReturnValue(
+      Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+    );
     render(<Workspace />);
-    fireEvent.click(screen.getByRole("button", { name: "安全连接" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "保存账户快照" })).toHaveProperty(
         "disabled",
@@ -220,7 +236,11 @@ describe("identity and import recovery", () => {
     expect(screen.queryByText("510500")).toBeNull();
     expect(screen.queryByDisplayValue("PRIVATE-CASH")).toBeNull();
     await screen.findByRole("alert");
-    fireEvent.click(screen.getByRole("button", { name: "安全连接" }));
+    cleanup();
+    vi.mocked(oidc.completeAuthorization).mockReturnValue(
+      Promise.resolve({ token: "memory-token", expiresIn: 300 }),
+    );
+    render(<Workspace />);
     await waitFor(() =>
       expect(screen.getByLabelText("可用现金")).toHaveProperty("value", "123.4500"),
     );

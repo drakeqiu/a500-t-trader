@@ -52,6 +52,9 @@ def local_environment() -> dict[str, str]:
                 raise ValueError(f".env line {number}: quote values containing spaces")
             environment[key] = tokens[0] if tokens else ""
     environment.update(os.environ)
+    environment["A500_POSTGRES_PASSWORD"] = (
+        environment.get("A500_POSTGRES_PASSWORD") or "changeme"
+    )
     for suffix in ("USERNAME", "PASSWORD", "HOST", "PORT"):
         target = f"AMAZINGDATA_{suffix}"
         if not environment.get(target):
@@ -138,6 +141,7 @@ def check_configuration(environment: dict[str, str]) -> None:
             "http://keycloak:8080/realms/a500/protocol/openid-connect/certs"
         ),
         "KEYCLOAK_HOSTNAME": "http://localhost:8081",
+        "A500_OIDC_CLIENT_ID": "a500-browser-client",
         "KEYCLOAK_HOST_PORT": "8081",
     }
     for name, value in expected.items():
@@ -152,6 +156,113 @@ def check_configuration(environment: dict[str, str]) -> None:
     ):
         if not (ROOT / "wheels" / wheel).is_file():
             raise ValueError(f"Missing wheels/{wheel}; obtain the deps-v1 release")
+
+
+def keycloak_admin(command: list[str], environment: dict[str, str]):
+    """Return a kcadm runner authenticated against the running local Keycloak."""
+    base = [*command, "exec", "-T", "keycloak", "/opt/keycloak/bin/kcadm.sh"]
+
+    def admin(*arguments: str) -> str:
+        return subprocess.run(
+            [*base, *arguments],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout
+
+    admin(
+        "config",
+        "credentials",
+        "--server",
+        "http://localhost:8080",
+        "--realm",
+        "master",
+        "--user",
+        environment["KEYCLOAK_ADMIN_USERNAME"],
+        "--password",
+        environment["KEYCLOAK_ADMIN_PASSWORD"],
+    )
+    return admin
+
+
+def configure_browser_client(admin, origin: str) -> None:
+    """Reconcile the browser client even when the realm was already imported."""
+    realm = json.loads((ROOT / "keycloak/realm-a500.json").read_text())
+    template = next(
+        client
+        for client in realm["clients"]
+        if client["clientId"] == "a500-browser-client"
+    )
+    clients = json.loads(
+        admin("get", "clients", "-r", "a500", "-q", "clientId=a500-browser-client")
+    )
+    client = next(
+        (item for item in clients if item["clientId"] == template["clientId"]), None
+    )
+    settings = {
+        key: value for key, value in template.items() if key != "protocolMappers"
+    }
+    settings["redirectUris"] = list(
+        dict.fromkeys(
+            [uri for uri in (client or {}).get("redirectUris", []) if "*" not in uri]
+            + [*template["redirectUris"], f"{origin}/"]
+        )
+    )
+    settings["webOrigins"] = list(
+        dict.fromkeys(
+            [
+                uri
+                for uri in (client or {}).get("webOrigins", [])
+                if "*" not in uri and uri != "+"
+            ]
+            + [*template["webOrigins"], origin]
+        )
+    )
+    settings["attributes"] = {
+        **(client or {}).get("attributes", {}),
+        **template["attributes"],
+    }
+
+    def assignments(values):
+        arguments = []
+        for key, value in values.items():
+            encoded = (
+                value
+                if isinstance(value, str)
+                else json.dumps(value, separators=(",", ":"))
+            )
+            arguments.extend(("-s", f"{key}={encoded}"))
+        return arguments
+
+    if client is None:
+        admin("create", "clients", "-r", "a500", *assignments(settings))
+        clients = json.loads(
+            admin("get", "clients", "-r", "a500", "-q", "clientId=a500-browser-client")
+        )
+        client = next(
+            item for item in clients if item["clientId"] == template["clientId"]
+        )
+    else:
+        admin("update", f"clients/{client['id']}", "-r", "a500", *assignments(settings))
+
+    endpoint = f"clients/{client['id']}/protocol-mappers/models"
+    existing_mappers = json.loads(admin("get", endpoint, "-r", "a500"))
+    mapper = template["protocolMappers"][0]
+    old_mapper = next(
+        (item for item in existing_mappers if item["name"] == mapper["name"]), None
+    )
+    if old_mapper is None:
+        admin("create", endpoint, "-r", "a500", *assignments(mapper))
+    else:
+        admin(
+            "update",
+            f"{endpoint}/{old_mapper['id']}",
+            "-r",
+            "a500",
+            *assignments(mapper),
+        )
 
 
 def wait_ready(timeout: int, gateway_port: str = "8080") -> None:
@@ -221,6 +332,8 @@ def main() -> int:
             )
             gateway_port = environment.get("A500_GATEWAY_HOST_PORT", "8080")
             wait_ready(arguments.timeout, gateway_port)
+            admin = keycloak_admin(command, environment)
+            configure_browser_client(admin, f"http://localhost:{gateway_port}")
             print(
                 f"Ready: http://localhost:{gateway_port} (Keycloak: http://localhost:8081)"
             )

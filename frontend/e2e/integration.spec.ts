@@ -11,15 +11,20 @@ async function connect(page: Page, subject: string) {
     (response) => response.url() === `${fixture}/fixture-idp/token` && response.ok(),
   );
   await page.getByRole("button", { name: "安全连接", exact: true }).click();
-  const verification = page.context().waitForEvent("page");
-  await page.getByRole("link", { name: /打开验证页面/ }).click();
-  const popup = await verification;
-  await popup.getByLabel("Fixture account").fill(subject);
-  await popup.getByRole("button", { name: "Authorize fixture device" }).click();
-  await expect(popup.getByRole("heading", { name: "Fixture device authorized" })).toBeVisible();
-  await popup.close();
+  await page.waitForURL(`${fixture}/fixture-idp/authorize**`);
+  const authorization = new URL(page.url());
+  expect(authorization.searchParams.get("client_id")).toBe("a500-browser-client");
+  expect(authorization.searchParams.get("redirect_uri")).toBe(
+    `${new URL(test.info().project.use.baseURL!).origin}/`,
+  );
+  expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
+  expect(authorization.searchParams.get("state")).toBeTruthy();
+  expect(authorization.searchParams.get("code_challenge")).toBeTruthy();
+  await page.getByLabel("Fixture account").fill(subject);
+  await page.getByRole("button", { name: "Authorize fixture account" }).click();
   const token = (await (await issuedToken).json()).access_token as string;
   await expect(page.getByRole("heading", { name: "实时信号", exact: true })).toBeVisible();
+  expect(new URL(page.url()).search).toBe("");
   return token;
 }
 
@@ -71,6 +76,28 @@ test("serves the UI and API from one origin without the legacy API route", async
   expect(new URL(page.url()).origin).toBe(new URL(test.info().project.use.baseURL!).origin);
   expect((await request.get("/api/v1/account-snapshot")).status()).toBe(401);
   expect((await request.get("/v1/account-snapshot")).status()).toBe(404);
+});
+
+test("rejects unsolicited callbacks and removes authorization data from the address bar", async ({
+  page,
+}) => {
+  let tokenRequests = 0;
+  page.on("request", (request) => {
+    if (request.url() === `${fixture}/fixture-idp/token`) tokenRequests++;
+  });
+  await page.goto("/?code=untrusted&state=unexpected");
+  await expect(page.getByText("授权会话无效或已过期，请重新连接。")).toBeVisible();
+  await expect(page).toHaveURL("/");
+  expect(tokenRequests).toBe(0);
+});
+
+test("signs in when SubtleCrypto is unavailable on HTTP", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, "subtle", { value: undefined, configurable: true });
+  });
+  await page.goto("/");
+  const token = await connect(page, `http-${randomUUID()}`);
+  expect(token).toBeTruthy();
 });
 
 test("creates and edits an account; a real 412 retains the draft until explicitly replaced", async ({

@@ -4,15 +4,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import {
   ApiError,
   abortableDelay,
-  configurationReady,
   confirmPreview,
-  discover,
   getNav,
   getPreview,
   getSignals,
   getSnapshot,
-  pollDeviceToken,
-  requestDeviceCode,
   saveSnapshot,
   streamSignals,
   uploadPreview,
@@ -21,21 +17,13 @@ import {
   type Signal,
   type SnapshotResult,
 } from "@/lib/a500-client";
+import { beginAuthorization, completeAuthorization, configurationReady } from "@/lib/oidc";
 import { parseSnapshotDraft, snapshotDraft, snapshotFields } from "@/lib/snapshot-draft";
 
 const STREAM_DISCONNECTED = "尚未连接";
 const STREAM_NO_SYMBOLS = "当前没有可订阅的标的";
 const STREAM_LIVE = "实时订阅";
 const STREAM_RECONNECT_DELAY_MS = 5000;
-
-type Device = {
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete?: string;
-  device_code: string;
-  expires_in: number;
-  interval?: number;
-};
 
 function formatTime(value?: string | null) {
   if (!value) return "—";
@@ -61,7 +49,6 @@ const serverHydrated = () => false;
 export default function Workspace() {
   const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
   const [token, setToken] = useState<string | null>(null);
-  const [device, setDevice] = useState<Device | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [nav, setNav] = useState<AccountNav | null>(null);
   const [navError, setNavError] = useState<string | null>(null);
@@ -82,13 +69,14 @@ export default function Workspace() {
   const authAbort = useRef<AbortController | null>(null);
   const sessionAbort = useRef<AbortController | null>(null);
   const identity = useRef(0);
+  const expiryTimer = useRef<number | undefined>(undefined);
   const draftDirty = useRef(false);
   const clearSession = useCallback(() => {
     identity.current += 1;
     authAbort.current?.abort();
+    window.clearTimeout(expiryTimer.current);
     sessionAbort.current?.abort();
     setToken(null);
-    setDevice(null);
     setSignals([]);
     setNav(null);
     setNavError(null);
@@ -115,6 +103,34 @@ export default function Workspace() {
     },
     [clearSession],
   );
+  useEffect(() => {
+    const generation = identity.current;
+    const pending = completeAuthorization();
+    if (!pending) return;
+    void Promise.resolve().then(() => {
+      if (generation === identity.current) setBusy(true);
+    });
+    void pending
+      .then(({ token: accessToken, expiresIn }) => {
+        if (generation !== identity.current) return;
+        setSnapshotBusy(true);
+        setToken(accessToken);
+        setNotice("数据服务已连接。");
+        expiryTimer.current = window.setTimeout(
+          () => {
+            clearSession();
+            setError("授权已过期，请重新安全连接。");
+          },
+          Math.min(expiresIn * 1000, 2147483647),
+        );
+      })
+      .catch((reason) => {
+        if (generation === identity.current) fail(reason);
+      })
+      .finally(() => {
+        if (generation === identity.current) setBusy(false);
+      });
+  }, [clearSession, fail]);
 
   useEffect(() => {
     if (!token) return;
@@ -249,6 +265,7 @@ export default function Workspace() {
     () => () => {
       authAbort.current?.abort();
       sessionAbort.current?.abort();
+      window.clearTimeout(expiryTimer.current);
     },
     [],
   );
@@ -262,27 +279,11 @@ export default function Workspace() {
     setError(null);
     setStreamState("连接中");
     try {
-      const endpoints = await discover(controller.signal);
-      const result = await requestDeviceCode(endpoints.device, controller.signal);
+      const url = await beginAuthorization(controller.signal);
       if (generation !== identity.current || controller.signal.aborted) return;
-      setDevice(result);
-      const accessToken = await pollDeviceToken(
-        endpoints.token,
-        result.device_code,
-        result.interval || 5,
-        controller.signal,
-        result.expires_in,
-      );
-      if (generation !== identity.current || controller.signal.aborted) return;
-      setSnapshotBusy(true);
-      setToken(accessToken);
-      setDevice(null);
-      setNotice("数据服务已连接。");
+      window.location.assign(url);
     } catch (reason) {
-      if (generation === identity.current) {
-        fail(reason);
-        setDevice(null);
-      }
+      if (generation === identity.current) fail(reason);
     } finally {
       if (generation === identity.current) setBusy(false);
     }
@@ -432,47 +433,23 @@ export default function Workspace() {
             <section className="auth-box" aria-labelledby="auth-title" aria-live="polite">
               <div className="auth-box-heading">
                 <div>
-                  <h2 id="auth-title">{device ? "在另一台设备完成授权" : "通过身份提供方继续"}</h2>
-                  <p>
-                    {device
-                      ? "仅在官方验证页面输入此代码。"
-                      : "我们会安全地将你转至已配置的身份提供方。"}
-                  </p>
+                  <h2 id="auth-title">通过身份提供方继续</h2>
+                  <p>我们会安全地将你转至已配置的身份提供方。</p>
                 </div>
                 <span className={`auth-state ${busy ? "is-active" : ""}`}>
                   <span className="status-dot" aria-hidden="true" />
                   {busy ? "等待授权" : "尚未连接"}
                 </span>
               </div>
-              {device ? (
-                <>
-                  <div className="code-row">
-                    <span>一次性设备代码</span>
-                    <strong className="user-code">{device.user_code}</strong>
-                  </div>
-                  <a
-                    className="button primary full auth-action"
-                    href={device.verification_uri_complete || device.verification_uri}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    打开验证页面 <span aria-hidden="true">↗</span>
-                  </a>
-                  <button className="text-button auth-cancel" onClick={disconnect}>
-                    取消授权
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="button primary full auth-action"
-                  onClick={() => void connect()}
-                  disabled={!hydrated || busy || !configurationReady}
-                >
-                  {busy ? "正在连接…" : "安全连接"}
-                  {!busy && <span aria-hidden="true">→</span>}
-                </button>
-              )}
-              {busy && !device && (
+              <button
+                className="button primary full auth-action"
+                onClick={() => void connect()}
+                disabled={!hydrated || busy || !configurationReady}
+              >
+                {busy ? "正在连接…" : "安全连接"}
+                {!busy && <span aria-hidden="true">→</span>}
+              </button>
+              {busy && (
                 <button className="text-button auth-cancel" onClick={disconnect}>
                   取消连接
                 </button>
@@ -496,8 +473,8 @@ export default function Workspace() {
               <li>
                 <span>2</span>
                 <div>
-                  <strong>确认设备代码</strong>
-                  <p>在官方验证页面确认本次登录。</p>
+                  <strong>登录并授权</strong>
+                  <p>在身份提供方页面完成本次登录。</p>
                 </div>
               </li>
               <li>
