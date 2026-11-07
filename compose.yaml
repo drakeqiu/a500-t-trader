@@ -119,6 +119,53 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  jobs-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
+    command: ["python", "-m", "a500_t_trader.jobs_api"]
+    environment:
+      A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
+      A500_OIDC_AUDIENCE: ${A500_OIDC_AUDIENCE:?A500_OIDC_AUDIENCE is required}
+      A500_OIDC_JWKS_URI: ${A500_OIDC_JWKS_URI:?A500_OIDC_JWKS_URI is required}
+      A500_POSTGRES_HOST: postgres
+      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
+      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
+      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      A500_HISTORY_PERSISTENCE_PERMITTED: ${A500_HISTORY_PERSISTENCE_PERMITTED:-false}
+      A500_JOB_RETENTION_DAYS: ${A500_JOB_RETENTION_DAYS:-30}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  jobs-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
+    command: ["python", "-m", "a500_t_trader.jobs"]
+    environment:
+      A500_POSTGRES_HOST: postgres
+      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
+      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
+      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      AMAZINGDATA_USERNAME: ${AMAZINGDATA_USERNAME:?AMAZINGDATA_USERNAME is required}
+      AMAZINGDATA_PASSWORD: ${AMAZINGDATA_PASSWORD:?AMAZINGDATA_PASSWORD is required}
+      AMAZINGDATA_HOST: ${AMAZINGDATA_HOST:?AMAZINGDATA_HOST is required}
+      AMAZINGDATA_PORT: ${AMAZINGDATA_PORT:?AMAZINGDATA_PORT is required}
+      A500_HISTORY_PERSISTENCE_PERMITTED: ${A500_HISTORY_PERSISTENCE_PERMITTED:-false}
+      A500_JOB_RETENTION_DAYS: ${A500_JOB_RETENTION_DAYS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
   consumer-signals:
     build:
       context: .

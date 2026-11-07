@@ -6,7 +6,7 @@
 
 - Linux 主机、可工作的 Docker Engine 和 Compose 插件，能拉取基础镜像并访问构建依赖；下面命令使用 `docker compose`。rootless Podman 可使用 `podman-compose`，但网络和卷权限需按其环境处理。
 - 在仓库 `wheels/` 放置项目 `deps-v1` release 提供的 `AmazingData-1.1.9-cp314-none-any.whl` 和 `tgw-1.0.9.2-py3-none-any.whl`。前端镜像使用 Bun 构建，后端镜像使用 uv；无需在宿主机安装它们。构建网络需能访问依赖源，可用 `UV_INDEX_URL` 指定 Python 包索引。
-- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
+- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 和历史任务 worker 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
 - 凭据通过受保护的环境变量或未提交、限制访问的 `.env` 提供，不写入镜像或仓库。下例以交互式 shell 输入敏感值，避免直接写入命令历史；不要在共享终端输出环境变量或令牌。
 
 ## 本地集成：真实服务和开发 Keycloak
@@ -107,6 +107,28 @@ unset ACCESS_TOKEN
 
 账户尚未写入快照时返回 404；SSE 初始快照及后续变化不代表已有实时行情。令牌过期或撤销后重新授权，勿记录 token。HTTPS 使用可信 CA；测试自签名证书时可通过 `curl --cacert 测试CA证书路径` 验证，不要在生产中关闭证书校验。
 
+### 异步历史日线任务
+
+历史任务通过独立 `jobs-api` 接受请求，`jobs-worker` 在后台处理；两者使用 PostgreSQL，API 和 worker 不对宿主机发布端口。统一入口将 `/api/v1/jobs` 转发到内部 `/v1/jobs`。所有操作均需要与其他 API 相同的 OIDC Bearer **access token**，任务和结果按已验证的主体隔离；不是自己的任务不可访问。
+
+历史数据持久化默认关闭：仅在确认 AmazingData 许可允许获取、缓存和持久化所请求的历史数据后，设置 `A500_HISTORY_PERSISTENCE_PERMITTED=true` 并重建相关容器。该开关不是许可授权本身。`A500_JOB_RETENTION_DAYS` 默认 `30`，用于控制任务及结果保留天数；请按数据许可和备份策略配置。PostgreSQL 卷必须受到访问控制并纳入备份与恢复方案。
+
+提交仅支持日线，日期为包含端点的 ISO 日期且都必须早于上海的今天，跨度不限。使用上文的 `A500_WEB_URL` 并重新安全取得 `ACCESS_TOKEN`：
+
+```bash
+curl -sS -X POST "$A500_WEB_URL/api/v1/jobs" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"daily_history","symbol":"563360","start_date":"2024-01-01","end_date":"2024-12-31"}'
+# 使用提交响应中的任务 ID
+curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID"
+curl -sS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID/cancel"
+curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID/results?limit=100&offset=0"
+```
+
+提交返回 HTTP 202 和任务信息；状态为 `queued`、`running`、`succeeded`、`failed` 或 `cancelled`。`stage` 表示 `queued`、`checking_cache`、`querying`、`saving` 或 `finished`，`completed_chunks` 和 `total_chunks` 表示分片进度。结果分页包含 `job_id`、`total`、`limit`、`offset` 和 `bars`；客户端应按偏移量读取，并只使用成功任务的结果。取消为后台协作式操作，`cancel_requested` 表示请求已接受，查看状态确认最终结果。
+
+worker 按自然年分片查询并持久化进度，可在进程中断后恢复未完成工作；任务结果固定，不因随后缓存变化而改变。只有具备可信覆盖记录的缓存可免去供应商查询；既有 CLI 共享缓存不自动视为可信。供应商返回的数据可能缺失或不完整，成功不保证每个交易日均有记录，也不保证供应商数据完整。部署者须监控 worker、PostgreSQL 和供应商连接；单机 Compose 和数据卷不提供高可用保证。
+
 ## 证书轮换
 
 证书申请、续期和监控由部署者负责，Compose 不自动处理。证书和密钥以单个文件只读 bind mount：原位更新文件内容后可执行下面的 Nginx 重载；若通过原子替换改变宿主机文件（或更换路径），必须重建 gateway 容器以重新挂载，单纯重载或重启不足以保证读到新文件。更新后确保两者匹配、权限允许容器读取：
@@ -136,7 +158,7 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml up 
 
 ```bash
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
-docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml logs -f gateway frontend signal-api account-api signal-calculator
+docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml logs -f gateway frontend signal-api account-api jobs-api jobs-worker signal-calculator
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml restart gateway
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml down
 ```
@@ -144,5 +166,5 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml dow
 - 配置或构建失败：确认模式、必填 OIDC/AmazingData 变量、wheel、镜像与依赖源可用；检查端口冲突。HTTPS 启动失败检查证书链、私钥匹配、挂载路径和读取权限。
 - 登录失败：确认浏览器能访问 issuer/discovery、设备端点，IdP 的 Web origins 精确匹配 UI 的协议、主机和端口，用户已启用并获授权；变更公开构建配置后重建前端。
 - API 返回 401：使用 access token 而非 ID token，检查过期、签名、issuer、audience 和容器到 JWKS 的连接。账户 API 启动失败检查 AmazingData 凭据和网络；信号不可用检查 Redis、calculator、行情模式与外部采集器。`ps` 健康状态及服务日志有助于定位，但不要公开凭据和令牌。
-- `down` 停止并移除容器和网络，不删除命名卷。`account-data` 保存账户数据库，`signal-data` 保存 Redis AOF，`rabbitmq-data` 保存 broker 数据；本地 Keycloak 的 `keycloak-data` 保存身份数据。`down -v` 会删除这些卷并造成数据丢失，不要用于日常停止或配置更新。上线前制定受限访问的备份和恢复流程；数据卷不是高可用或备份。
+- `down` 停止并移除容器和网络，不删除命名卷。`postgres-data` 保存账户及历史任务数据库，`signal-data` 保存 Redis AOF，`rabbitmq-data` 保存 broker 数据；本地 Keycloak 的 `keycloak-data` 保存身份数据。`down -v` 会删除这些卷并造成数据丢失，不要用于日常停止或配置更新。上线前制定受限访问的备份和恢复流程；数据卷不是高可用或备份。
 - 重新启动可用原文件组合执行 `up -d`；配置或镜像需要变更时使用 `up -d --build`。仅需消费者时不要启动 Web 或 IdP，按[行情消费者指南](single-host-market-data-compose.md)操作。

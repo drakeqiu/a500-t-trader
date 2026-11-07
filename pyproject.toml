@@ -28,6 +28,8 @@ a500-market-data-replay = "a500_t_trader.market_data.replay:main"
 a500-signal-api = "a500_t_trader.signal_api:main"
 a500-signal-calculator = "a500_t_trader.signal_calculator_cli:main"
 a500-account-api = "a500_t_trader.account_api:main"
+a500-jobs-api = "a500_t_trader.jobs_api:main"
+a500-jobs-worker = "a500_t_trader.jobs:worker_main"
 
 [dependency-groups]
 dev = [

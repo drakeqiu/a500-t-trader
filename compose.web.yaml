@@ -19,4 +19,5 @@ services:
       - frontend
       - signal-api
       - account-api
+      - jobs-api
     restart: unless-stopped
