@@ -34,24 +34,29 @@ def test_confirmed_dispatch_marks_outbox_published(postgres_url: str) -> None:
             pass
 
         def basic_publish(self, **kwargs: object) -> bool:
-            self.messages.append((
-                str(kwargs["exchange"]), str(kwargs["routing_key"]),
-                json.loads(kwargs["body"]),
-            ))
+            self.messages.append(
+                (
+                    str(kwargs["exchange"]),
+                    str(kwargs["routing_key"]),
+                    json.loads(kwargs["body"]),
+                )
+            )
             return True
 
     channel = Channel()
     publisher = HistoryPublisher(channel=channel)
     assert repository.publish_pending(publisher) == 1
     assert channel.declarations == [
-        ("exchange", HISTORY_EXCHANGE), ("queue", HISTORY_QUEUE),
+        ("exchange", HISTORY_EXCHANGE),
+        ("queue", HISTORY_QUEUE),
         ("binding", HISTORY_EXCHANGE),
     ]
     assert channel.messages == [(HISTORY_EXCHANGE, "job", {"job_id": job["id"]})]
     with psycopg.connect(postgres_url) as db:
         row = db.execute(
             "SELECT published_at, attempts, last_error FROM daily_history_job_outbox "
-            "WHERE job_id=%s", (job["id"],),
+            "WHERE job_id=%s",
+            (job["id"],),
         ).fetchone()
     assert row is not None and row[0] is not None and row[1:] == (1, None)
 
@@ -77,9 +82,12 @@ def test_failed_outbox_insert_rolls_back_task(postgres_url: str) -> None:
         repository.create("alice", "563360", "2020-01-01", "2020-12-31")
 
     with psycopg.connect(postgres_url) as db:
-        assert db.execute(
-            "SELECT count(*) FROM daily_history_jobs WHERE subject='alice'"
-        ).fetchone()[0] == 0
+        assert (
+            db.execute(
+                "SELECT count(*) FROM daily_history_jobs WHERE subject='alice'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) -> None:
@@ -94,7 +102,8 @@ def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) 
     with psycopg.connect(postgres_url) as db:
         row = db.execute(
             "SELECT published_at, attempts, last_error, available_at FROM "
-            "daily_history_job_outbox WHERE job_id=%s", (job["id"],),
+            "daily_history_job_outbox WHERE job_id=%s",
+            (job["id"],),
         ).fetchone()
     assert row is not None
     assert row[0] is None and row[1] == 1 and row[2] == "broker unavailable"
@@ -144,10 +153,18 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
         ) -> tuple[DailyBar, ...]:
             return ()
 
+    class Connection:
+        is_open = True
+
+        def add_callback_threadsafe(self, callback: object) -> None:
+            callback()  # type: ignore[operator]
+
     class Channel:
         def __init__(self) -> None:
             self.acks: list[int] = []
             self.nacks: list[int] = []
+            self.connection = Connection()
+            self.is_open = True
 
         def exchange_declare(self, **kwargs: object) -> None:
             pass
@@ -174,20 +191,46 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     assert held_lease is not None
     channel = Channel()
     consumer = HistoryConsumer(repository, channel=channel, provider_factory=Provider)
+    from threading import Event
+
+    settled = Event()
+    original_ack = channel.basic_ack
+    original_nack = channel.basic_nack
+
+    def ack(*, delivery_tag: int) -> None:
+        original_ack(delivery_tag=delivery_tag)
+        if len(channel.acks) + len(channel.nacks) == 3:
+            settled.set()
+
+    def nack(*, delivery_tag: int, requeue: bool) -> None:
+        original_nack(delivery_tag=delivery_tag, requeue=requeue)
+        if len(channel.acks) + len(channel.nacks) == 3:
+            settled.set()
+
+    channel.basic_ack = ack
+    channel.basic_nack = nack
     consumer._on_message(
-        channel, SimpleNamespace(delivery_tag=1), None,
+        channel,
+        SimpleNamespace(delivery_tag=1),
+        None,
         json.dumps({"job_id": notified["id"]}).encode(),
     )
     consumer._on_message(
-        channel, SimpleNamespace(delivery_tag=2), None,
+        channel,
+        SimpleNamespace(delivery_tag=2),
+        None,
         json.dumps({"job_id": notified["id"]}).encode(),
     )
     consumer._on_message(
-        channel, SimpleNamespace(delivery_tag=3), None,
+        channel,
+        SimpleNamespace(delivery_tag=3),
+        None,
         json.dumps({"job_id": unrelated["id"]}).encode(),
     )
+    assert settled.wait(5)
+    consumer.close()
 
-    assert channel.acks == [1, 2, 3]
+    assert sorted(channel.acks + channel.nacks) == [1, 2, 3]
     assert channel.nacks == []
     with psycopg.connect(postgres_url) as db:
         statuses = db.execute(
@@ -199,6 +242,74 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
         notified["id"]: "succeeded",
         unrelated["id"]: "running",
     }
+
+
+def test_consumer_requeues_queued_job_when_claim_is_locked(
+    postgres_url: str,
+) -> None:
+    from threading import Event
+    from types import SimpleNamespace
+
+    from a500_t_trader.history_dispatch import HistoryConsumer
+
+    repository = JobRepository(postgres_url)
+    job = repository.create("alice", "563360", "2020-01-01", "2020-12-31")
+
+    class Connection:
+        is_open = True
+
+        def add_callback_threadsafe(self, callback: object) -> None:
+            callback()  # type: ignore[operator]
+
+    class Channel:
+        connection = Connection()
+        is_open = True
+
+        def __init__(self) -> None:
+            self.acks: list[int] = []
+            self.nacks: list[int] = []
+            self.settled = Event()
+
+        def exchange_declare(self, **kwargs: object) -> None:
+            pass
+
+        def queue_declare(self, **kwargs: object) -> None:
+            pass
+
+        def queue_bind(self, **kwargs: object) -> None:
+            pass
+
+        def basic_qos(self, **kwargs: object) -> None:
+            pass
+
+        def basic_ack(self, *, delivery_tag: int) -> None:
+            self.acks.append(delivery_tag)
+            self.settled.set()
+
+        def basic_nack(self, *, delivery_tag: int, requeue: bool) -> None:
+            self.nacks.append(delivery_tag)
+            self.settled.set()
+
+        def basic_reject(self, *, delivery_tag: int, requeue: bool) -> None:
+            self.nacks.append(delivery_tag)
+            self.settled.set()
+
+    channel = Channel()
+    consumer = HistoryConsumer(repository, channel=channel)
+    with psycopg.connect(postgres_url) as db:
+        db.execute(
+            "SELECT id FROM daily_history_jobs WHERE id=%s FOR SHARE", (job["id"],)
+        )
+        consumer._on_message(
+            channel,
+            SimpleNamespace(delivery_tag=4),
+            None,
+            json.dumps({"job_id": job["id"]}).encode(),
+        )
+        assert channel.settled.wait(2)
+        assert channel.nacks == [4]
+        assert channel.acks == []
+    consumer.close()
 
 
 def test_running_job_without_lease_is_recovered_as_legacy_state(

@@ -63,6 +63,7 @@ class HistoryPublisher:
         if self._connection is not None and self._connection.is_open:
             self._connection.close()
 
+
 class HistoryConsumer:
     """RabbitMQ worker；任务状态仍由 PostgreSQL 决定。"""
 
@@ -77,6 +78,7 @@ class HistoryConsumer:
     ) -> None:
         self.repository = repository
         self.retention_days = retention_days
+        self._provider_factory = provider_factory
         self._last_cleanup = 0.0
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._connection: Any | None = None
@@ -114,7 +116,7 @@ class HistoryConsumer:
             if not isinstance(job_id, str):
                 raise ValueError("job_id must be a string")
             job_id = str(uuid.UUID(job_id))
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        except ValueError, TypeError, KeyError, json.JSONDecodeError:
             channel.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
             return
 
@@ -157,8 +159,11 @@ class HistoryConsumer:
                 connection = self._channel.connection
                 if connection.is_open:
                     connection.add_callback_threadsafe(
-                        lambda: connection.call_later(30, self._recover_expired)
-                        if connection.is_open else None
+                        lambda: (
+                            connection.call_later(30, self._recover_expired)
+                            if connection.is_open
+                            else None
+                        )
                     )
 
         self._executor.submit(recover)
@@ -179,7 +184,6 @@ class HistoryConsumer:
         self._channel.start_consuming()
 
 
-
 def publisher_main() -> None:
     logging.basicConfig(level=logging.INFO)
     repository = JobRepository(database_url())
@@ -190,7 +194,9 @@ def publisher_main() -> None:
             pending = repository.outbox_backlog()
             _LOG.info(
                 "History dispatch backlog pending=%s ready=%s oldest=%s",
-                pending["pending"], pending["ready"], pending["oldest_created_at"],
+                pending["pending"],
+                pending["ready"],
+                pending["oldest_created_at"],
             )
             publisher = HistoryPublisher()
             count = repository.publish_pending(publisher)

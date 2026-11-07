@@ -161,6 +161,18 @@ class JobRepository:
             ).fetchone()
         return _job(row)
 
+    def status(self, job_id: str | uuid.UUID) -> str | None:
+        """Return a job's current state for dispatch duplicate handling."""
+        try:
+            identifier = uuid.UUID(str(job_id))
+        except ValueError, TypeError, AttributeError:
+            return None
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT status FROM daily_history_jobs WHERE id=%s", (identifier,)
+            ).fetchone()
+        return None if row is None else row["status"]
+
     def cancel(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
             identifier = uuid.UUID(str(job_id))
@@ -278,12 +290,15 @@ class JobRepository:
         token = uuid.uuid4()
         with self._connect() as db:
             # A cancelled task with a dead worker is finalized on recovery.
-            db.execute("""UPDATE daily_history_jobs SET status='cancelled',
+            db.execute(
+                """UPDATE daily_history_jobs SET status='cancelled',
                 stage='finished', finished_at=now(), updated_at=now(),
                 lease_token=NULL, lease_until=NULL
                 WHERE status='running' AND cancel_requested
                     AND (lease_until < now() OR lease_until IS NULL)
-                    AND (%s::uuid IS NULL OR id=%s)""", (job_id, job_id))
+                    AND (%s::uuid IS NULL OR id=%s)""",
+                (job_id, job_id),
+            )
             row = db.execute(
                 """WITH candidate AS (
                 SELECT id FROM daily_history_jobs
@@ -301,12 +316,6 @@ class JobRepository:
                 (job_id, job_id, token, _LEASE_SECONDS),
             ).fetchone()
         return row
-    def status(self, job_id: str | uuid.UUID) -> str | None:
-        with self._connect() as db:
-            row = db.execute(
-                "SELECT status FROM daily_history_jobs WHERE id=%s", (job_id,)
-            ).fetchone()
-        return row["status"] if row is not None else None
 
     def expired_job_ids(self, limit: int = 100) -> list[uuid.UUID]:
         """返回可恢复任务，覆盖已确认但 worker 在租约到期前崩溃的情况。"""
