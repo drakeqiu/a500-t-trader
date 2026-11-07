@@ -80,48 +80,9 @@ def main() -> int:
                 if time.monotonic() >= deadline:
                     raise ValueError("Keycloak readiness timed out; inspect logs")
                 time.sleep(1)
-            # Update existing realms too: import only runs on first creation.
-            base = [*command, "exec", "-T", "keycloak", "/opt/keycloak/bin/kcadm.sh"]
-
-            def admin(*arguments: str) -> str:
-                return subprocess.run(
-                    [*base, *arguments],
-                    cwd=ROOT,
-                    env=env,
-                    check=True,
-                    text=True,
-                    capture_output=True,
-                ).stdout
-
-            admin(
-                "config",
-                "credentials",
-                "--server",
-                "http://localhost:8080",
-                "--realm",
-                "master",
-                "--user",
-                env["KEYCLOAK_ADMIN_USERNAME"],
-                "--password",
-                env["KEYCLOAK_ADMIN_PASSWORD"],
-            )
-            clients = json.loads(
-                admin(
-                    "get", "clients", "-r", "a500", "-q", "clientId=a500-device-client"
-                )
-            )
-            client = next(
-                item for item in clients if item["clientId"] == "a500-device-client"
-            )
-            origins = list(dict.fromkeys([*client.get("webOrigins", []), origin]))
-            admin(
-                "update",
-                f"clients/{client['id']}",
-                "-r",
-                "a500",
-                "-s",
-                f"webOrigins={json.dumps(origins)}",
-            )
+            # Realm import is skipped for existing Keycloak data volumes.
+            admin = LOCAL["keycloak_admin"](command, env)
+            LOCAL["configure_browser_client"](admin, origin)
             users = json.loads(
                 admin("get", "users", "-r", "a500", "-q", "username=admin")
             )
@@ -207,7 +168,10 @@ def main() -> int:
         StopIteration,
         json.JSONDecodeError,
     ) as error:
-        print(f"LAN startup failed: {error}", file=sys.stderr)
+        if isinstance(error, subprocess.CalledProcessError):
+            print("LAN startup failed: container command failed; inspect logs", file=sys.stderr)
+        else:
+            print(f"LAN startup failed: {error}", file=sys.stderr)
         return 1
     return 0
 

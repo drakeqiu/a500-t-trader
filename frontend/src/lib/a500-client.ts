@@ -44,9 +44,6 @@ export type ImportPreview = {
 export type SignalEvent = { event: string; id?: string; data: unknown };
 type SignalResponse = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
 const apiOrigin = "/api";
-const issuer = process.env.NEXT_PUBLIC_A500_OIDC_ISSUER?.replace(/\/$/, "");
-const clientId = process.env.NEXT_PUBLIC_A500_OIDC_CLIENT_ID || "a500-device-client";
-export const configurationReady = Boolean(issuer);
 
 export class ApiError extends Error {
   constructor(
@@ -76,31 +73,6 @@ async function responseJson<T>(response: Response): Promise<T> {
   }
   return body as T;
 }
-export async function discover(signal?: AbortSignal): Promise<{ device: string; token: string }> {
-  if (!issuer) throw new Error("缺少 NEXT_PUBLIC_A500_OIDC_ISSUER 配置。");
-  const config = await responseJson<{
-    device_authorization_endpoint: string;
-    token_endpoint: string;
-  }>(await fetch(`${issuer}/.well-known/openid-configuration`, { cache: "no-store", signal }));
-  return { device: config.device_authorization_endpoint, token: config.token_endpoint };
-}
-export async function requestDeviceCode(endpoint: string, signal?: AbortSignal) {
-  return responseJson<{
-    device_code: string;
-    user_code: string;
-    verification_uri: string;
-    verification_uri_complete?: string;
-    interval?: number;
-    expires_in: number;
-  }>(
-    await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: clientId, scope: "openid" }),
-      signal,
-    }),
-  );
-}
 export function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
   const { promise, resolve, reject } = Promise.withResolvers<void>();
@@ -114,41 +86,6 @@ export function abortableDelay(milliseconds: number, signal: AbortSignal): Promi
   }, milliseconds);
   signal.addEventListener("abort", abort, { once: true });
   return promise;
-}
-export async function pollDeviceToken(
-  endpoint: string,
-  deviceCode: string,
-  interval: number,
-  signal: AbortSignal,
-  expiresIn = 600,
-): Promise<string> {
-  let intervalMs = Math.max(1, interval) * 1000;
-  const expiresAt = Date.now() + expiresIn * 1000;
-  while (!signal.aborted) {
-    if (Date.now() + intervalMs >= expiresAt) throw new Error("授权码已过期，请重新开始。");
-    await abortableDelay(intervalMs, signal);
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-        device_code: deviceCode,
-        client_id: clientId,
-      }),
-      signal,
-    });
-    const result = await response.json();
-    if (response.ok && result.access_token) return result.access_token as string;
-    if (result.error === "authorization_pending") continue;
-    if (result.error === "slow_down") {
-      intervalMs += 5_000;
-      continue;
-    }
-    if (result.error === "access_denied") throw new Error("授权已拒绝。");
-    if (result.error === "expired_token") throw new Error("授权码已过期，请重新开始。");
-    throw new Error(result.error_description || "无法完成身份授权。");
-  }
-  throw new DOMException("Aborted", "AbortError");
 }
 function request(path: string, token: string, init?: RequestInit) {
   return fetch(`${apiOrigin}${path}`, {

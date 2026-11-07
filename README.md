@@ -24,7 +24,7 @@
 
 AmazingData 账号、密码、主机和端口使用现有未提交 `.env` 的 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`；启动器也支持现有 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 别名。shell 环境优先，不修改 `.env`，不输出配置值；`.env` 支持字面值、引号、注释和可选 `export`，不执行 shell 或展开变量。缺少配置时只提示字段名。账户服务必须能实际连接 AmazingData，否则启动不会被报告为成功。
 
-持久化使用 PostgreSQL。Compose 必须设置 `A500_POSTGRES_PASSWORD`，可选的 `A500_POSTGRES_DB`、`A500_POSTGRES_USER` 和 `A500_POSTGRES_PORT` 默认分别为 `a500`、`a500` 和 `5432`。数据库端口只绑定主机回环地址，数据保存在 `postgres-data` 卷。首次使用空数据库，应用创建所需表；不会迁移旧 SQLite 数据，也不会删除旧数据库文件或卷。独立运行 CLI 或 API 时设置 `A500_DATABASE_URL`，例如 `postgresql://a500:密码@127.0.0.1:5432/a500`；CLI 的 `--database` 可显式指定 URL 并覆盖环境变量。URL 中的特殊字符需百分号编码，凭据应妥善保管。
+持久化使用 PostgreSQL。本地启动脚本在 `A500_POSTGRES_PASSWORD` 未设置或为空时默认使用 `changeme`，可通过 shell 环境变量或 `.env` 覆盖；直接使用 Compose 时必须设置该变量。可选的 `A500_POSTGRES_DB`、`A500_POSTGRES_USER` 和 `A500_POSTGRES_PORT` 默认分别为 `a500`、`a500` 和 `5432`。数据库端口只绑定主机回环地址，数据保存在 `postgres-data` 卷。已有数据库卷须使用初始化时的密码，修改环境变量不会重置数据库密码。默认密码仅供本地开发；首次使用空数据库，应用创建所需表，不会迁移旧 SQLite 数据，也不会删除旧数据库文件或卷。独立运行 CLI 或 API 时设置 `A500_DATABASE_URL`，例如 `postgresql://a500:密码@127.0.0.1:5432/a500`；CLI 的 `--database` 可显式指定 URL 并覆盖环境变量。URL 中的特殊字符需百分号编码，凭据应妥善保管。
 
 在 Bash 中输入自行选择的本地管理员凭据（不写源码、命令历史或应用 `.env`）：
 
@@ -32,8 +32,8 @@ AmazingData 账号、密码、主机和端口使用现有未提交 `.env` 的 `A
 read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
 read -r -s -p 'Keycloak admin password: ' KEYCLOAK_ADMIN_PASSWORD; printf '\n'
 export KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD
-read -r -s -p 'PostgreSQL password: ' A500_POSTGRES_PASSWORD; printf '\n'
-export A500_POSTGRES_PASSWORD
+# 可选：覆盖本地默认数据库密码；已有数据库卷须使用初始化时的密码
+# export A500_POSTGRES_PASSWORD=自行设置的密码
 # 必须显式选择；tgw 需外部采集器，replay 仅为历史数据回放
 export A500_MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
@@ -41,11 +41,11 @@ python3 scripts/start-local.py
 
 启动器自动选择 Docker Compose 或 `podman-compose`，也可显式设置 `A500_COMPOSE_COMMAND='podman-compose'`。它使用固定项目名 `a500-local`，组合 `compose.yaml`、`compose.keycloak.yaml`、`compose.web.yaml` 和 `compose.web-http.yaml`，构建并启动所有服务，再检查 IdP discovery、页面及同源 API 的未认证 `401`。默认就绪等待 180 秒，可加 `--timeout 300`；这不是实时行情或完整登录验收。模式、wheel、容器引擎或必要配置缺失时会明确失败。
 
-打开 `http://localhost:8081` 管理界面，在 `a500` Realm 的 Users 中创建并启用获准用户、设置密码，然后从 `http://localhost:8080` 开始设备码授权。没有提交默认用户、管理员密码或客户端密钥，自助注册关闭。请勿以 `127.0.0.1:8080` 替代页面来源：Realm 精确允许 `http://localhost:8080` 的浏览器跨域 IdP 请求。旧 Keycloak 卷不会重新导入 Realm；已有 `a500-device-client` 需在管理界面将 Web origins 更新为该来源，不要为此删除用户卷。
+打开 `http://localhost:8081` 管理界面，在 `a500` Realm 的 Users 中创建并启用获准用户、设置密码，然后从 `http://localhost:8080` 跳转 Keycloak 登录，无需设备码授权。没有提交默认用户、管理员密码或客户端密钥，自助注册关闭。请勿以 `127.0.0.1:8080` 替代页面来源：浏览器客户端须精确允许该来源和回调 URI。不要为更新客户端配置删除用户卷。
 
 浏览器与直接 API 调用均使用 `/api/v1/*`，Nginx 将请求路由到内部 Python API，前端不另行发布主机端口，也不保留旧 `/v1/*` 网关路径。API 检查的公开 issuer 为 `http://localhost:8081/realms/a500`，容器取公钥则使用 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs`，不能把容器内部名当作浏览器 issuer。前端公开 IdP 配置在构建时确定，修改后需重建镜像；外部 IdP 部署见 [信号监控 API 指南](docs/signal-monitoring-api.md#compose-部署)。
 
-仅页面内存保存 access token，不自动使用 refresh token；刷新、失效或撤销后重新设备授权。同一身份重登可恢复服务端导入批次；CSV 不持久化在浏览器，导入不更新账户快照。工作台支持 ETag 条件保存/冲突保留草稿、NAV 如实不可用、信号 SSE 游标续传和脱敏预览错误；没有下单、历史查询或部署管理功能。
+仅页面内存保存 access token，不自动使用 refresh token；刷新、失效或撤销后重新登录，Keycloak 会话仍有效时可能无需重新输入密码。同一身份重登可恢复服务端导入批次；CSV 不持久化在浏览器，导入不更新账户快照。工作台支持 ETag 条件保存/冲突保留草稿、NAV 如实不可用、信号 SSE 游标续传和脱敏预览错误；没有下单、历史查询或部署管理功能。
 
 ```bash
 python3 scripts/start-local.py ps
@@ -74,7 +74,7 @@ python3 scripts/start-local.py replay \
 ./scripts/start-local-replay.sh down
 ```
 
-脚本选择 `replay` 模式，账户 API 仍使用 `.env` 中的 AmazingData 连接信息；不会自动回放数据，可使用上面的 `replay` 命令。Keycloak 首次初始化的管理员为 `admin` / `changeme`，仅供本机开发；已有 Keycloak 持久化卷不会因此重置管理员密码。应用用户仍需在 `a500` Realm 中另行创建。
+脚本选择 `replay` 模式，账户 API 仍使用 `.env` 中的 AmazingData 连接信息；不会自动回放数据，可使用上面的 `replay` 命令。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量 `A500_POSTGRES_PASSWORD` 覆盖；脚本的默认值优先于 `.env` 中的设置。已有 PostgreSQL 数据卷须使用初始化时的密码，修改环境变量不会重置数据库密码。Keycloak 首次初始化的管理员为 `admin` / `changeme`；已有 Keycloak 持久化卷不会因此重置管理员密码。上述默认凭据仅供本机开发，应用用户仍需在 `a500` Realm 中另行创建。
 
 可信局域网内的其他机器访问时，指定本机的局域网 IPv4 地址（不是客户端地址）：
 
@@ -84,7 +84,7 @@ python3 scripts/start-local.py replay \
 ./scripts/start-lan-replay.py 192.168.1.10 down
 ```
 
-将示例 IP 替换为本机实际地址，并从其他机器打开 `http://该IP:8080`。脚本使用独立的 `a500-lan` Compose 项目和数据卷；回放时使用 `./scripts/start-lan-replay.py 192.168.1.10 replay` 后接上述回放参数。脚本开放 Web 的 8080 和 Keycloak 的 8081，更新设备授权客户端的允许来源；RabbitMQ 仅绑定回环地址。首次启动会在 `a500` Realm 中创建应用用户 `admin` / `changeme`；已有用户和管理员的密码不会重置。HTTP 和默认密码仅适合可信局域网，禁止暴露到公网；防火墙须限制访问。使用的 AmazingData 主机也必须能从容器访问。
+将示例 IP 替换为本机实际地址，并从其他机器打开 `http://该IP:8080`。脚本使用独立的 `a500-lan` Compose 项目和数据卷；回放时使用 `./scripts/start-lan-replay.py 192.168.1.10 replay` 后接上述回放参数。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量或 `.env` 中的 `A500_POSTGRES_PASSWORD` 覆盖；已有数据库卷须使用初始化时的密码。脚本开放 Web 的 8080 和 Keycloak 的 8081，配置浏览器客户端的允许来源和回调；RabbitMQ 仅绑定回环地址。首次启动会在 `a500` Realm 中创建应用用户 `admin` / `changeme`；已有用户和管理员的密码不会重置。HTTP 和默认密码仅适合可信局域网，禁止暴露到公网；防火墙须限制访问。使用的 AmazingData 主机也必须能从容器访问。
 
 历史时间不会被伪装成实时行情，NAV 使用独立 AmazingData 查询及真实新鲜度约束，可能不可用。更多回放语义见 [行情 Compose 指南](docs/single-host-market-data-compose.md#历史回放模式)。确定性浏览器测试使用明确标记的行情 fixture，不能代替实时供应商或真实 IdP 证明。真实服务验收命令见 [API 验收说明](docs/signal-monitoring-api.md#compose-真实端到端验收)。
 

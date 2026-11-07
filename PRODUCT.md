@@ -31,7 +31,7 @@ Users may monitor live signals through an SSE stream and inspect account snapsho
 - NAV is unavailable when the snapshot or required quote is missing, future-dated, stale, or otherwise unusable; the client must not present partial valuation as a complete NAV.
 - The frontend lives in `frontend/`, uses Next.js App Router, TypeScript, Tailwind CSS, and Bun, and manages dependencies independently from Python/uv.
 - First-version workflow scope: signal monitoring, account snapshot and NAV, and trade-file preview and confirmation.
-- Product language is Chinese with Asia/Shanghai timestamps. The user-approved local integration runs the frontend, Python APIs, gateway, Keycloak, RabbitMQ and Redis together; browser API requests use same-origin `/api` rewrites to the existing gateway. Device authorization and page-memory access tokens remain in use: reload or token expiry requires reauthorization, without browser refresh-token persistence.
+- Product language is Chinese with Asia/Shanghai timestamps. The local integration runs the frontend, Python APIs, gateway, Keycloak, RabbitMQ and Redis together; browser API requests use same-origin `/api` routes to the existing gateway. Browser sign-in uses OIDC Authorization Code with PKCE; access tokens remain in page memory and refresh tokens are not persisted.
 
 ## Brand Commitments
 

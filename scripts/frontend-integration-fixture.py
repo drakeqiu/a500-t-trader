@@ -1,6 +1,6 @@
 """Explicit browser-test fixtures around the real account and signal HTTP routes.
 
-Not a live IdP or market feed: device authorization and Redis are deterministic
+Not a live IdP or market feed: authorization code flow and Redis are deterministic
 fixtures. PostgreSQL test data and tokens exist only for this process's lifetime.
 Run only through Playwright, or: uv run python scripts/frontend-integration-fixture.py
 --test-mode --port 38100. There is no production configuration fallback.
@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
+import hashlib
 import html
 import os
+import re
 import secrets
 import uuid
 from contextlib import asynccontextmanager
@@ -24,7 +27,7 @@ import psycopg
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from psycopg import sql
 
 from a500_t_trader.account_snapshot_api import create_app as create_account_app
@@ -57,7 +60,7 @@ def create_fixture(port: int) -> FastAPI:
 
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     tokens: dict[str, str] = {}
-    devices: dict[str, dict[str, str]] = {}
+    codes: dict[str, dict[str, str]] = {}
     stream_generation = 0
     issuer = f"http://127.0.0.1:{port}/fixture-idp"
     config = LiveSignalConfig(("510300", "563360"), {}, {}, "browser-fixture")
@@ -135,60 +138,90 @@ def create_fixture(port: int) -> FastAPI:
     async def discovery():
         return {
             "issuer": issuer,
-            "device_authorization_endpoint": f"{issuer}/device",
+            "authorization_endpoint": f"{issuer}/authorize",
             "token_endpoint": f"{issuer}/token",
         }
 
-    @app.post("/fixture-idp/device")
-    async def device(client_id: str = Form(), scope: str = Form()):
-        if client_id != "a500-device-client" or scope != "openid":
-            raise HTTPException(400, "Unknown fixture client or scope")
-        code = secrets.token_urlsafe(24)
-        devices[code] = {"subject": ""}
-        return {
-            "device_code": code,
-            "user_code": code[:8].upper(),
-            "verification_uri": f"{issuer}/verify",
-            "verification_uri_complete": f"{issuer}/verify?code={code}",
-            "interval": 1,
-            "expires_in": 300,
-        }
+    def validate_authorization(
+        client_id: str, redirect_uri: str, response_type: str, scope: str,
+        state: str, code_challenge: str, code_challenge_method: str,
+    ) -> None:
+        expected_redirect = f"http://127.0.0.1:{os.getenv('A500_E2E_WEB_PORT', '3100')}/"
+        if (
+            client_id != "a500-browser-client"
+            or redirect_uri != expected_redirect
+            or response_type != "code"
+            or "openid" not in scope.split()
+            or not state
+            or not re.fullmatch(r"[A-Za-z0-9_-]{43}", code_challenge)
+            or code_challenge_method != "S256"
+        ):
+            raise HTTPException(400, "Invalid fixture authorization request")
 
-    @app.get("/fixture-idp/verify", response_class=HTMLResponse)
-    async def verify(code: str):
-        if code not in devices:
-            raise HTTPException(404, "Unknown fixture device")
+    @app.get("/fixture-idp/authorize", response_class=HTMLResponse)
+    async def authorize(
+        client_id: str, redirect_uri: str, response_type: str, scope: str,
+        state: str, code_challenge: str, code_challenge_method: str,
+    ):
+        values = {
+            "client_id": client_id, "redirect_uri": redirect_uri,
+            "response_type": response_type, "scope": scope, "state": state,
+            "code_challenge": code_challenge, "code_challenge_method": code_challenge_method,
+        }
+        validate_authorization(**values)
+        hidden = "".join(
+            f"<input type='hidden' name='{name}' value='{html.escape(value, quote=True)}'>"
+            for name, value in values.items()
+        )
         return (
-            "<!doctype html><html lang='en'><title>Fixture device authorization</title>"
+            "<!doctype html><html lang='en'><title>Fixture authorization</title>"
             "<h1>Deterministic test IdP — not Keycloak</h1>"
-            "<form method='post'><input type='hidden' name='code' "
-            f"value='{html.escape(code)}'>"
+            f"<form method='post'>{hidden}"
             "<label>Fixture account<input name='subject' required></label>"
-            "<button type='submit'>Authorize fixture device</button></form></html>"
+            "<button type='submit'>Authorize fixture account</button></form></html>"
         )
 
-    @app.post("/fixture-idp/verify", response_class=HTMLResponse)
-    async def approve(code: str = Form(), subject: str = Form()):
-        if code not in devices or not subject.strip():
-            raise HTTPException(400, "Unknown fixture device or empty subject")
-        devices[code]["subject"] = subject.strip()
-        return "<h1>Fixture device authorized</h1><p>You may close this test page.</p>"
+    @app.post("/fixture-idp/authorize")
+    async def approve(
+        client_id: str = Form(), redirect_uri: str = Form(),
+        response_type: str = Form(), scope: str = Form(), state: str = Form(),
+        code_challenge: str = Form(), code_challenge_method: str = Form(),
+        subject: str = Form(),
+    ):
+        validate_authorization(
+            client_id, redirect_uri, response_type, scope, state,
+            code_challenge, code_challenge_method,
+        )
+        if not subject.strip():
+            raise HTTPException(400, "Empty fixture subject")
+        code = secrets.token_urlsafe(32)
+        codes[code] = {
+            "subject": subject.strip(), "challenge": code_challenge,
+            "redirect_uri": redirect_uri,
+        }
+        return RedirectResponse(f"{redirect_uri}?{urlencode({'code': code, 'state': state})}", status_code=303)
 
     @app.post("/fixture-idp/token")
     async def token(
-        device_code: str = Form(), grant_type: str = Form(), client_id: str = Form()
+        code: str = Form(), grant_type: str = Form(), client_id: str = Form(),
+        redirect_uri: str = Form(), code_verifier: str = Form(),
     ):
+        if not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", code_verifier):
+            return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        authorization = codes.pop(code, None)
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode("ascii")).digest()
+        ).rstrip(b"=").decode("ascii")
         if (
-            client_id != "a500-device-client"
-            or grant_type != "urn:ietf:params:oauth:grant-type:device_code"
-            or device_code not in devices
+            client_id != "a500-browser-client"
+            or grant_type != "authorization_code"
+            or authorization is None
+            or redirect_uri != authorization["redirect_uri"]
+            or not secrets.compare_digest(challenge, authorization["challenge"])
         ):
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
-        subject = devices[device_code]["subject"]
-        if not subject:
-            return JSONResponse({"error": "authorization_pending"}, status_code=400)
         access_token = secrets.token_urlsafe(32)
-        tokens[access_token] = subject
+        tokens[access_token] = authorization["subject"]
         return {"access_token": access_token, "token_type": "Bearer", "expires_in": 300}
 
     @app.post("/__fixture/signals/{status}")

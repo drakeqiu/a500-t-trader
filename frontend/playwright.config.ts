@@ -43,7 +43,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${nextPort}`,
       env: {
         NEXT_PUBLIC_A500_OIDC_ISSUER: `${fixtureOrigin}/fixture-idp`,
-        NEXT_PUBLIC_A500_OIDC_CLIENT_ID: "a500-device-client",
+        NEXT_PUBLIC_A500_OIDC_CLIENT_ID: "a500-browser-client",
         A500_NEXT_DIST_DIR: `.next-e2e-${webPort}`,
       },
       reuseExistingServer: false,

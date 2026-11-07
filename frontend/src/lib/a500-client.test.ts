@@ -8,7 +8,6 @@ import {
   getSignals,
   getSnapshot,
   parseSignalEvent,
-  pollDeviceToken,
   saveSnapshot,
   streamSignals,
 } from "./a500-client";
@@ -189,18 +188,10 @@ describe("SSE protocol", () => {
     await expect(getSignals("token")).rejects.toMatchObject({ status: 401 });
   });
 });
-describe("device authorization cancellation", () => {
-  it("cancels the interval without issuing a token request", async () => {
-    vi.useFakeTimers();
+describe("stream retry cancellation", () => {
+  it("rejects a delay when aborted", async () => {
     const controller = new AbortController();
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const pending = pollDeviceToken("/token", "device", 5, controller.signal);
-    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
     controller.abort();
-    await rejection;
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetchMock).not.toHaveBeenCalled();
     await expect(abortableDelay(1000, controller.signal)).rejects.toMatchObject({
       name: "AbortError",
     });

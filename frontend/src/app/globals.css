@@ -159,29 +159,6 @@ code {
   background: var(--red-soft);
   color: #76291f;
 }
-.device-panel {
-  margin-top: 20px;
-  padding: 18px 20px;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  border: 1px solid var(--rule);
-  background: var(--surface);
-}
-.device-panel h2 {
-  margin: 0 0 3px;
-  font-size: 16px;
-}
-.device-panel p {
-  margin: 0;
-  color: var(--muted);
-}
-.user-code {
-  margin-left: auto;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 22px;
-  letter-spacing: 0.1em;
-}
 .button {
   min-height: 38px;
   display: inline-flex;
@@ -593,18 +570,6 @@ tbody th {
   .empty-state {
     border-bottom: 1px solid var(--rule);
   }
-  .device-panel {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 14px;
-  }
-  .device-panel > div {
-    width: 100%;
-  }
-  .user-code {
-    margin: 0;
-  }
   .page-footer {
     flex-direction: column;
     gap: 5px;
@@ -710,21 +675,6 @@ tbody th {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
-}
-.code-row {
-  margin-top: 19px;
-  padding: 13px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  background: var(--paper);
-  color: var(--muted);
-  font-size: 12px;
-}
-.code-row .user-code {
-  margin: 0;
-  color: var(--ink);
 }
 .auth-cancel {
   margin-top: 10px;

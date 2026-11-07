@@ -6,7 +6,7 @@
 
 - Linux 主机、可工作的 Docker Engine 和 Compose 插件，能拉取基础镜像并访问构建依赖；下面命令使用 `docker compose`。rootless Podman 可使用 `podman-compose`，但网络和卷权限需按其环境处理。
 - 在仓库 `wheels/` 放置项目 `deps-v1` release 提供的 `AmazingData-1.1.9-cp314-none-any.whl` 和 `tgw-1.0.9.2-py3-none-any.whl`。前端镜像使用 Bun 构建，后端镜像使用 uv；无需在宿主机安装它们。构建网络需能访问依赖源，可用 `UV_INDEX_URL` 指定 Python 包索引。
-- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 容器到该服务的网络。准备独立 OIDC IdP、获准用户及设备授权客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
+- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
 - 凭据通过受保护的环境变量或未提交、限制访问的 `.env` 提供，不写入镜像或仓库。下例以交互式 shell 输入敏感值，避免直接写入命令历史；不要在共享终端输出环境变量或令牌。
 
 ## 本地集成：真实服务和开发 Keycloak
@@ -23,9 +23,9 @@ python3 scripts/start-local.py
 
 启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也可指定 `--timeout 300`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放的完整操作见 [README](../README.md#本地前后端集成)。
 
-在同一台机器访问 <http://localhost:8081>，使用刚设置的管理员登录，在 `a500` Realm 中创建并启用用户、设置密码；没有默认用户，自助注册关闭。打开 <http://localhost:8080>，按页面展示的设备授权 URI 和用户码在浏览器登录并批准。默认客户端只允许 `http://localhost:8080` 跨域访问 IdP，因此不要替换为 `127.0.0.1`；更改端口时必须在 Keycloak 客户端 Web origins 添加实际来源。旧 Keycloak 卷中的 Realm 不会因重启重新导入，应在管理界面修改，不要为更新配置删除用户卷。
+在同一台机器访问 <http://localhost:8081>，使用刚设置的管理员登录，在 `a500` Realm 中创建并启用用户、设置密码；没有默认用户，自助注册关闭。打开 <http://localhost:8080>，通过 Keycloak 登录。客户端须精确允许浏览器来源和根路径回调 URI；不要将 `localhost` 替换为 `127.0.0.1`。
 
-本地 issuer 是 `http://localhost:8081/realms/a500`，浏览器必须能访问它；API 容器从 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs` 获取公钥。前者必须与令牌 `iss` 一致，不能替换为容器内部名称。开发 Keycloak 只绑定本机，设备授权 URI 也指向本机，不支持跨设备或局域网浏览器登录。
+本地 issuer 是 `http://localhost:8081/realms/a500`，浏览器必须能访问它；API 容器从 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs` 获取公钥。前者必须与令牌 `iss` 一致，不能替换为容器内部名称。局域网启动方式见 [README](../README.md#本地前后端集成)。
 
 ```bash
 python3 scripts/start-local.py ps
@@ -39,7 +39,7 @@ python3 scripts/start-local.py down
 
 ### 配置身份和外部服务
 
-由 IdP 管理员配置支持 OAuth 2.0 Device Authorization Grant 的 public client，提供获准用户，使 access token 包含 API 所需 audience，并允许实际 UI 来源跨域访问 IdP 的设备授权和 token 端点。issuer 的 discovery 地址及其返回的端点必须可由用户浏览器访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全相同，audience 必须与 access token 的 `aud` 匹配。API 验证签名、issuer、audience 和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
+由 IdP 管理员配置支持 Authorization Code 和 PKCE S256 的 public client，提供获准用户，使 access token 包含 API 所需 audience，并精确允许 UI 来源及根路径回调 URI。issuer 的 discovery 地址及其返回的端点必须可由用户浏览器访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全相同，audience 必须与 access token 的 `aud` 匹配。API 验证签名、issuer、audience 和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
 
 以下域名和账户参数须替换成实际环境值。输入的密码不显示；也可由部署环境安全注入这些变量。
 
@@ -48,7 +48,7 @@ export A500_MARKET_DATA_MODE=tgw
 export A500_OIDC_ISSUER=https://identity.example.internal/realms/a500
 export A500_OIDC_AUDIENCE=a500-api
 export A500_OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
-export A500_OIDC_CLIENT_ID=a500-device-client
+export A500_OIDC_CLIENT_ID=a500-browser-client
 read -r -p 'AmazingData username: ' AMAZINGDATA_USERNAME
 read -r -s -p 'AmazingData password: ' AMAZINGDATA_PASSWORD; printf '\n'
 read -r -p 'AmazingData host: ' AMAZINGDATA_HOST
@@ -56,7 +56,7 @@ read -r -p 'AmazingData port: ' AMAZINGDATA_PORT
 export AMAZINGDATA_USERNAME AMAZINGDATA_PASSWORD AMAZINGDATA_HOST AMAZINGDATA_PORT
 ```
 
-`A500_OIDC_CLIENT_ID` 默认 `a500-device-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
+`A500_OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
 
 ### 选择 HTTP 或 HTTPS
 
@@ -82,7 +82,7 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml up 
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 ```
 
-在客户端打开 `https://实际域名:8443`（若覆盖端口则使用实际端口）；证书须覆盖该域名。回环绑定适合本机浏览器，使用对应本机 DNS/hosts 和证书名称。HTTP 模式则打开实际 `http://主机:端口`。登录时按页面的设备授权提示访问独立 IdP 并批准。切换模式前，使用旧模式的文件组合执行 `down`，再以新模式启动；不要同时启动两个入口。更新 UI 来源时同步更新 IdP 的允许来源。
+在客户端打开 `https://实际域名:8443`（若覆盖端口则使用实际端口）；证书须覆盖该域名。回环绑定适合本机浏览器，使用对应本机 DNS/hosts 和证书名称。HTTP 模式则打开实际 `http://主机:端口`。登录时跳转至独立 IdP。切换模式前，使用旧模式的文件组合执行 `down`，再以新模式启动；不要同时启动两个入口。更新 UI 来源时同步更新 IdP 的允许来源和回调 URI。
 
 ### 访问与直接调用
 
