@@ -52,7 +52,9 @@ def local_environment() -> dict[str, str]:
                 raise ValueError(f".env line {number}: quote values containing spaces")
             environment[key] = tokens[0] if tokens else ""
     environment.update(os.environ)
-    environment["A500_POSTGRES_PASSWORD"] = environment.get("A500_POSTGRES_PASSWORD") or "changeme"
+    environment["A500_POSTGRES_PASSWORD"] = (
+        environment.get("A500_POSTGRES_PASSWORD") or "changeme"
+    )
     for suffix in ("USERNAME", "PASSWORD", "HOST", "PORT"):
         target = f"AMAZINGDATA_{suffix}"
         if not environment.get(target):
@@ -171,9 +173,16 @@ def keycloak_admin(command: list[str], environment: dict[str, str]):
         ).stdout
 
     admin(
-        "config", "credentials", "--server", "http://localhost:8080",
-        "--realm", "master", "--user", environment["KEYCLOAK_ADMIN_USERNAME"],
-        "--password", environment["KEYCLOAK_ADMIN_PASSWORD"],
+        "config",
+        "credentials",
+        "--server",
+        "http://localhost:8080",
+        "--realm",
+        "master",
+        "--user",
+        environment["KEYCLOAK_ADMIN_USERNAME"],
+        "--password",
+        environment["KEYCLOAK_ADMIN_PASSWORD"],
     )
     return admin
 
@@ -182,7 +191,8 @@ def configure_browser_client(admin, origin: str) -> None:
     """Reconcile the browser client even when the realm was already imported."""
     realm = json.loads((ROOT / "keycloak/realm-a500.json").read_text())
     template = next(
-        client for client in realm["clients"]
+        client
+        for client in realm["clients"]
         if client["clientId"] == "a500-browser-client"
     )
     clients = json.loads(
@@ -191,23 +201,38 @@ def configure_browser_client(admin, origin: str) -> None:
     client = next(
         (item for item in clients if item["clientId"] == template["clientId"]), None
     )
-    settings = {key: value for key, value in template.items() if key != "protocolMappers"}
-    settings["redirectUris"] = list(dict.fromkeys(
-        [uri for uri in (client or {}).get("redirectUris", []) if "*" not in uri]
-        + [*template["redirectUris"], f"{origin}/"]
-    ))
-    settings["webOrigins"] = list(dict.fromkeys(
-        [uri for uri in (client or {}).get("webOrigins", []) if "*" not in uri and uri != "+"]
-        + [*template["webOrigins"], origin]
-    ))
+    settings = {
+        key: value for key, value in template.items() if key != "protocolMappers"
+    }
+    settings["redirectUris"] = list(
+        dict.fromkeys(
+            [uri for uri in (client or {}).get("redirectUris", []) if "*" not in uri]
+            + [*template["redirectUris"], f"{origin}/"]
+        )
+    )
+    settings["webOrigins"] = list(
+        dict.fromkeys(
+            [
+                uri
+                for uri in (client or {}).get("webOrigins", [])
+                if "*" not in uri and uri != "+"
+            ]
+            + [*template["webOrigins"], origin]
+        )
+    )
     settings["attributes"] = {
-        **(client or {}).get("attributes", {}), **template["attributes"]
+        **(client or {}).get("attributes", {}),
+        **template["attributes"],
     }
 
     def assignments(values):
         arguments = []
         for key, value in values.items():
-            encoded = value if isinstance(value, str) else json.dumps(value, separators=(",", ":"))
+            encoded = (
+                value
+                if isinstance(value, str)
+                else json.dumps(value, separators=(",", ":"))
+            )
             arguments.extend(("-s", f"{key}={encoded}"))
         return arguments
 
@@ -216,7 +241,9 @@ def configure_browser_client(admin, origin: str) -> None:
         clients = json.loads(
             admin("get", "clients", "-r", "a500", "-q", "clientId=a500-browser-client")
         )
-        client = next(item for item in clients if item["clientId"] == template["clientId"])
+        client = next(
+            item for item in clients if item["clientId"] == template["clientId"]
+        )
     else:
         admin("update", f"clients/{client['id']}", "-r", "a500", *assignments(settings))
 
@@ -229,7 +256,13 @@ def configure_browser_client(admin, origin: str) -> None:
     if old_mapper is None:
         admin("create", endpoint, "-r", "a500", *assignments(mapper))
     else:
-        admin("update", f"{endpoint}/{old_mapper['id']}", "-r", "a500", *assignments(mapper))
+        admin(
+            "update",
+            f"{endpoint}/{old_mapper['id']}",
+            "-r",
+            "a500",
+            *assignments(mapper),
+        )
 
 
 def wait_ready(timeout: int, gateway_port: str = "8080") -> None:

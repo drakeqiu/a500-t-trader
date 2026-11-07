@@ -169,7 +169,10 @@ def main() -> int:
         json.JSONDecodeError,
     ) as error:
         if isinstance(error, subprocess.CalledProcessError):
-            print("LAN startup failed: container command failed; inspect logs", file=sys.stderr)
+            print(
+                "LAN startup failed: container command failed; inspect logs",
+                file=sys.stderr,
+            )
         else:
             print(f"LAN startup failed: {error}", file=sys.stderr)
         return 1

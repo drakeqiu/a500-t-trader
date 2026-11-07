@@ -143,10 +143,17 @@ def create_fixture(port: int) -> FastAPI:
         }
 
     def validate_authorization(
-        client_id: str, redirect_uri: str, response_type: str, scope: str,
-        state: str, code_challenge: str, code_challenge_method: str,
+        client_id: str,
+        redirect_uri: str,
+        response_type: str,
+        scope: str,
+        state: str,
+        code_challenge: str,
+        code_challenge_method: str,
     ) -> None:
-        expected_redirect = f"http://127.0.0.1:{os.getenv('A500_E2E_WEB_PORT', '3100')}/"
+        expected_redirect = (
+            f"http://127.0.0.1:{os.getenv('A500_E2E_WEB_PORT', '3100')}/"
+        )
         if (
             client_id != "a500-browser-client"
             or redirect_uri != expected_redirect
@@ -160,17 +167,27 @@ def create_fixture(port: int) -> FastAPI:
 
     @app.get("/fixture-idp/authorize", response_class=HTMLResponse)
     async def authorize(
-        client_id: str, redirect_uri: str, response_type: str, scope: str,
-        state: str, code_challenge: str, code_challenge_method: str,
+        client_id: str,
+        redirect_uri: str,
+        response_type: str,
+        scope: str,
+        state: str,
+        code_challenge: str,
+        code_challenge_method: str,
     ):
         values = {
-            "client_id": client_id, "redirect_uri": redirect_uri,
-            "response_type": response_type, "scope": scope, "state": state,
-            "code_challenge": code_challenge, "code_challenge_method": code_challenge_method,
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": response_type,
+            "scope": scope,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": code_challenge_method,
         }
         validate_authorization(**values)
         hidden = "".join(
-            f"<input type='hidden' name='{name}' value='{html.escape(value, quote=True)}'>"
+            f"<input type='hidden' name='{name}' "
+            f"value='{html.escape(value, quote=True)}'>"
             for name, value in values.items()
         )
         return (
@@ -183,35 +200,55 @@ def create_fixture(port: int) -> FastAPI:
 
     @app.post("/fixture-idp/authorize")
     async def approve(
-        client_id: str = Form(), redirect_uri: str = Form(),
-        response_type: str = Form(), scope: str = Form(), state: str = Form(),
-        code_challenge: str = Form(), code_challenge_method: str = Form(),
+        client_id: str = Form(),
+        redirect_uri: str = Form(),
+        response_type: str = Form(),
+        scope: str = Form(),
+        state: str = Form(),
+        code_challenge: str = Form(),
+        code_challenge_method: str = Form(),
         subject: str = Form(),
     ):
         validate_authorization(
-            client_id, redirect_uri, response_type, scope, state,
-            code_challenge, code_challenge_method,
+            client_id,
+            redirect_uri,
+            response_type,
+            scope,
+            state,
+            code_challenge,
+            code_challenge_method,
         )
         if not subject.strip():
             raise HTTPException(400, "Empty fixture subject")
         code = secrets.token_urlsafe(32)
         codes[code] = {
-            "subject": subject.strip(), "challenge": code_challenge,
+            "subject": subject.strip(),
+            "challenge": code_challenge,
             "redirect_uri": redirect_uri,
         }
-        return RedirectResponse(f"{redirect_uri}?{urlencode({'code': code, 'state': state})}", status_code=303)
+        return RedirectResponse(
+            f"{redirect_uri}?{urlencode({'code': code, 'state': state})}",
+            status_code=303,
+        )
 
     @app.post("/fixture-idp/token")
     async def token(
-        code: str = Form(), grant_type: str = Form(), client_id: str = Form(),
-        redirect_uri: str = Form(), code_verifier: str = Form(),
+        code: str = Form(),
+        grant_type: str = Form(),
+        client_id: str = Form(),
+        redirect_uri: str = Form(),
+        code_verifier: str = Form(),
     ):
         if not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", code_verifier):
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
         authorization = codes.pop(code, None)
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode("ascii")).digest()
-        ).rstrip(b"=").decode("ascii")
+        challenge = (
+            base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode("ascii")).digest()
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
         if (
             client_id != "a500-browser-client"
             or grant_type != "authorization_code"
