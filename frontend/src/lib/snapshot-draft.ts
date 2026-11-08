@@ -2,14 +2,71 @@ import type { AccountSnapshot } from "./a500-client";
 
 const decimalString = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 export type SnapshotDraft = Record<keyof AccountSnapshot, string>;
+export type PositionDraft = {
+  symbol: string;
+  holdings: string;
+  protected_floor: string;
+  sellable: string;
+  cost_basis: string;
+};
 export const snapshotFields = [
-  ["as_of", "快照时间（含时区）"],
+  ["as_of", "快照时间"],
+  ["holdings", "持有总份额"],
+  ["protected_floor", "保护底仓"],
+  ["sellable", "当前可卖"],
+  ["cost_basis", "成本基础"],
   ["available_cash", "可用现金"],
-  ["holdings", "持仓数量（JSON）"],
-  ["protected_floor", "保护底仓（JSON）"],
-  ["sellable", "可卖数量（JSON）"],
-  ["cost_basis", "成本基础（JSON）"],
 ] as const;
+const positionFields = ["holdings", "protected_floor", "sellable", "cost_basis"] as const;
+
+export function snapshotPositions(draft: SnapshotDraft): PositionDraft[] {
+  const mappings = Object.fromEntries(
+    positionFields.map((field) => [
+      field,
+      JSON.parse(draft[field]) as Record<string, number | string>,
+    ]),
+  ) as Record<(typeof positionFields)[number], Record<string, number | string>>;
+  const symbols = new Set(positionFields.flatMap((field) => Object.keys(mappings[field])));
+  return [...symbols].map((symbol) => ({
+    symbol,
+    holdings: String(mappings.holdings[symbol] ?? 0),
+    protected_floor: String(mappings.protected_floor[symbol] ?? 0),
+    sellable: String(mappings.sellable[symbol] ?? 0),
+    cost_basis: String(mappings.cost_basis[symbol] ?? ""),
+  }));
+}
+
+export function snapshotDraftWithPositions(
+  draft: SnapshotDraft,
+  positions: PositionDraft[],
+): SnapshotDraft {
+  const mappings = Object.fromEntries(positionFields.map((field) => [field, {}])) as Record<
+    (typeof positionFields)[number],
+    Record<string, number | string>
+  >;
+  for (const position of positions) {
+    const symbol = position.symbol.trim();
+    if (!symbol) continue;
+    for (const field of positionFields) {
+      const value = position[field].trim();
+      if (field === "cost_basis") {
+        if (value) mappings[field][symbol] = value;
+      } else {
+        const number = Number(value);
+        mappings[field][symbol] =
+          value !== "" && Number.isSafeInteger(number) && number >= 0 ? number : value;
+      }
+    }
+  }
+  return {
+    ...draft,
+    holdings: JSON.stringify(mappings.holdings, null, 2),
+    protected_floor: JSON.stringify(mappings.protected_floor, null, 2),
+    sellable: JSON.stringify(mappings.sellable, null, 2),
+    cost_basis: JSON.stringify(mappings.cost_basis, null, 2),
+  };
+}
+
 export function snapshotDraft(snapshot?: AccountSnapshot): SnapshotDraft {
   return {
     as_of: snapshot?.as_of ?? "",

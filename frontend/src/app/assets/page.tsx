@@ -16,7 +16,9 @@ import { clearAccessToken, getAccessToken, subscribeSession } from "@/lib/sessio
 import {
   parseSnapshotDraft,
   snapshotDraft,
-  snapshotFields,
+  snapshotDraftWithPositions,
+  snapshotPositions,
+  type PositionDraft,
   type SnapshotDraft,
 } from "@/lib/snapshot-draft";
 
@@ -70,6 +72,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotBusy, setSnapshotBusy] = useState(false);
   const [draft, setDraft] = useState<SnapshotDraft>(snapshotDraft());
+  const [positions, setPositions] = useState<PositionDraft[]>([]);
   const [draftDirty, setDraftDirty] = useState(false);
   const [editing, setEditing] = useState(false);
   const [latest, setLatest] = useState<SnapshotResult | null | undefined>(undefined);
@@ -81,6 +84,27 @@ function AssetsDashboard({ token }: { token: string | null }) {
   const snapshotOperationRef = useRef(false);
   const snapshotRequestRef = useRef(0);
   const navRequestRef = useRef(0);
+  function replaceDraft(value: SnapshotDraft) {
+    setDraft(value);
+    setPositions(snapshotPositions(value));
+  }
+
+  function updatePosition(index: number, field: keyof PositionDraft, value: string) {
+    const next = positions.map((position, row) =>
+      row === index ? { ...position, [field]: value } : position,
+    );
+    setPositions(next);
+    setDraft((current) => snapshotDraftWithPositions(current, next));
+    setDraftDirty(true);
+    setSnapshotError(null);
+  }
+
+  function setPositionsAndDraft(next: PositionDraft[]) {
+    setPositions(next);
+    setDraft((current) => snapshotDraftWithPositions(current, next));
+    setDraftDirty(true);
+    setSnapshotError(null);
+  }
 
   const refreshNav = useCallback(async (accessToken: string, signal?: AbortSignal) => {
     const request = ++navRequestRef.current;
@@ -111,7 +135,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
         if (controller.signal.aborted || request !== snapshotRequestRef.current) return;
         setSnapshot(result);
         setSnapshotKnown(true);
-        setDraft(snapshotDraft(result?.snapshot));
+        replaceDraft(snapshotDraft(result?.snapshot));
       } catch (reason) {
         if (controller.signal.aborted || request !== snapshotRequestRef.current) return;
         if (reason instanceof ApiError && reason.status === 401) clearAccessToken();
@@ -127,7 +151,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
   function discardDraft() {
     const source = latest !== undefined ? latest : snapshot;
     setSnapshot(source);
-    setDraft(snapshotDraft(source?.snapshot));
+    replaceDraft(snapshotDraft(source?.snapshot));
     setDraftDirty(false);
     setEditing(false);
     setLatest(undefined);
@@ -165,7 +189,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
       setLatest(result);
       if (!draftDirty) {
         setSnapshot(result);
-        setDraft(snapshotDraft(result?.snapshot));
+        replaceDraft(snapshotDraft(result?.snapshot));
       }
       await refreshNav(token);
       setNotice("已读取服务端最新快照。当前草稿保持不变；请选择如何处理版本差异。");
@@ -188,9 +212,15 @@ function AssetsDashboard({ token }: { token: string | null }) {
     setSnapshotError(null);
     setNotice(null);
     try {
+      if (positions.some((position) => !position.symbol.trim())) {
+        throw new Error("请为每行填写证券代码，或删除空白行。");
+      }
+      if (new Set(positions.map((position) => position.symbol.trim())).size !== positions.length) {
+        throw new Error("证券代码不能重复。");
+      }
       const result = await saveSnapshot(token, parseSnapshotDraft(draft), snapshot?.etag ?? null);
       setSnapshot(result);
-      setDraft(snapshotDraft(result.snapshot));
+      replaceDraft(snapshotDraft(result.snapshot));
       setDraftDirty(false);
       setEditing(false);
       setLatest(undefined);
@@ -481,79 +511,169 @@ function AssetsDashboard({ token }: { token: string | null }) {
               {editing && (
                 <form className="snapshot-editor" onSubmit={(event) => void saveAccount(event)}>
                   <p className="snapshot-editor-note">
-                    六项均为必填。数量字段使用非负整数 JSON
-                    对象；成本基础使用十进制字符串。快照时间须包含时区。保存会完整替换现有快照。
+                    按照你查看账户的实际情况填写。证券持仓按行录入，不用编写
+                    JSON；保存后会完整替换当前快照。
                   </p>
                   <div className="snapshot-fields">
-                    {snapshotFields.map(([field, label]) => {
-                      const mapping = [
-                        "holdings",
-                        "protected_floor",
-                        "sellable",
-                        "cost_basis",
-                      ].includes(field);
-                      return (
-                        <label
-                          className={`snapshot-field${mapping ? " is-mapping" : ""}`}
-                          key={field}
-                        >
-                          <span>{label}</span>
-                          {mapping ? (
-                            <textarea
-                              aria-label={label}
-                              value={draft[field]}
-                              required
-                              spellCheck={false}
-                              rows={5}
-                              aria-describedby={`${field}-hint`}
-                              onChange={(event) => setField(field, event.target.value)}
-                            />
-                          ) : (
-                            <input
-                              aria-label={label}
-                              aria-describedby={
-                                field === "as_of" || field === "available_cash"
-                                  ? `${field}-hint`
-                                  : undefined
-                              }
-                              value={draft[field]}
-                              required
-                              inputMode={field === "available_cash" ? "decimal" : "text"}
-                              onChange={(event) => setField(field, event.target.value)}
-                            />
-                          )}
-                          {field === "as_of" && (
-                            <small id="as_of-hint">
-                              RFC 3339 日期时间，例如 2026-11-06T15:00:00+08:00
-                            </small>
-                          )}
-                          {field === "available_cash" && (
-                            <small id="available_cash-hint">
-                              非负十进制字符串；支持超大金额并保留输入精度，不强制保留两位小数。
-                            </small>
-                          )}
-                          {field === "holdings" && (
-                            <small id="holdings-hint">例：{`{"510300":100}`}</small>
-                          )}
-                          {field === "protected_floor" && (
-                            <small id="protected_floor-hint">
-                              标的集合与持仓一致；保护底仓不得超过持仓。
-                            </small>
-                          )}
-                          {field === "sellable" && (
-                            <small id="sellable-hint">
-                              标的集合与持仓一致；可卖数量不得超过持仓减保护底仓。
-                            </small>
-                          )}
-                          {field === "cost_basis" && (
-                            <small id="cost_basis-hint">
-                              例：{`{"510300":"3.8500"}`}；每个金额必须为字符串。
-                            </small>
-                          )}
-                        </label>
-                      );
-                    })}
+                    <label className="snapshot-field">
+                      <span>快照时间</span>
+                      <input
+                        aria-label="快照时间"
+                        aria-describedby="as_of-hint"
+                        value={draft.as_of}
+                        required
+                        onChange={(event) => setField("as_of", event.target.value)}
+                      />
+                      <small id="as_of-hint">
+                        记录这份余额和持仓对应的时间，必须包含时区。例：2026-11-06T15:00:00+08:00
+                      </small>
+                      <button
+                        className="text-action snapshot-time-action"
+                        type="button"
+                        onClick={() => setField("as_of", new Date().toISOString())}
+                      >
+                        填入当前时间（UTC）
+                      </button>
+                    </label>
+                    <label className="snapshot-field">
+                      <span>可用现金（元）</span>
+                      <input
+                        aria-label="可用现金"
+                        aria-describedby="available_cash-hint"
+                        value={draft.available_cash}
+                        required
+                        inputMode="decimal"
+                        onChange={(event) => setField("available_cash", event.target.value)}
+                      />
+                      <small id="available_cash-hint">
+                        填账户当前可用于交易的现金，不含持仓市值。例：5000.00
+                      </small>
+                    </label>
                   </div>
+                  <section className="position-editor" aria-labelledby="positions-title">
+                    <div className="position-editor-heading">
+                      <div>
+                        <h3 id="positions-title">证券持仓</h3>
+                        <p>每只证券一行。没有持仓时可以留空；保护底仓和可卖数量按账户实际填写。</p>
+                      </div>
+                      <button
+                        className="refresh-button"
+                        type="button"
+                        onClick={() =>
+                          setPositionsAndDraft([
+                            ...positions,
+                            {
+                              symbol: "",
+                              holdings: "0",
+                              protected_floor: "0",
+                              sellable: "0",
+                              cost_basis: "",
+                            },
+                          ])
+                        }
+                      >
+                        添加证券
+                      </button>
+                    </div>
+                    {positions.length === 0 ? (
+                      <p className="position-empty">
+                        当前没有持仓行。若账户持有证券，请添加一行填写。
+                      </p>
+                    ) : (
+                      <div className="position-list">
+                        {positions.map((position, index) => (
+                          <fieldset className="position-row" key={index}>
+                            <legend>证券 {index + 1}</legend>
+                            <label>
+                              <span>证券代码</span>
+                              <input
+                                aria-label={`第 ${index + 1} 行证券代码`}
+                                value={position.symbol}
+                                placeholder="例如 510300"
+                                required
+                                onChange={(event) =>
+                                  updatePosition(index, "symbol", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              <span>持有总份额</span>
+                              <input
+                                aria-label={`第 ${index + 1} 行持有总份额`}
+                                inputMode="numeric"
+                                value={position.holdings}
+                                required
+                                aria-describedby="position-holdings-hint"
+                                onChange={(event) =>
+                                  updatePosition(index, "holdings", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              <span>保护底仓</span>
+                              <input
+                                aria-label={`第 ${index + 1} 行保护底仓`}
+                                inputMode="numeric"
+                                value={position.protected_floor}
+                                required
+                                aria-describedby="position-floor-hint"
+                                onChange={(event) =>
+                                  updatePosition(index, "protected_floor", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              <span>当前可卖</span>
+                              <input
+                                aria-label={`第 ${index + 1} 行当前可卖`}
+                                inputMode="numeric"
+                                value={position.sellable}
+                                required
+                                aria-describedby="position-sellable-hint"
+                                onChange={(event) =>
+                                  updatePosition(index, "sellable", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label>
+                              <span>成本基础（元）</span>
+                              <input
+                                aria-label={`第 ${index + 1} 行成本基础`}
+                                inputMode="decimal"
+                                value={position.cost_basis}
+                                placeholder="可留空"
+                                aria-describedby="position-cost-hint"
+                                onChange={(event) =>
+                                  updatePosition(index, "cost_basis", event.target.value)
+                                }
+                              />
+                            </label>
+                            <button
+                              className="text-action position-remove"
+                              type="button"
+                              onClick={() =>
+                                setPositionsAndDraft(positions.filter((_, row) => row !== index))
+                              }
+                            >
+                              删除此行
+                            </button>
+                          </fieldset>
+                        ))}
+                      </div>
+                    )}
+                    <div className="position-hints">
+                      <small id="position-holdings-hint">账户中该证券的持仓总份额。</small>
+                      <small id="position-floor-hint">
+                        其中不打算卖出的保留份额，不能大于总持仓。
+                      </small>
+                      <small id="position-sellable-hint">
+                        当前实际可卖份额，不能超过持仓减保护底仓。
+                      </small>
+                      <small id="position-cost-hint">
+                        成本基础金额；暂不清楚时可留空。例：3.8500
+                      </small>
+                    </div>
+                  </section>
                   {conflict && (
                     <div className="asset-conflict" role="group" aria-label="处理快照版本冲突">
                       <p>草稿内容仍保留。不会自动覆盖其他版本。</p>
@@ -565,7 +685,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                             disabled={snapshotBusy}
                             onClick={() => {
                               setSnapshot(latest);
-                              setDraft(snapshotDraft(latest?.snapshot));
+                              replaceDraft(snapshotDraft(latest?.snapshot));
                               setDraftDirty(false);
                               setEditing(false);
                               setConflict(false);

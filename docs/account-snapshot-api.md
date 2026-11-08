@@ -2,6 +2,55 @@
 
 `GET /api/v1/account-snapshot` 返回当前认证主体的当前账户快照；首次写入前返回 `404`。快照包含 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash`、服务器写入时间 `updated_at` 和 `user-entered; not broker-verified` 分类。响应带有代表完整当前状态的强 `ETag`。
 
+## `GET /api/v1/account-snapshot` 响应示例
+
+快照资源已创建、但当前没有任何持仓时，接口返回 `200`。这是“持仓为空”，不代表账户整体为空；例如仍可有可用现金。各持仓映射为空对象：
+
+```json
+{
+  "as_of": "2026-11-08T09:30:00+08:00",
+  "holdings": {},
+  "protected_floor": {},
+  "sellable": {},
+  "cost_basis": {},
+  "available_cash": "5000.00",
+  "updated_at": "2026-11-08T01:31:12.345678+00:00",
+  "classification": "user-entered; not broker-verified"
+}
+```
+
+有持仓时，各字段按证券代码映射；数量为整数，成本基础为十进制字符串：
+
+```json
+{
+  "as_of": "2026-11-08T09:30:00+08:00",
+  "holdings": { "510300": 1000 },
+  "protected_floor": { "510300": 200 },
+  "sellable": { "510300": 800 },
+  "cost_basis": { "510300": "3.8500" },
+  "available_cash": "5000.00",
+  "updated_at": "2026-11-08T01:31:12.345678+00:00",
+  "classification": "user-entered; not broker-verified"
+}
+```
+
+多个证券持仓时，每个映射分别包含对应证券代码；`holdings`、`protected_floor`、`sellable` 的证券代码集合必须一致：
+
+```json
+{
+  "as_of": "2026-11-08T09:30:00+08:00",
+  "holdings": { "510300": 1000, "159919": 500 },
+  "protected_floor": { "510300": 200, "159919": 100 },
+  "sellable": { "510300": 800, "159919": 400 },
+  "cost_basis": { "510300": "3.8500", "159919": "1.2345" },
+  "available_cash": "5000.00",
+  "updated_at": "2026-11-08T01:31:12.345678+00:00",
+  "classification": "user-entered; not broker-verified"
+}
+```
+
+`cost_basis` 可以不包含没有成本数据的证券代码；不要用 `null` 表示空值。快照尚未首次写入时，GET 返回 `404`，表示快照资源不存在，而不是持仓为空。
+
 `PUT /api/v1/account-snapshot` 是完整替换，不是部分更新。请求体必须且只能提供 `as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash` 六个字段；缺失或未知字段、任意位置的 `null`、以及不符合字段类型的值均拒绝。`as_of` 必须是带 `Z` 或 `±HH:MM` 时区偏移的 RFC 3339 日期时间，不限制历史日期。金额必须是有限、非负的十进制字符串。证券数量必须是非负整数（布尔值不算整数）；`holdings`、`protected_floor`、`sellable` 的证券 key 集合必须相同，且 `protected_floor <= holdings`、`sellable <= holdings - protected_floor`。`cost_basis` 必须为对象，key 经证券代码标准化后须为 holdings 的子集，金额也必须是有限非负十进制字符串；所有证券映射标准化后发生重复时拒绝。
 
 格式错误或非标准 JSON（包括 `NaN`、`Infinity`）返回 `400 application/problem+json`；合法 JSON 但不符合快照契约返回 `422 application/problem+json`。错误响应的 `errors` 数组提供稳定的 `path` 和 `code`，例如 `{"path":"holdings.510300","code":"invalid_quantity"}`。校验失败不会修改当前快照或追加历史记录。成功响应保留规范化证券 key，并包含 `user-entered; not broker-verified` classification。
@@ -22,6 +71,8 @@ DATABASE_URL=postgresql://a500:password@127.0.0.1:5432/a500
 未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需保护 PostgreSQL 凭据并使用持久化、受限访问的数据库；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `postgres-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/api/v1/account-*`、`/api/v1/trade-imports` 至账户 API。测试可通过 `create_app(database, authenticator, market_data=...)` 使用独立数据库、确定性身份验证替身及可控行情服务。
 
 本地前后端真实集成的启动步骤见[统一 Web 部署与运维](web-deployment.md#本地集成真实服务和开发-keycloak)。浏览器与直接 API 调用均通过 `http://localhost:8080/api/v1/*` 访问 Nginx gateway，旧 `/v1/*` 网关路径不再提供。该代理不增加账户业务逻辑。前端使用页面内存 access token，刷新或失效后重新通过 Keycloak 登录；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
+
+资产页面提供逐行填写的快照表单，不需要手写 JSON：选择快照对应的时间，输入可用现金；每只证券一行填写代码、持有总份额、保护底仓、当前可卖数量和成本基础。成本基础可留空；没有持仓时不添加证券行。表单说明各字段含义并将这些行转换为 API 所需的完整证券映射。保存会完整替换当前快照，数据仍是用户录入、未经券商核验。
 
 ## 当前净资产
 
