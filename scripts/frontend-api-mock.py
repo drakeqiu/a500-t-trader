@@ -171,9 +171,7 @@ def create_fixture(port: int) -> FastAPI:
         code_challenge: str,
         code_challenge_method: str,
     ) -> None:
-        expected_redirect = (
-            f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}/"
-        )
+        expected_redirect = f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}/"
         if (
             client_id != "a500-browser-client"
             or redirect_uri != expected_redirect

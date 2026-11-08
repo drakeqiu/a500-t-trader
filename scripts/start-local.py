@@ -72,9 +72,7 @@ def local_environment() -> dict[str, str]:
 
 
 def compose_command(environment: dict[str, str]) -> list[str]:
-    configured = environment.get("COMPOSE_COMMAND") or environment.get(
-        "PODMAN_COMPOSE"
-    )
+    configured = environment.get("COMPOSE_COMMAND") or environment.get("PODMAN_COMPOSE")
     if configured:
         command = shlex.split(configured)
     elif (
