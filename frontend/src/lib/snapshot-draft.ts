@@ -21,7 +21,10 @@ const positionFields = ["holdings", "protected_floor", "sellable", "cost_basis"]
 
 export function snapshotPositions(draft: SnapshotDraft): PositionDraft[] {
   const mappings = Object.fromEntries(
-    positionFields.map((field) => [field, JSON.parse(draft[field]) as Record<string, number | string>]),
+    positionFields.map((field) => [
+      field,
+      JSON.parse(draft[field]) as Record<string, number | string>,
+    ]),
   ) as Record<(typeof positionFields)[number], Record<string, number | string>>;
   const symbols = new Set(positionFields.flatMap((field) => Object.keys(mappings[field])));
   return [...symbols].map((symbol) => ({

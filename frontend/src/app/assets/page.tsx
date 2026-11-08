@@ -511,7 +511,8 @@ function AssetsDashboard({ token }: { token: string | null }) {
               {editing && (
                 <form className="snapshot-editor" onSubmit={(event) => void saveAccount(event)}>
                   <p className="snapshot-editor-note">
-                    按照你查看账户的实际情况填写。证券持仓按行录入，不用编写 JSON；保存后会完整替换当前快照。
+                    按照你查看账户的实际情况填写。证券持仓按行录入，不用编写
+                    JSON；保存后会完整替换当前快照。
                   </p>
                   <div className="snapshot-fields">
                     <label className="snapshot-field">
@@ -561,7 +562,13 @@ function AssetsDashboard({ token }: { token: string | null }) {
                         onClick={() =>
                           setPositionsAndDraft([
                             ...positions,
-                            { symbol: "", holdings: "0", protected_floor: "0", sellable: "0", cost_basis: "" },
+                            {
+                              symbol: "",
+                              holdings: "0",
+                              protected_floor: "0",
+                              sellable: "0",
+                              cost_basis: "",
+                            },
                           ])
                         }
                       >
@@ -569,7 +576,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                       </button>
                     </div>
                     {positions.length === 0 ? (
-                      <p className="position-empty">当前没有持仓行。若账户持有证券，请添加一行填写。</p>
+                      <p className="position-empty">
+                        当前没有持仓行。若账户持有证券，请添加一行填写。
+                      </p>
                     ) : (
                       <div className="position-list">
                         {positions.map((position, index) => (
@@ -582,7 +591,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                                 value={position.symbol}
                                 placeholder="例如 510300"
                                 required
-                                onChange={(event) => updatePosition(index, "symbol", event.target.value)}
+                                onChange={(event) =>
+                                  updatePosition(index, "symbol", event.target.value)
+                                }
                               />
                             </label>
                             <label>
@@ -593,7 +604,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                                 value={position.holdings}
                                 required
                                 aria-describedby="position-holdings-hint"
-                                onChange={(event) => updatePosition(index, "holdings", event.target.value)}
+                                onChange={(event) =>
+                                  updatePosition(index, "holdings", event.target.value)
+                                }
                               />
                             </label>
                             <label>
@@ -604,7 +617,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                                 value={position.protected_floor}
                                 required
                                 aria-describedby="position-floor-hint"
-                                onChange={(event) => updatePosition(index, "protected_floor", event.target.value)}
+                                onChange={(event) =>
+                                  updatePosition(index, "protected_floor", event.target.value)
+                                }
                               />
                             </label>
                             <label>
@@ -615,7 +630,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                                 value={position.sellable}
                                 required
                                 aria-describedby="position-sellable-hint"
-                                onChange={(event) => updatePosition(index, "sellable", event.target.value)}
+                                onChange={(event) =>
+                                  updatePosition(index, "sellable", event.target.value)
+                                }
                               />
                             </label>
                             <label>
@@ -626,7 +643,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
                                 value={position.cost_basis}
                                 placeholder="可留空"
                                 aria-describedby="position-cost-hint"
-                                onChange={(event) => updatePosition(index, "cost_basis", event.target.value)}
+                                onChange={(event) =>
+                                  updatePosition(index, "cost_basis", event.target.value)
+                                }
                               />
                             </label>
                             <button
@@ -644,9 +663,15 @@ function AssetsDashboard({ token }: { token: string | null }) {
                     )}
                     <div className="position-hints">
                       <small id="position-holdings-hint">账户中该证券的持仓总份额。</small>
-                      <small id="position-floor-hint">其中不打算卖出的保留份额，不能大于总持仓。</small>
-                      <small id="position-sellable-hint">当前实际可卖份额，不能超过持仓减保护底仓。</small>
-                      <small id="position-cost-hint">成本基础金额；暂不清楚时可留空。例：3.8500</small>
+                      <small id="position-floor-hint">
+                        其中不打算卖出的保留份额，不能大于总持仓。
+                      </small>
+                      <small id="position-sellable-hint">
+                        当前实际可卖份额，不能超过持仓减保护底仓。
+                      </small>
+                      <small id="position-cost-hint">
+                        成本基础金额；暂不清楚时可留空。例：3.8500
+                      </small>
                     </div>
                   </section>
                   {conflict && (

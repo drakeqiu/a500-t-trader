@@ -1097,7 +1097,11 @@ code {
   border-radius: 0;
   background: #fff;
   color: var(--ink);
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font:
+    13px/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
 }
 .position-row input::placeholder {
   color: #66716b;

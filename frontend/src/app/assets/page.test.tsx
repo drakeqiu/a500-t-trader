@@ -135,7 +135,6 @@ describe("assets route", () => {
     expect(saveSnapshot).not.toHaveBeenCalled();
   });
 
-
   it("allows only one in-flight save even when submit fires repeatedly", async () => {
     let resolveSave!: (result: SnapshotResult) => void;
     saveSnapshot.mockImplementation(
