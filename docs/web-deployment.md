@@ -21,11 +21,11 @@ export MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
-启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也可指定 `--timeout 300`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放的完整操作见 [README](../README.md#本地前后端集成)。
+启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也可指定 `--timeout 300`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
 
 在同一台机器访问 <http://localhost:8081>，使用刚设置的管理员登录，在 `a500` Realm 中创建并启用用户、设置密码；没有默认用户，自助注册关闭。打开 <http://localhost:8080>，通过 Keycloak 登录。客户端须精确允许浏览器来源和根路径回调 URI；不要将 `localhost` 替换为 `127.0.0.1`。
 
-本地 issuer 是 `http://localhost:8081/realms/a500`，浏览器必须能访问它；API 容器从 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs` 获取公钥。前者必须与令牌 `iss` 一致，不能替换为容器内部名称。局域网启动方式见 [README](../README.md#本地前后端集成)。
+本地 issuer 是 `http://localhost:8081/realms/a500`，浏览器必须能访问它；API 容器从 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs` 获取公钥。前者必须与令牌 `iss` 一致，不能替换为容器内部名称。局域网启动方式见本地[回放与局域网访问](#本地回放与局域网访问)。
 
 ```bash
 python3 scripts/start-local.py ps
@@ -34,6 +34,29 @@ python3 scripts/start-local.py down
 ```
 
 这些命令需要保留同一配置和管理员环境；`down` 不删除持久化卷。启动器仅提供本地 HTTP/Keycloak 拓扑；HTTPS、外部 IdP 和自定义域名使用下面的 Compose 命令。
+
+### 本地回放与局域网访问
+
+不连接 TGW 时，可用快捷脚本启动完整本地服务；脚本选择 `replay` 模式，但不会自动回放行情：
+
+```bash
+./scripts/start-local-replay.sh
+./scripts/start-local-replay.sh ps
+./scripts/start-local-replay.sh logs
+./scripts/start-local-replay.sh down
+```
+
+启动后按[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)准备回放数据；完整本地服务的回放命令见 `python3 scripts/start-local.py replay --help`。账户 API 仍需可用的 AmazingData 配置。
+
+可信局域网内访问时，使用本机的局域网 IPv4 地址启动独立项目：
+
+```bash
+./scripts/start-lan-replay.py 192.168.1.10
+./scripts/start-lan-replay.py 192.168.1.10 ps
+./scripts/start-lan-replay.py 192.168.1.10 down
+```
+
+将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Keycloak 端口；同步配置浏览器客户端允许来源和回调 URI。HTTP 与默认凭据仅适合受防火墙保护的可信局域网，禁止暴露到公网；RabbitMQ 不应暴露给不受信网络。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
 
 ## 实际单机部署
 

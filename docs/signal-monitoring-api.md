@@ -8,7 +8,7 @@
 
 Compose 要求统一 OIDC 配置 `OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；浏览器使用 Authorization Code + PKCE，不提供 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
 
-浏览器与后端的统一本地启动见 [根 README](../README.md#本地前后端集成)：`python3 scripts/start-local.py` 组合基础 Compose、Keycloak、`compose.web.yaml` 和 `compose.web-http.yaml`。浏览器访问 `http://localhost:8080`，Nginx 将同源 `/api/v1/*` 路由到内部 API，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新登录，可复用 Keycloak 会话。直接 API 调用方也使用相同网关路径。
+浏览器与后端的统一本地启动见[统一 Web 部署与运维](web-deployment.md#本地集成真实服务和开发-keycloak)：`python3 scripts/start-local.py` 组合基础 Compose、Keycloak、`compose.web.yaml` 和 `compose.web-http.yaml`。浏览器访问 `http://localhost:8080`，Nginx 将同源 `/api/v1/*` 路由到内部 API，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新登录，可复用 Keycloak 会话。直接 API 调用方也使用相同网关路径。
 
 本地开发可通过独立的 Keycloak Compose 文件启动 IdP；该服务不属于生产外部 OIDC 的默认 Compose 部署。先在当前 shell 中生成临时管理员凭据（不要提交或复用真实凭据），再启动身份服务：
 

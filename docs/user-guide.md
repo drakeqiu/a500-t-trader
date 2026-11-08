@@ -152,7 +152,7 @@ python -m a500_t_trader premarket \
   --config strategy.json --account account.json --output plan-2026-10-30.json
 ```
 
-监控仍使用同一 PostgreSQL 证据库。以下命令假定已设置 `DATABASE_URL`；也可使用 `--database` 显式指定 PostgreSQL URL。配置方法见[根 README](../README.md#本地前后端集成)。盘后按交易日生成复盘：
+监控仍使用同一 PostgreSQL 证据库。以下命令假定已设置 `DATABASE_URL`；也可使用 `--database` 显式指定 PostgreSQL URL。配置方法见[统一 Web 部署与运维](web-deployment.md#本地集成真实服务和开发-keycloak)。盘后按交易日生成复盘：
 
 ```bash
 python -m a500_t_trader postmarket \

@@ -21,7 +21,7 @@ DATABASE_URL=postgresql://a500:password@127.0.0.1:5432/a500
 
 未提供有效 OIDC 配置或 AmazingData 行情提供方配置时，生产应用拒绝启动。生产部署需保护 PostgreSQL 凭据并使用持久化、受限访问的数据库；`a500-account-api` 使用 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST` 和 `AMAZINGDATA_PORT` 配置行情查询服务。Compose 使用持久化 `postgres-data` 卷，并将账户 API 放在只对内部网络开放的 8000 端口；`deploy/oidc-gateway.conf` 在同源 gateway 中路由 `/api/v1/account-*`、`/api/v1/trade-imports` 至账户 API。测试可通过 `create_app(database, authenticator, market_data=...)` 使用独立数据库、确定性身份验证替身及可控行情服务。
 
-本地前后端真实集成使用 [根 README 启动器](../README.md#本地前后端集成)；浏览器与直接 API 调用均通过 `http://localhost:8080/api/v1/*` 访问 Nginx gateway，旧 `/v1/*` 网关路径不再提供。该代理不增加账户业务逻辑。前端使用页面内存 access token，刷新或失效后重新通过 Keycloak 登录；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
+本地前后端真实集成的启动步骤见[统一 Web 部署与运维](web-deployment.md#本地集成真实服务和开发-keycloak)。浏览器与直接 API 调用均通过 `http://localhost:8080/api/v1/*` 访问 Nginx gateway，旧 `/v1/*` 网关路径不再提供。该代理不增加账户业务逻辑。前端使用页面内存 access token，刷新或失效后重新通过 Keycloak 登录；相同 `sub` 可恢复持久化导入批次。快照首次创建、替换严格沿用 ETag 前置条件；冲突不自动覆盖，保留本地编辑草稿，用户可显式读取最新快照。浏览器仅保存批次恢复标识，不保存原 CSV、token 或账户快照数据；导入从不更新账户快照，NAV 不可用时不呈现部分净值。
 
 ## 当前净资产
 
