@@ -74,7 +74,9 @@ test("opens the signals route by default and serves the API from one origin", as
   await page.goto("/");
   await expect(page).toHaveURL(/\/signals$/);
   await expect(page.getByRole("heading", { name: "策略信号", exact: true })).toBeVisible();
-  await expect(page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true }),
+  ).toBeEnabled();
   expect(new URL(page.url()).origin).toBe(new URL(test.info().project.use.baseURL!).origin);
   expect((await request.get("/api/v1/account-snapshot")).status()).toBe(401);
   expect((await request.get("/v1/account-snapshot")).status()).toBe(404);
@@ -88,7 +90,10 @@ test("navigates all four business routes without losing their page identity", as
     { label: "历史行情", path: "/data/history", heading: "历史行情" },
     { label: "策略信号", path: "/signals", heading: "策略信号" },
   ]) {
-    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: route.label }).click();
+    await page
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("link", { name: route.label })
+      .click();
     await expect(page).toHaveURL(new RegExp(`${route.path.replaceAll("/", "\\/")}$`));
     await expect(page.getByRole("heading", { name: route.heading, exact: true })).toBeVisible();
   }
@@ -105,7 +110,9 @@ test("returns to a protected route after Keycloak authorization and disconnects 
   await page.getByRole("link", { name: "断开" }).click();
   await expect(page).toHaveURL(/\/signals$/);
   await expect(page.getByRole("banner").getByText("尚未连接", { exact: true })).toBeVisible();
-  await expect(page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "策略信号", exact: true })).toBeVisible();
 });
 
@@ -131,7 +138,10 @@ test("signs in when SubtleCrypto is unavailable on HTTP", async ({ page }) => {
   expect(token).toBeTruthy();
 });
 
-test("imports trades from /data/trades only after reviewing the real preview", async ({ page, request }) => {
+test("imports trades from /data/trades only after reviewing the real preview", async ({
+  page,
+  request,
+}) => {
   await page.goto("/data/trades");
   const subject = `trades-page-${randomUUID()}`;
   const token = await connect(page, subject, "成交导入");
@@ -143,8 +153,9 @@ test("imports trades from /data/trades only after reviewing the real preview", a
       mimeType: "text/csv",
       buffer: await csv.body(),
     });
-    const response = page.waitForResponse((item) =>
-      item.url().endsWith("/api/v1/trade-imports/previews") && item.request().method() === "POST",
+    const response = page.waitForResponse(
+      (item) =>
+        item.url().endsWith("/api/v1/trade-imports/previews") && item.request().method() === "POST",
     );
     await importRegion.getByRole("button", { name: "上传并预览", exact: true }).click();
     expect((await response).status()).toBe(200);
@@ -158,10 +169,11 @@ test("imports trades from /data/trades only after reviewing the real preview", a
   await uploadOnTradesPage("valid");
   await expect(importRegion.getByRole("heading", { name: "检查导入预览" })).toBeVisible();
   await expect(importRegion.getByText("历史成交", { exact: true })).toBeVisible();
-  const confirmation = page.waitForResponse((response) =>
-    response.url().includes("/api/v1/trade-imports/previews/") &&
-    response.url().endsWith("/confirm") &&
-    response.request().method() === "POST",
+  const confirmation = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/v1/trade-imports/previews/") &&
+      response.url().endsWith("/confirm") &&
+      response.request().method() === "POST",
   );
   await importRegion.getByRole("button", { name: "确认导入", exact: true }).click();
   expect((await confirmation).status()).toBe(200);
@@ -213,7 +225,9 @@ test("validates snapshot amounts and preserves oversized decimal precision on re
     }
   });
   await page.getByRole("button", { name: "创建账户快照", exact: true }).click();
-  await expect(page.getByRole("region", { name: "账户快照" }).getByRole("alert")).toContainText("可用现金");
+  await expect(page.getByRole("region", { name: "账户快照" }).getByRole("alert")).toContainText(
+    "可用现金",
+  );
   expect(snapshotWrites).toBe(0);
 
   await page.getByLabel("可用现金", { exact: true }).fill("");
@@ -317,7 +331,10 @@ test("shows sanitized row errors, restores preview after reauthorization, and co
     headers: { Authorization: `Bearer ${token}` },
   });
   const originalSnapshot = await before.json();
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "成交导入" }).click();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("link", { name: "成交导入" })
+    .click();
   await expect(page.getByRole("heading", { name: "成交导入", exact: true })).toBeVisible();
   const imports = page.getByRole("main");
   const invalid = await upload(page, request, "invalid");
@@ -339,14 +356,18 @@ test("shows sanitized row errors, restores preview after reauthorization, and co
   );
   expect(stored).not.toContain(token);
   await page.reload();
-  await expect(page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true }),
+  ).toBeEnabled();
   const restored = page.waitForResponse((response) =>
     response.url().endsWith(`/api/v1/trade-imports/previews/${valid.batch_id}`),
   );
   token = await connect(page, subject, "成交导入");
   expect((await restored).status()).toBe(200);
   await expect(imports).toContainText(valid.batch_id);
-  await expect(page.getByRole("status").filter({ hasText: "已恢复此账户最近保存的成交批次" })).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "已恢复此账户最近保存的成交批次" }),
+  ).toBeVisible();
   const confirmed = page.waitForResponse((response) =>
     response.url().endsWith(`/api/v1/trade-imports/previews/${valid.batch_id}/confirm`),
   );
@@ -526,7 +547,9 @@ test("creates a history task without treating acceptance as completion", async (
   await expect(page.getByText("已完成", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("progressbar")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  const pageBounds = await page.locator(".history-page").evaluate((element) => element.getBoundingClientRect().right);
+  const pageBounds = await page
+    .locator(".history-page")
+    .evaluate((element) => element.getBoundingClientRect().right);
   expect(pageBounds).toBeLessThanOrEqual(391);
   await expect(page.getByRole("heading", { name: "历史行情", exact: true })).toBeVisible();
 });

@@ -11,5 +11,5 @@ export function signalFromEvent(data: unknown): Signal | null {
 export function mergeSignal(current: Signal[], next: Signal): Signal[] {
   const index = current.findIndex((signal) => signal.symbol === next.symbol);
   if (index < 0) return [...current, next];
-  return current.map((signal, position) => position === index ? next : signal);
+  return current.map((signal, position) => (position === index ? next : signal));
 }

@@ -55,8 +55,14 @@ describe("trade import page", () => {
     });
     const rendered = render(<TradeImportPage />);
     const file = new File(["csv"], "trades.csv", { type: "text/csv" });
-    fireEvent.change(rendered.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
+      target: { files: [file] },
+    });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(screen.getByRole("button", { name: "上传并预览" }));
     const errorList = await screen.findByRole("list", { name: "导入逐行错误" });
     expect(errorList.textContent).toContain("第 4 行");
@@ -68,22 +74,52 @@ describe("trade import page", () => {
 
   it("requires explicit confirmation, prevents rapid repeat submission, and reports returned IDs", async () => {
     client.uploadPreview.mockResolvedValue(preview);
-    let finish: ((value: typeof preview & { confirmed: { confirmed: boolean; new: number; duplicates: number; inserted_ids: number[] } }) => void) | undefined;
-    client.confirmPreview.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    let finish:
+      | ((
+          value: typeof preview & {
+            confirmed: {
+              confirmed: boolean;
+              new: number;
+              duplicates: number;
+              inserted_ids: number[];
+            };
+          },
+        ) => void)
+      | undefined;
+    client.confirmPreview.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
     const rendered = render(<TradeImportPage />);
     const fileInput = rendered.container.querySelector('input[type="file"]')!;
-    fireEvent.change(fileInput, { target: { files: [new File(["csv"], "trades.csv", { type: "text/csv" })] } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["csv"], "trades.csv", { type: "text/csv" })] },
+    });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(screen.getByRole("button", { name: "上传并预览" }));
     const confirm = await screen.findByRole("button", { name: "确认导入" });
-    await waitFor(() => expect((screen.getByRole("button", { name: "确认导入" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "确认导入" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
     expect(client.confirmPreview).not.toHaveBeenCalled();
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     expect(client.confirmPreview).toHaveBeenCalledTimes(1);
-    finish?.({ ...preview, confirmed: { confirmed: true, new: 1, duplicates: 0, inserted_ids: [42] } });
+    finish?.({
+      ...preview,
+      confirmed: { confirmed: true, new: 1, duplicates: 0, inserted_ids: [42] },
+    });
     expect((await screen.findByText(/新增记录编号：42/)).textContent).toContain("42");
-    await waitFor(() => expect(screen.getByRole("heading", { name: "已确认" }).textContent).toBe("已确认"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "已确认" }).textContent).toBe("已确认"),
+    );
   });
 
   it("explains an expired batch and leaves it replaceable", async () => {
@@ -111,19 +147,31 @@ describe("trade import page", () => {
 
   it("allows cancelling an upload and explains that no preview was returned", async () => {
     let signal: AbortSignal | undefined;
-    client.uploadPreview.mockImplementation((_token: string, _file: File, requestSignal: AbortSignal) => {
-      signal = requestSignal;
-      return new Promise((_resolve, reject) => requestSignal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))));
-    });
+    client.uploadPreview.mockImplementation(
+      (_token: string, _file: File, requestSignal: AbortSignal) => {
+        signal = requestSignal;
+        return new Promise((_resolve, reject) =>
+          requestSignal.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          ),
+        );
+      },
+    );
     const rendered = render(<TradeImportPage />);
     fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["data"], "trades.csv", { type: "text/csv" })] },
     });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "上传并预览" }));
     fireEvent.click(await screen.findByRole("button", { name: "取消上传" }));
     expect(signal?.aborted).toBe(true);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/已取消上传.*没有收到预览/));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(/已取消上传.*没有收到预览/),
+    );
     expect(screen.queryByRole("heading", { name: "检查导入预览" })).toBeNull();
   });
 
@@ -135,7 +183,11 @@ describe("trade import page", () => {
     fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["data"], "trades.csv", { type: "text/csv" })] },
     });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "上传并预览" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/无法确认服务端最终状态/);
@@ -146,12 +198,19 @@ describe("trade import page", () => {
   it("reconciles a successful confirmation whose response was interrupted", async () => {
     client.uploadPreview.mockResolvedValue(preview);
     client.confirmPreview.mockRejectedValue(new TypeError("Failed to fetch"));
-    client.getPreview.mockResolvedValue({ ...preview, confirmed: { confirmed: true, new: 1, duplicates: 0, inserted_ids: [42] } });
+    client.getPreview.mockResolvedValue({
+      ...preview,
+      confirmed: { confirmed: true, new: 1, duplicates: 0, inserted_ids: [42] },
+    });
     const rendered = render(<TradeImportPage />);
     fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["data"], "trades.csv", { type: "text/csv" })] },
     });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "上传并预览" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
     expect(await screen.findByRole("heading", { name: "已确认" })).toBeTruthy();
@@ -163,7 +222,11 @@ describe("trade import page", () => {
     fireEvent.change(rendered.container.querySelector('input[type="file"]')!, {
       target: { files: [new File(["data"], "trades.csv", { type: "text/csv" })] },
     });
-    await waitFor(() => expect((screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "上传并预览" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "上传并预览" }));
     const confirm = await screen.findByRole("button", { name: "确认导入" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);

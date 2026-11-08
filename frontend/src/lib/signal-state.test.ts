@@ -10,7 +10,7 @@ const row = (symbol: string, direction: string | null, stale = false): Signal =>
   rule_version: "1",
   parameters: {},
   parameter_fingerprint: "hash",
-  status: stale ? "UNAVAILABLE" : direction ?? "WAIT",
+  status: stale ? "UNAVAILABLE" : (direction ?? "WAIT"),
   direction: stale ? null : direction,
   quantity: stale ? null : direction ? 100 : null,
   reasons: [],
@@ -28,7 +28,14 @@ describe("signal stream state", () => {
   it("replaces only the matching symbol and preserves unavailable nulls", () => {
     const original = [row("510500", "BUY"), row("159919", "SELL")];
     const next = mergeSignal(original, row("510500", null, true));
-    expect(next.map(({ symbol, direction, quantity, stale }) => ({ symbol, direction, quantity, stale }))).toEqual([
+    expect(
+      next.map(({ symbol, direction, quantity, stale }) => ({
+        symbol,
+        direction,
+        quantity,
+        stale,
+      })),
+    ).toEqual([
       { symbol: "510500", direction: null, quantity: null, stale: true },
       { symbol: "159919", direction: "SELL", quantity: 100, stale: false },
     ]);

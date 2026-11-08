@@ -5,12 +5,20 @@ import type { HistoryJob } from "@/lib/a500-client";
 
 const { client } = vi.hoisted(() => ({
   client: {
-    createHistoryJob: vi.fn(), getHistoryJob: vi.fn(), cancelHistoryJob: vi.fn(), getHistoryResults: vi.fn(),
+    createHistoryJob: vi.fn(),
+    getHistoryJob: vi.fn(),
+    cancelHistoryJob: vi.fn(),
+    getHistoryResults: vi.fn(),
   },
 }));
-vi.mock("@/lib/a500-client", async (importOriginal) => ({ ...(await importOriginal()), ...client }));
+vi.mock("@/lib/a500-client", async (importOriginal) => ({
+  ...(await importOriginal()),
+  ...client,
+}));
 vi.mock("@/lib/session", () => ({
-  clearAccessToken: vi.fn(), getAccessToken: () => "memory-token", subscribeSession: () => () => undefined,
+  clearAccessToken: vi.fn(),
+  getAccessToken: () => "memory-token",
+  subscribeSession: () => () => undefined,
 }));
 vi.mock("@/lib/oidc", () => ({ beginAuthorization: vi.fn(), configurationReady: true }));
 vi.mock("@/components/app-shell", () => ({
@@ -19,15 +27,29 @@ vi.mock("@/components/app-shell", () => ({
 import HistoryPage from "@/app/data/history/page";
 
 const job: HistoryJob = {
-  type: "daily_history", id: "job-1", symbol: "SH.510500", start_date: "2025-01-01", end_date: "2025-01-02",
-  status: "queued", stage: "queued", cancel_requested: false, total_chunks: 0, completed_chunks: 0,
-  created_at: "2025-01-03T00:00:00+00:00", updated_at: "2025-01-03T00:00:00+00:00", finished_at: null, error: null,
+  type: "daily_history",
+  id: "job-1",
+  symbol: "SH.510500",
+  start_date: "2025-01-01",
+  end_date: "2025-01-02",
+  status: "queued",
+  stage: "queued",
+  cancel_requested: false,
+  total_chunks: 0,
+  completed_chunks: 0,
+  created_at: "2025-01-03T00:00:00+00:00",
+  updated_at: "2025-01-03T00:00:00+00:00",
+  finished_at: null,
+  error: null,
 };
 beforeEach(() => {
   vi.resetAllMocks();
   window.localStorage.clear();
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("history task page", () => {
   it("does not present an accepted job as completed and uses non-percent status feedback without progress data", async () => {
@@ -35,7 +57,9 @@ describe("history task page", () => {
     render(<HistoryPage />);
     fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
-    expect(await screen.findByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。")).toBeTruthy();
+    expect(
+      await screen.findByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。"),
+    ).toBeTruthy();
     expect(screen.getByText("等待执行")).toBeTruthy();
     expect(screen.getByText("正在等待后端处理；当前没有可用的精确百分比。")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
@@ -43,7 +67,13 @@ describe("history task page", () => {
   });
 
   it("shows progress only when the backend reports valid chunk totals", async () => {
-    const running = { ...job, status: "running" as const, stage: "fetching", total_chunks: 4, completed_chunks: 1 };
+    const running = {
+      ...job,
+      status: "running" as const,
+      stage: "fetching",
+      total_chunks: 4,
+      completed_chunks: 1,
+    };
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
@@ -58,30 +88,77 @@ describe("history task page", () => {
     render(<HistoryPage />);
     expect(await screen.findByText("失败")).toBeTruthy();
     expect(screen.getByText("失败原因：供应商连接超时")).toBeTruthy();
-    expect(client.getHistoryJob).toHaveBeenCalledWith("memory-token", job.id, expect.any(AbortSignal));
+    expect(client.getHistoryJob).toHaveBeenCalledWith(
+      "memory-token",
+      job.id,
+      expect.any(AbortSignal),
+    );
   });
 
   it("loads actual paginated results only for a succeeded task", async () => {
-    const succeeded = { ...job, status: "succeeded" as const, total_chunks: 1, completed_chunks: 1 };
+    const succeeded = {
+      ...job,
+      status: "succeeded" as const,
+      total_chunks: 1,
+      completed_chunks: 1,
+    };
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
     client.getHistoryJob.mockResolvedValue(succeeded);
     client.getHistoryResults.mockResolvedValue({
-      job_id: job.id, total: 1, limit: 50, offset: 0,
-      bars: [{ symbol: "SH.510500", timestamp: "2025-01-02T00:00:00+08:00", open: "5.2", high: "5.3", low: "5.1", close: "5.25", volume: 1000 }],
+      job_id: job.id,
+      total: 1,
+      limit: 50,
+      offset: 0,
+      bars: [
+        {
+          symbol: "SH.510500",
+          timestamp: "2025-01-02T00:00:00+08:00",
+          open: "5.2",
+          high: "5.3",
+          low: "5.1",
+          close: "5.25",
+          volume: 1000,
+        },
+      ],
     });
     render(<HistoryPage />);
     fireEvent.click(await screen.findByRole("button", { name: "查看结果" }));
     expect(await screen.findByText("共 1 条 · 按日期升序")).toBeTruthy();
     expect(screen.getByText("5.25")).toBeTruthy();
-    await waitFor(() => expect(client.getHistoryResults).toHaveBeenCalledWith("memory-token", job.id, 0, expect.any(AbortSignal)));
+    await waitFor(() =>
+      expect(client.getHistoryResults).toHaveBeenCalledWith(
+        "memory-token",
+        job.id,
+        0,
+        expect.any(AbortSignal),
+      ),
+    );
   });
   it("marks previously loaded results as potentially stale when a later page read fails", async () => {
-    const succeeded = { ...job, status: "succeeded" as const, total_chunks: 1, completed_chunks: 1 };
+    const succeeded = {
+      ...job,
+      status: "succeeded" as const,
+      total_chunks: 1,
+      completed_chunks: 1,
+    };
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
     client.getHistoryJob.mockResolvedValue(succeeded);
     client.getHistoryResults.mockResolvedValue({
-      job_id: job.id, total: 1, limit: 50, offset: 0,
-      bars: [{ symbol: "SH.510500", timestamp: "2025-01-02T00:00:00+08:00", open: "5.2", high: "5.3", low: "5.1", close: "5.25", volume: 1000 }],
+      job_id: job.id,
+      total: 1,
+      limit: 50,
+      offset: 0,
+      bars: [
+        {
+          symbol: "SH.510500",
+          timestamp: "2025-01-02T00:00:00+08:00",
+          open: "5.2",
+          high: "5.3",
+          low: "5.1",
+          close: "5.25",
+          volume: 1000,
+        },
+      ],
     });
     render(<HistoryPage />);
     fireEvent.click(await screen.findByRole("button", { name: "查看结果" }));
@@ -89,14 +166,16 @@ describe("history task page", () => {
     client.getHistoryResults.mockRejectedValueOnce(new Error("连接中断"));
     fireEvent.click(screen.getByRole("button", { name: "刷新结果" }));
     expect(await screen.findByText("连接中断")).toBeTruthy();
-    expect(screen.getByText("以下为此前成功读取的结果；本次读取未成功，数据可能不是最新页。")).toBeTruthy();
+    expect(
+      screen.getByText("以下为此前成功读取的结果；本次读取未成功，数据可能不是最新页。"),
+    ).toBeTruthy();
     expect(screen.getByText("5.25")).toBeTruthy();
   });
   it("keeps failed status lookups visible and allows unresolved task IDs to be retried", async () => {
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id, "job-2"]));
-    client.getHistoryJob.mockImplementation((_token: string, id: string) => id === job.id
-      ? Promise.resolve(job)
-      : Promise.reject(new Error("网络不可用")));
+    client.getHistoryJob.mockImplementation((_token: string, id: string) =>
+      id === job.id ? Promise.resolve(job) : Promise.reject(new Error("网络不可用")),
+    );
     render(<HistoryPage />);
     expect(await screen.findByText("无法确认任务状态")).toBeTruthy();
     expect(screen.getByText(/网络不可用/)).toBeTruthy();
@@ -109,7 +188,9 @@ describe("history task page", () => {
 
   it("keeps the last confirmed task state explicit when a manual refresh fails", async () => {
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
-    client.getHistoryJob.mockResolvedValueOnce(job).mockRejectedValueOnce(new Error("服务暂不可用"));
+    client.getHistoryJob
+      .mockResolvedValueOnce(job)
+      .mockRejectedValueOnce(new Error("服务暂不可用"));
     render(<HistoryPage />);
     expect(await screen.findByText("等待执行")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
@@ -119,12 +200,23 @@ describe("history task page", () => {
   });
 
   it("allows a failed result read to be retried without inventing results", async () => {
-    const succeeded = { ...job, status: "succeeded" as const, total_chunks: 1, completed_chunks: 1 };
+    const succeeded = {
+      ...job,
+      status: "succeeded" as const,
+      total_chunks: 1,
+      completed_chunks: 1,
+    };
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
     client.getHistoryJob.mockResolvedValue(succeeded);
-    client.getHistoryResults.mockRejectedValueOnce(new Error("结果暂不可用")).mockResolvedValueOnce({
-      job_id: job.id, total: 0, limit: 50, offset: 0, bars: [],
-    });
+    client.getHistoryResults
+      .mockRejectedValueOnce(new Error("结果暂不可用"))
+      .mockResolvedValueOnce({
+        job_id: job.id,
+        total: 0,
+        limit: 50,
+        offset: 0,
+        bars: [],
+      });
     render(<HistoryPage />);
     fireEvent.click(await screen.findByRole("button", { name: "查看结果" }));
     expect(await screen.findByText("结果暂不可用")).toBeTruthy();
@@ -135,7 +227,12 @@ describe("history task page", () => {
 
   it("does not send duplicate create requests from rapid repeated clicks", async () => {
     let finish: (value: HistoryJob) => void = () => undefined;
-    client.createHistoryJob.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    client.createHistoryJob.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
     render(<HistoryPage />);
     fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
     const submit = screen.getByRole("button", { name: "创建任务" });
@@ -151,20 +248,32 @@ describe("history task page", () => {
     fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
     expect(await screen.findByText(/后端可能已创建任务，但未返回任务编号/)).toBeTruthy();
-    expect(screen.queryByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。")).toBeNull();
+    expect(
+      screen.queryByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。"),
+    ).toBeNull();
     expect(client.createHistoryJob).toHaveBeenCalledTimes(1);
   });
   it("warns when an active task has had no backend update for a minute", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2025-01-03T00:00:00Z"));
-    const running = { ...job, status: "running" as const, stage: "fetching", total_chunks: 10, completed_chunks: 3 };
+    const running = {
+      ...job,
+      status: "running" as const,
+      stage: "fetching",
+      total_chunks: 10,
+      completed_chunks: 3,
+    };
     window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(screen.getByText("30%")).toBeTruthy();
     expect(screen.queryByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_001); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_001);
+    });
     expect(screen.getByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeTruthy();
   });
 });

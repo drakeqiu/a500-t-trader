@@ -233,11 +233,9 @@ export function getHistoryResults(
   signal?: AbortSignal,
 ) {
   const query = new URLSearchParams({ limit: "50", offset: String(offset) });
-  return api<HistoryResults>(
-    `/v1/jobs/${encodeURIComponent(jobId)}/results?${query}`,
-    token,
-    { signal },
-  );
+  return api<HistoryResults>(`/v1/jobs/${encodeURIComponent(jobId)}/results?${query}`, token, {
+    signal,
+  });
 }
 export function parseSignalEvent(block: string): SignalEvent | null {
   let event = "message";

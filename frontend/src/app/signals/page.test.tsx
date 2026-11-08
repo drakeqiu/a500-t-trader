@@ -38,11 +38,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   streamCallback = undefined;
   setAccessToken("memory-token", 300);
-  getSignalSnapshot.mockResolvedValue({ signals: [signal("510500"), signal("159919", true)], strategy: "wide-index", parameter_fingerprint: "sha256:abc" });
-  streamSignals.mockImplementation((_token: string, _symbols: string[], _abort: AbortSignal, callback: (event: SignalEvent) => void) => {
-    streamCallback = callback;
-    return new Promise<void>(() => undefined);
+  getSignalSnapshot.mockResolvedValue({
+    signals: [signal("510500"), signal("159919", true)],
+    strategy: "wide-index",
+    parameter_fingerprint: "sha256:abc",
   });
+  streamSignals.mockImplementation(
+    (
+      _token: string,
+      _symbols: string[],
+      _abort: AbortSignal,
+      callback: (event: SignalEvent) => void,
+    ) => {
+      streamCallback = callback;
+      return new Promise<void>(() => undefined);
+    },
+  );
 });
 afterEach(() => {
   cleanup();
@@ -53,7 +64,11 @@ describe("signals route", () => {
   it("loads real snapshot data and never presents stale or unavailable values as current suggestions", async () => {
     render(<SignalsPage />);
     expect(await screen.findByRole("row", { name: /510500/ })).toBeTruthy();
-    expect(getSignalSnapshot).toHaveBeenCalledWith("memory-token", undefined, expect.any(AbortSignal));
+    expect(getSignalSnapshot).toHaveBeenCalledWith(
+      "memory-token",
+      undefined,
+      expect.any(AbortSignal),
+    );
     expect(screen.getByText("不作为当前建议")).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getByText("不具备执行资格")).toBeTruthy();
@@ -77,9 +92,25 @@ describe("signals route", () => {
     await screen.findByRole("row", { name: /510500/ });
     fireEvent.click(screen.getAllByText(/全部标的 · 2/)[0]);
     fireEvent.click(screen.getByLabelText("159919"));
-    await waitFor(() => expect(getSignalSnapshot).toHaveBeenLastCalledWith("memory-token", ["159919"], undefined));
-    await waitFor(() => expect(streamSignals).toHaveBeenLastCalledWith("memory-token", ["159919"], expect.any(AbortSignal), expect.any(Function), undefined));
+    await waitFor(() =>
+      expect(getSignalSnapshot).toHaveBeenLastCalledWith("memory-token", ["159919"], undefined),
+    );
+    await waitFor(() =>
+      expect(streamSignals).toHaveBeenLastCalledWith(
+        "memory-token",
+        ["159919"],
+        expect.any(AbortSignal),
+        expect.any(Function),
+        undefined,
+      ),
+    );
     await act(async () => streamCallback?.({ event: "reset", data: { reason: "cursor_expired" } }));
-    await waitFor(() => expect(getSignalSnapshot).toHaveBeenLastCalledWith("memory-token", ["159919"], expect.any(AbortSignal)));
+    await waitFor(() =>
+      expect(getSignalSnapshot).toHaveBeenLastCalledWith(
+        "memory-token",
+        ["159919"],
+        expect.any(AbortSignal),
+      ),
+    );
   });
 });
