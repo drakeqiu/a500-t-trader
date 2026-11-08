@@ -13,6 +13,14 @@ services:
 
   gateway:
     image: nginx:1.27-alpine
+    # Resolve Compose service names at request time so restarts can change container IPs.
+    entrypoint: ["/bin/sh"]
+    command:
+      - -ec
+      - |
+        resolver="$$(awk '$$1 == "nameserver" { print $$2; exit }' /etc/resolv.conf)"
+        printf 'resolver %s valid=5s ipv6=off;\n' "$$resolver" > /etc/nginx/resolver.conf
+        exec /docker-entrypoint.sh nginx -g 'daemon off;'
     volumes:
       - ./deploy/oidc-gateway.conf:/etc/nginx/a500-routes.conf:ro
     depends_on:
