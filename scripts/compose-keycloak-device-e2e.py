@@ -164,7 +164,7 @@ def _check_browser_login(
             page.locator("input[name='username']").fill(username, timeout=30000)
             page.locator("input[name='password']").fill(password)
             page.locator("button[type='submit'], input[type='submit']").first.click()
-            page.get_by_role("heading", name="实时信号", exact=True).wait_for(
+            page.get_by_role("heading", name="策略信号", exact=True).wait_for(
                 state="visible", timeout=90000
             )
         finally:
