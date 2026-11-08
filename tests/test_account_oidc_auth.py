@@ -165,9 +165,9 @@ def test_account_api_requires_complete_oidc_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in (
-        "A500_OIDC_ISSUER",
-        "A500_OIDC_AUDIENCE",
-        "A500_OIDC_JWKS_URI",
+        "OIDC_ISSUER",
+        "OIDC_AUDIENCE",
+        "OIDC_JWKS_URI",
     ):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(RuntimeError, match="must be configured"):
@@ -177,9 +177,9 @@ def test_account_api_requires_complete_oidc_environment(
 def test_account_api_does_not_configure_legacy_audience(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("A500_OIDC_ISSUER", ISSUER)
-    monkeypatch.setenv("A500_OIDC_AUDIENCE", LEGACY_AUDIENCE)
-    monkeypatch.setenv("A500_OIDC_JWKS_URI", "https://jwks.test")
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", LEGACY_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
     with pytest.raises(ValueError, match="shared audience"):
         OIDCAuthenticator.from_environment()
 
@@ -187,9 +187,9 @@ def test_account_api_does_not_configure_legacy_audience(
 def test_account_api_uses_shared_audience_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("A500_OIDC_ISSUER", ISSUER)
-    monkeypatch.setenv("A500_OIDC_AUDIENCE", SHARED_AUDIENCE)
-    monkeypatch.setenv("A500_OIDC_JWKS_URI", "https://jwks.test")
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", SHARED_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
     assert OIDCAuthenticator.from_environment().audience == SHARED_AUDIENCE
 
 

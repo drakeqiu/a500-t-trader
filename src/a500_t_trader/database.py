@@ -10,16 +10,16 @@ import psycopg
 
 def database_url(value: str | None = None) -> str:
     """Resolve the explicit connection string before the environment default."""
-    url = value or os.environ.get("A500_DATABASE_URL")
-    if not url and os.environ.get("A500_POSTGRES_HOST"):
-        user = quote(os.environ.get("A500_POSTGRES_USER", "a500"), safe="")
-        password = quote(os.environ["A500_POSTGRES_PASSWORD"], safe="")
-        host = os.environ["A500_POSTGRES_HOST"]
-        name = quote(os.environ.get("A500_POSTGRES_DB", "a500"), safe="")
+    url = value or os.environ.get("DATABASE_URL")
+    if not url and os.environ.get("POSTGRES_HOST"):
+        user = quote(os.environ.get("POSTGRES_USER", "a500"), safe="")
+        password = quote(os.environ["POSTGRES_PASSWORD"], safe="")
+        host = os.environ["POSTGRES_HOST"]
+        name = quote(os.environ.get("POSTGRES_DB", "a500"), safe="")
         url = f"postgresql://{user}:{password}@{host}/{name}"
     if not url:
         raise ValueError(
-            "PostgreSQL connection string required: set A500_DATABASE_URL or --database"
+            "PostgreSQL connection string required: set DATABASE_URL or --database"
         )
     if not url.startswith(("postgresql://", "postgres://")):
         raise ValueError("database must be a PostgreSQL connection URL")

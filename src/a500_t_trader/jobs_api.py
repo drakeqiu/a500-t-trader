@@ -43,7 +43,7 @@ def create_app(
     permitted = (
         persistence_permitted
         if persistence_permitted is not None
-        else os.environ.get("A500_HISTORY_PERSISTENCE_PERMITTED", "").lower() == "true"
+        else os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower() == "true"
     )
     app = FastAPI(
         title="A500 jobs API", docs_url=None, redoc_url=None, openapi_url=None

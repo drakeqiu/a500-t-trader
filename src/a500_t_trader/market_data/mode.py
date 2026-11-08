@@ -16,12 +16,12 @@ class MarketDataMode(StrEnum):
 
 
 def market_data_mode(value: str | None = None) -> MarketDataMode:
-    configured = value if value is not None else os.environ.get("A500_MARKET_DATA_MODE")
+    configured = value if value is not None else os.environ.get("MARKET_DATA_MODE")
     try:
         return MarketDataMode(configured or "")
     except ValueError as error:
         raise ValueError(
-            "A500_MARKET_DATA_MODE must be explicitly set to 'tgw' or 'replay'"
+            "MARKET_DATA_MODE must be explicitly set to 'tgw' or 'replay'"
         ) from error
 
 

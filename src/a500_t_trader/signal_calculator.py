@@ -147,7 +147,7 @@ def run_signal_calculator(
     from .market_data.consumer import RabbitMQConsumer
 
     redis = Redis.from_url(
-        os.environ.get("A500_REDIS_URL", "redis://localhost:6379/0"),
+        os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
         decode_responses=True,
     )
     config = load_live_signal_config()

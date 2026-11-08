@@ -24,7 +24,8 @@
 
 AmazingData 账号、密码、主机和端口使用现有未提交 `.env` 的 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`；启动器也支持现有 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 别名。shell 环境优先，不修改 `.env`，不输出配置值；`.env` 支持字面值、引号、注释和可选 `export`，不执行 shell 或展开变量。缺少配置时只提示字段名。账户服务必须能实际连接 AmazingData，否则启动不会被报告为成功。
 
-持久化使用 PostgreSQL。本地启动脚本在 `A500_POSTGRES_PASSWORD` 未设置或为空时默认使用 `changeme`，可通过 shell 环境变量或 `.env` 覆盖；直接使用 Compose 时必须设置该变量。可选的 `A500_POSTGRES_DB`、`A500_POSTGRES_USER` 和 `A500_POSTGRES_PORT` 默认分别为 `a500`、`a500` 和 `5432`。数据库端口只绑定主机回环地址，数据保存在 `postgres-data` 卷。已有数据库卷须使用初始化时的密码，修改环境变量不会重置数据库密码。默认密码仅供本地开发；首次使用空数据库，应用创建所需表，不会迁移旧 SQLite 数据，也不会删除旧数据库文件或卷。独立运行 CLI 或 API 时设置 `A500_DATABASE_URL`，例如 `postgresql://a500:密码@127.0.0.1:5432/a500`；CLI 的 `--database` 可显式指定 URL 并覆盖环境变量。URL 中的特殊字符需百分号编码，凭据应妥善保管。
+持久化使用 PostgreSQL。本地启动脚本在 `POSTGRES_PASSWORD` 未设置或为空时默认使用 `changeme`，可通过 shell 环境变量或 `.env` 覆盖；直接使用 Compose 时必须设置该变量。可选的 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PORT` 默认分别为 `a500`、`a500` 和 `5432`。数据库端口只绑定主机回环地址，数据保存在 `postgres-data` 卷。已有数据库卷须使用初始化时的密码，修改环境变量不会重置数据库密码。默认密码仅供本地开发；首次使用空数据库，应用创建所需表，不会迁移旧 SQLite 数据，也不会删除旧数据库文件或卷。独立运行 CLI 或 API 时设置 `DATABASE_URL`，例如 `postgresql://a500:密码@127.0.0.1:5432/a500`；CLI 的 `--database` 可显式指定 URL 并覆盖环境变量。URL 中的特殊字符需百分号编码，凭据应妥善保管。
+环境配置已统一移除旧的 `A500_` 项目前缀。升级时同步更新 shell 导出、未提交的 `.env`、CI secrets 和部署注入配置；不提供旧变量名兼容别名。
 
 在 Bash 中输入自行选择的本地管理员凭据（不写源码、命令历史或应用 `.env`）：
 
@@ -33,13 +34,13 @@ read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
 read -r -s -p 'Keycloak admin password: ' KEYCLOAK_ADMIN_PASSWORD; printf '\n'
 export KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD
 # 可选：覆盖本地默认数据库密码；已有数据库卷须使用初始化时的密码
-# export A500_POSTGRES_PASSWORD=自行设置的密码
+# export POSTGRES_PASSWORD=自行设置的密码
 # 必须显式选择；tgw 需外部采集器，replay 仅为历史数据回放
-export A500_MARKET_DATA_MODE=tgw
+export MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
-启动器自动选择 Docker Compose 或 `podman-compose`，也可显式设置 `A500_COMPOSE_COMMAND='podman-compose'`。它使用固定项目名 `a500-local`，组合 `compose.yaml`、`compose.keycloak.yaml`、`compose.web.yaml` 和 `compose.web-http.yaml`，构建并启动所有服务，再检查 IdP discovery、页面及同源 API 的未认证 `401`。默认就绪等待 180 秒，可加 `--timeout 300`；这不是实时行情或完整登录验收。模式、wheel、容器引擎或必要配置缺失时会明确失败。
+启动器自动选择 Docker Compose 或 `podman-compose`，也可显式设置 `COMPOSE_COMMAND='podman-compose'`。它使用固定项目名 `a500-local`，组合 `compose.yaml`、`compose.keycloak.yaml`、`compose.web.yaml` 和 `compose.web-http.yaml`，构建并启动所有服务，再检查 IdP discovery、页面及同源 API 的未认证 `401`。默认就绪等待 180 秒，可加 `--timeout 300`；这不是实时行情或完整登录验收。模式、wheel、容器引擎或必要配置缺失时会明确失败。
 
 打开 `http://localhost:8081` 管理界面，在 `a500` Realm 的 Users 中创建并启用获准用户、设置密码，然后从 `http://localhost:8080` 跳转 Keycloak 登录，无需设备码授权。没有提交默认用户、管理员密码或客户端密钥，自助注册关闭。请勿以 `127.0.0.1:8080` 替代页面来源：浏览器客户端须精确允许该来源和回调 URI。不要为更新客户端配置删除用户卷。
 
@@ -53,12 +54,12 @@ python3 scripts/start-local.py logs
 python3 scripts/start-local.py down
 ```
 
-后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（PostgreSQL、身份和 Redis 数据保留），不要加 `down -v`。HTTP gateway 默认绑定 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`；可通过 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 分别设置绑定地址和端口。Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用 HTTP 和本地 Keycloak；完整生产、HTTPS、证书维护和迁移步骤见[统一 Web 部署指南](docs/web-deployment.md)。独立行情消费者无需前端或 Web 配置，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
+后续命令需保留同一配置/管理员环境；`down` 不删除持久化卷（PostgreSQL、身份和 Redis 数据保留），不要加 `down -v`。HTTP gateway 默认绑定 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`；可通过 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 分别设置绑定地址和端口。Keycloak 为 `127.0.0.1:8081`。RabbitMQ 保留原配置的 `5672`，不应暴露到不受信网络。变更浏览器来源时还须同步更新 IdP 的允许来源。本地启动器使用 HTTP 和本地 Keycloak；完整生产、HTTPS、证书维护和迁移步骤见[统一 Web 部署指南](docs/web-deployment.md)。独立行情消费者无需前端或 Web 配置，见[行情 Compose 指南](docs/single-host-market-data-compose.md)。
 
 `tgw` 模式不会自动启动 TGW 采集器；没有外部规范化行情事件时信号可显示不可用。`replay` 模式需另行显式运行下列命令，使用同一 `a500-local` 项目及配置，不能误连另一个 Compose 项目的 broker：
 
 ```bash
-export A500_MARKET_DATA_MODE=replay
+export MARKET_DATA_MODE=replay
 python3 scripts/start-local.py
 python3 scripts/start-local.py replay \
   --file data/market-history/563360_1m_20261102.json \
@@ -74,7 +75,7 @@ python3 scripts/start-local.py replay \
 ./scripts/start-local-replay.sh down
 ```
 
-脚本选择 `replay` 模式，账户 API 仍使用 `.env` 中的 AmazingData 连接信息；不会自动回放数据，可使用上面的 `replay` 命令。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量 `A500_POSTGRES_PASSWORD` 覆盖；脚本的默认值优先于 `.env` 中的设置。已有 PostgreSQL 数据卷须使用初始化时的密码，修改环境变量不会重置数据库密码。Keycloak 首次初始化的管理员为 `admin` / `changeme`；已有 Keycloak 持久化卷不会因此重置管理员密码。上述默认凭据仅供本机开发，应用用户仍需在 `a500` Realm 中另行创建。
+脚本选择 `replay` 模式，账户 API 仍使用 `.env` 中的 AmazingData 连接信息；不会自动回放数据，可使用上面的 `replay` 命令。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量 `POSTGRES_PASSWORD` 覆盖；脚本的默认值优先于 `.env` 中的设置。已有 PostgreSQL 数据卷须使用初始化时的密码，修改环境变量不会重置数据库密码。Keycloak 首次初始化的管理员为 `admin` / `changeme`；已有 Keycloak 持久化卷不会因此重置管理员密码。上述默认凭据仅供本机开发，应用用户仍需在 `a500` Realm 中另行创建。
 
 可信局域网内的其他机器访问时，指定本机的局域网 IPv4 地址（不是客户端地址）：
 
@@ -84,7 +85,7 @@ python3 scripts/start-local.py replay \
 ./scripts/start-lan-replay.py 192.168.1.10 down
 ```
 
-将示例 IP 替换为本机实际地址，并从其他机器打开 `http://该IP:8080`。脚本使用独立的 `a500-lan` Compose 项目和数据卷；启动时会构建并启动网关依赖的所有 API（包括 `jobs-api`）。回放时使用 `./scripts/start-lan-replay.py 192.168.1.10 replay` 后接上述回放参数。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量或 `.env` 中的 `A500_POSTGRES_PASSWORD` 覆盖；已有数据库卷须使用初始化时的密码。脚本开放 Web 的 8080 和 Keycloak 的 8081，配置浏览器客户端的允许来源和回调；RabbitMQ 仅绑定回环地址。首次启动会在 `a500` Realm 中创建应用用户 `admin` / `changeme`；已有用户和管理员的密码不会重置。HTTP 和默认密码仅适合可信局域网，禁止暴露到公网；防火墙须限制访问。使用的 AmazingData 主机也必须能从容器访问。
+将示例 IP 替换为本机实际地址，并从其他机器打开 `http://该IP:8080`。脚本使用独立的 `a500-lan` Compose 项目和数据卷；启动时会构建并启动网关依赖的所有 API（包括 `jobs-api`）。回放时使用 `./scripts/start-lan-replay.py 192.168.1.10 replay` 后接上述回放参数。PostgreSQL 密码默认使用 `changeme`，可通过 shell 环境变量或 `.env` 中的 `POSTGRES_PASSWORD` 覆盖；已有数据库卷须使用初始化时的密码。脚本开放 Web 的 8080 和 Keycloak 的 8081，配置浏览器客户端的允许来源和回调；RabbitMQ 仅绑定回环地址。首次启动会在 `a500` Realm 中创建应用用户 `admin` / `changeme`；已有用户和管理员的密码不会重置。HTTP 和默认密码仅适合可信局域网，禁止暴露到公网；防火墙须限制访问。使用的 AmazingData 主机也必须能从容器访问。
 
 历史时间不会被伪装成实时行情，NAV 使用独立 AmazingData 查询及真实新鲜度约束，可能不可用。更多回放语义见 [行情 Compose 指南](docs/single-host-market-data-compose.md#历史回放模式)。确定性浏览器测试使用明确标记的行情 fixture，不能代替实时供应商或真实 IdP 证明。真实服务验收命令见 [API 验收说明](docs/signal-monitoring-api.md#compose-真实端到端验收)。
 

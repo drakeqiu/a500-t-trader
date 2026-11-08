@@ -5,8 +5,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
-        NEXT_PUBLIC_A500_OIDC_CLIENT_ID: ${A500_OIDC_CLIENT_ID:-a500-browser-client}
+        NEXT_PUBLIC_OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+        NEXT_PUBLIC_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-a500-browser-client}
     expose:
       - "3000"
     restart: unless-stopped

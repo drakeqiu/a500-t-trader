@@ -44,7 +44,7 @@ def register_premarket(
     )
     premarket.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
+        default=os.environ.get("DATABASE_URL"),
         help="PostgreSQL connection URL",
     )
 
@@ -61,8 +61,8 @@ def register_monitor_review(
     )
     monitor.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     monitor.add_argument(
@@ -82,8 +82,8 @@ def register_monitor_review(
     )
     review_parser.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
 

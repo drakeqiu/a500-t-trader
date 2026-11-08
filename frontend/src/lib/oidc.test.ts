@@ -11,8 +11,8 @@ const key = "a500.oidc.transaction";
 
 beforeEach(() => {
   vi.resetModules();
-  vi.stubEnv("NEXT_PUBLIC_A500_OIDC_ISSUER", issuer);
-  vi.stubEnv("NEXT_PUBLIC_A500_OIDC_CLIENT_ID", "a500-browser-client");
+  vi.stubEnv("NEXT_PUBLIC_OIDC_ISSUER", issuer);
+  vi.stubEnv("NEXT_PUBLIC_OIDC_CLIENT_ID", "a500-browser-client");
   sessionStorage.clear();
   history.replaceState(null, "", "/");
 });

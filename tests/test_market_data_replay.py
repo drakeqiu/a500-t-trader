@@ -102,7 +102,7 @@ def test_replay_event_preserves_market_time_and_uses_replay_clock() -> None:
 
 
 def test_market_data_mode_requires_explicit_valid_value() -> None:
-    with pytest.raises(ValueError, match="A500_MARKET_DATA_MODE"):
+    with pytest.raises(ValueError, match="MARKET_DATA_MODE"):
         market_data_mode("")
     assert market_data_mode("tgw") is MarketDataMode.TGW
     assert market_data_mode("replay") is MarketDataMode.REPLAY

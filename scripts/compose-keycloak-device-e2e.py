@@ -510,32 +510,32 @@ def main(*, mock_market_data: bool = False) -> None:
         "KEYCLOAK_ADMIN_PASSWORD": admin_password,
         "KEYCLOAK_HOSTNAME": base_url,
         "KEYCLOAK_HOST_PORT": str(keycloak_port),
-        "A500_POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "A500_POSTGRES_PORT": str(_available_port()),
-        "A500_OIDC_ISSUER": f"{base_url}/realms/{REALM}",
-        "A500_OIDC_AUDIENCE": API_AUDIENCE,
-        "A500_OIDC_JWKS_URI": (
+        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+        "POSTGRES_PORT": str(_available_port()),
+        "OIDC_ISSUER": f"{base_url}/realms/{REALM}",
+        "OIDC_AUDIENCE": API_AUDIENCE,
+        "OIDC_JWKS_URI": (
             f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
         ),
-        "A500_MARKET_DATA_MODE": "replay",
+        "MARKET_DATA_MODE": "replay",
         # Only an explicit test-mode override may replace the live provider.
     }
     if mock_market_data:
         print("验收使用测试专用模拟行情，非真实 TGW 行情", flush=True)
         for name in required:
             environment[name] = "test-only-not-used"
-        environment["A500_E2E_MOCK_MARKET_SCRIPT"] = str(
+        environment["E2E_MOCK_MARKET_SCRIPT"] = str(
             ROOT / "scripts/fixtures/account-api-mock-market.py"
         )
     for name in (
-        "A500_GATEWAY_HOST",
-        "A500_GATEWAY_HOST_PORT",
-        "A500_TLS_CERT",
-        "A500_TLS_KEY",
+        "GATEWAY_HOST",
+        "GATEWAY_HOST_PORT",
+        "TLS_CERT",
+        "TLS_KEY",
     ):
         environment.pop(name, None)
     compose_command = shlex.split(
-        os.environ.get("A500_COMPOSE_COMMAND")
+        os.environ.get("COMPOSE_COMMAND")
         or os.environ.get("PODMAN_COMPOSE")
         or "docker compose"
     )
@@ -559,7 +559,7 @@ def main(*, mock_market_data: bool = False) -> None:
     compose = [*common, "-f", str(ROOT / "compose.web-http.yaml")]
     with tempfile.TemporaryDirectory(prefix="a500-e2e-tls-") as directory:
         cert, key = _make_test_certificate(Path(directory))
-        environment.update(A500_TLS_CERT=str(cert), A500_TLS_KEY=str(key))
+        environment.update(TLS_CERT=str(cert), TLS_KEY=str(key))
         TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
         try:
             subprocess.run(
@@ -596,11 +596,11 @@ def main(*, mock_market_data: bool = False) -> None:
                 if index:
                     compose = [*common, "-f", str(ROOT / f"compose.web-{scheme}.yaml")]
                     if host == "127.0.0.1":
-                        environment.pop("A500_GATEWAY_HOST", None)
-                        environment.pop("A500_GATEWAY_HOST_PORT", None)
+                        environment.pop("GATEWAY_HOST", None)
+                        environment.pop("GATEWAY_HOST_PORT", None)
                     else:
                         environment.update(
-                            A500_GATEWAY_HOST=host, A500_GATEWAY_HOST_PORT=str(port)
+                            GATEWAY_HOST=host, GATEWAY_HOST_PORT=str(port)
                         )
                     subprocess.run(
                         [

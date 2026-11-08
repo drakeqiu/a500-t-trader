@@ -17,7 +17,7 @@
 read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
 read -r -s -p 'Keycloak admin password: ' KEYCLOAK_ADMIN_PASSWORD; printf '\n'
 export KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD
-export A500_MARKET_DATA_MODE=tgw
+export MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
@@ -44,11 +44,11 @@ python3 scripts/start-local.py down
 以下域名和账户参数须替换成实际环境值。输入的密码不显示；也可由部署环境安全注入这些变量。
 
 ```bash
-export A500_MARKET_DATA_MODE=tgw
-export A500_OIDC_ISSUER=https://identity.example.internal/realms/a500
-export A500_OIDC_AUDIENCE=a500-api
-export A500_OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
-export A500_OIDC_CLIENT_ID=a500-browser-client
+export MARKET_DATA_MODE=tgw
+export OIDC_ISSUER=https://identity.example.internal/realms/a500
+export OIDC_AUDIENCE=a500-api
+export OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
+export OIDC_CLIENT_ID=a500-browser-client
 read -r -p 'AmazingData username: ' AMAZINGDATA_USERNAME
 read -r -s -p 'AmazingData password: ' AMAZINGDATA_PASSWORD; printf '\n'
 read -r -p 'AmazingData host: ' AMAZINGDATA_HOST
@@ -56,18 +56,18 @@ read -r -p 'AmazingData port: ' AMAZINGDATA_PORT
 export AMAZINGDATA_USERNAME AMAZINGDATA_PASSWORD AMAZINGDATA_HOST AMAZINGDATA_PORT
 ```
 
-`A500_OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
+`OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
 
 ### 选择 HTTP 或 HTTPS
 
-每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
+每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
 
-HTTP 只适用于可信网络或由外部设施终止 TLS、且该设施到本机的链路受保护的场景；不可信网络必须使用 HTTPS。默认回环地址不能从其他主机访问。若确需远程访问，显式设置如 `A500_GATEWAY_HOST=0.0.0.0`，并配置主机防火墙、网络访问控制、DNS 和 IdP 允许来源。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口，必须限制对可信生产者的访问并妥善管理凭据，不要暴露到不受信网络。
+HTTP 只适用于可信网络或由外部设施终止 TLS、且该设施到本机的链路受保护的场景；不可信网络必须使用 HTTPS。默认回环地址不能从其他主机访问。若确需远程访问，显式设置如 `GATEWAY_HOST=0.0.0.0`，并配置主机防火墙、网络访问控制、DNS 和 IdP 允许来源。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口，必须限制对可信生产者的访问并妥善管理凭据，不要暴露到不受信网络。
 
 HTTP 示例：
 
 ```bash
-export A500_GATEWAY_HOST=127.0.0.1 A500_GATEWAY_HOST_PORT=8080
+export GATEWAY_HOST=127.0.0.1 GATEWAY_HOST_PORT=8080
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml up -d --build
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml ps
 ```
@@ -75,9 +75,9 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml ps
 HTTPS：准备与访问域名匹配、受客户端信任的 PEM 证书链和私钥，限制宿主机私钥读取权限，绝不提交私钥。将以下路径换成容器运行环境可读取的**绝对路径**；证书与私钥通过只读挂载提供给 gateway。若远程访问需同时设置适当绑定地址、防火墙和 DNS。
 
 ```bash
-export A500_TLS_CERT=/etc/a500/tls/fullchain.pem
-export A500_TLS_KEY=/etc/a500/tls/privkey.pem
-export A500_GATEWAY_HOST=127.0.0.1 A500_GATEWAY_HOST_PORT=8443
+export TLS_CERT=/etc/a500/tls/fullchain.pem
+export TLS_KEY=/etc/a500/tls/privkey.pem
+export GATEWAY_HOST=127.0.0.1 GATEWAY_HOST_PORT=8443
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml up -d --build
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 ```
@@ -90,17 +90,17 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 
 ```bash
 # 将地址替换为实际入口；HTTPS 使用证书匹配的域名
-export A500_WEB_URL=https://a500.example.internal:8443
-curl -i "$A500_WEB_URL/api/v1/signals"
+export WEB_URL=https://a500.example.internal:8443
+curl -i "$WEB_URL/api/v1/signals"
 ```
 
 从 IdP 获取含正确 audience 的 **access token**（不是 ID token）；可按[设备授权命令示例](signal-monitoring-api.md#compose-真实端到端验收)操作或使用支持设备授权的 OAuth 客户端。安全地输入令牌后调用，避免泄露终端输出或 shell 历史：
 
 ```bash
 read -r -s -p 'Access token: ' ACCESS_TOKEN; printf '\n'
-curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/signals"
-curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/account-snapshot"
-curl -N -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/signals/stream?symbols=563360"
+curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/signals"
+curl -i -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/account-snapshot"
+curl -N -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/signals/stream?symbols=563360"
 # Ctrl-C 结束流
 unset ACCESS_TOKEN
 ```
@@ -126,16 +126,16 @@ docker compose up -d --build history-dispatcher jobs-worker
 docker compose logs -f history-dispatcher jobs-worker
 ```
 
-提交仅支持日线，日期为包含端点的 ISO 日期且都必须早于上海的今天，跨度不限。使用上文的 `A500_WEB_URL` 并重新安全取得 `ACCESS_TOKEN`：
+提交仅支持日线，日期为包含端点的 ISO 日期且都必须早于上海的今天，跨度不限。使用上文的 `WEB_URL` 并重新安全取得 `ACCESS_TOKEN`：
 
 ```bash
-curl -sS -X POST "$A500_WEB_URL/api/v1/jobs" \
+curl -sS -X POST "$WEB_URL/api/v1/jobs" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
   -d '{"type":"daily_history","symbol":"563360","start_date":"2024-01-01","end_date":"2024-12-31"}'
 # 使用提交响应中的任务 ID
-curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID"
-curl -sS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID/cancel"
-curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$A500_WEB_URL/api/v1/jobs/JOB_ID/results?limit=100&offset=0"
+curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID"
+curl -sS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID/cancel"
+curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID/results?limit=100&offset=0"
 ```
 
 提交返回 HTTP 202 和任务信息；状态为 `queued`、`running`、`succeeded`、`failed` 或 `cancelled`。`stage` 表示 `queued`、`checking_cache`、`querying`、`saving` 或 `finished`，`completed_chunks` 和 `total_chunks` 表示分片进度。结果分页包含 `job_id`、`total`、`limit`、`offset` 和 `bars`；客户端应按偏移量读取，并只使用成功任务的结果。取消为后台协作式操作，`cancel_requested` 表示请求已接受，查看状态确认最终结果。
@@ -156,7 +156,7 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml exe
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml up -d --force-recreate --no-deps gateway
 ```
 
-如路径发生变化，先更新 `A500_TLS_CERT`、`A500_TLS_KEY` 再执行上述命令。重建可能短暂中断连接；客户端应重连 SSE。私钥不应进入仓库、日志或镜像。
+如路径发生变化，先更新 `TLS_CERT`、`TLS_KEY` 再执行上述命令。重建可能短暂中断连接；客户端应重连 SSE。私钥不应进入仓库、日志或镜像。
 
 ## 迁移旧入口
 

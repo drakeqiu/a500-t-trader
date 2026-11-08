@@ -22,7 +22,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="a500-market-data-collector")
     parser.add_argument(
         "--factory",
-        default=os.environ.get("A500_TGW_CONNECTION_FACTORY"),
+        default=os.environ.get("TGW_CONNECTION_FACTORY"),
         help=(
             "external module:callable that connects tgw and returns a push connection"
         ),
@@ -35,9 +35,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if market_data_mode() is not MarketDataMode.TGW:
-        parser.error("collector requires A500_MARKET_DATA_MODE=tgw")
+        parser.error("collector requires MARKET_DATA_MODE=tgw")
     if not args.factory:
-        parser.error("--factory or A500_TGW_CONNECTION_FACTORY is required")
+        parser.error("--factory or TGW_CONNECTION_FACTORY is required")
     factory = _load_factory(args.factory)
     options = _load_config(args.tgw_config)
     config = CollectorConfig(

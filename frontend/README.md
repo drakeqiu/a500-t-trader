@@ -17,8 +17,8 @@ python3 scripts/start-local.py
 Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重新执行 `python3 scripts/start-local.py`，构建并重建 Compose 服务。网关将 UI 与 API 统一暴露在同一来源；不支持通过宿主机独立 Next 开发服务器访问 API。
 
 - 浏览器使用同源 `/api/v1/*`，Nginx 网关转发至业务 API；Bearer、ETag 前置条件、CSV multipart 与 SSE 游标均经由网关传递。Next 不承担 API 代理，不需要 API CORS。
-- `NEXT_PUBLIC_A500_OIDC_ISSUER`：浏览器可访问的 issuer；集成默认 `http://localhost:8081/realms/a500`。discovery 必须提供 authorization endpoint 和 token endpoint。
-- `NEXT_PUBLIC_A500_OIDC_CLIENT_ID`：默认 `a500-browser-client`。IdP public client 必须启用 Authorization Code 和 PKCE S256，精确允许前端来源及根路径回调 URI；仓库 Realm 默认允许 `http://localhost:8080`。
+- `NEXT_PUBLIC_OIDC_ISSUER`：浏览器可访问的 issuer；集成默认 `http://localhost:8081/realms/a500`。discovery 必须提供 authorization endpoint 和 token endpoint。
+- `NEXT_PUBLIC_OIDC_CLIENT_ID`：默认 `a500-browser-client`。IdP public client 必须启用 Authorization Code 和 PKCE S256，精确允许前端来源及根路径回调 URI；仓库 Realm 默认允许 `http://localhost:8080`。
 - SSE 断线后由客户端携带游标重新连接。
 
 公开变量写入 production build；修改后需重新构建，不能只改运行时容器环境。`NEXT_PUBLIC_*` 不得放客户端密钥。缺少服务配置时应按页面提示设置配置，不会假装后端可用。自定义来源/外部 IdP 请直接配置 Compose 与 public client，不要混用 `localhost` 和 `127.0.0.1`。
@@ -44,5 +44,5 @@ Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重�
 - `bun run test`：单元测试。Vitest 配置使用 `vitest.config.mts`，以便 Vite 的原生配置加载器按 ES module 加载。
 - `bun run test:e2e`：Playwright 浏览器流程，启动本地 OIDC fixture 与内存 REST/SSE API mock；不启动 Python 业务 API、PostgreSQL 或 Redis。行情 fixture 是测试数据，不是实时行情或实际 IdP 证明。
   当设置 `NO_COLOR` 时，测试进程将其转换为 `FORCE_COLOR=0`，避免 Playwright 子进程的颜色变量冲突；Playwright 自身仍会强制测试 worker 输出颜色。
-  并行开发端口被占用时可设置 `A500_E2E_FIXTURE_PORT`、`A500_E2E_WEB_PORT` 与 `A500_E2E_NEXT_PORT`（默认 Web 端口加一）；测试专用网关把 UI 和 API 汇集到同一来源，不用于生产。测试产物按 Web 端口隔离。独立 Next 实例可用 `A500_NEXT_DIST_DIR` 隔离构建目录。
+  并行开发端口被占用时可设置 `E2E_FIXTURE_PORT`、`E2E_WEB_PORT` 与 `E2E_NEXT_PORT`（默认 Web 端口加一）；测试专用网关把 UI 和 API 汇集到同一来源，不用于生产。测试产物按 Web 端口隔离。独立 Next 实例可用 `NEXT_DIST_DIR` 隔离构建目录。
 - 真实 Keycloak/设备授权/API 验收命令见 [信号 API 文档](../docs/signal-monitoring-api.md#compose-真实端到端验收)。

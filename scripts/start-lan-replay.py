@@ -42,20 +42,20 @@ def main() -> int:
         env.update(
             KEYCLOAK_ADMIN_USERNAME="admin",
             KEYCLOAK_ADMIN_PASSWORD="changeme",
-            A500_MARKET_DATA_MODE="replay",
+            MARKET_DATA_MODE="replay",
         )
         # Validate the standard local prerequisites before applying the LAN topology.
         LOCAL["check_configuration"](env)
         origin = f"http://{host}:8080"
         keycloak = f"http://{host}:8081"
         env.update(
-            A500_GATEWAY_HOST="0.0.0.0",
-            A500_GATEWAY_HOST_PORT="8080",
+            GATEWAY_HOST="0.0.0.0",
+            GATEWAY_HOST_PORT="8080",
             KEYCLOAK_BIND_HOST="0.0.0.0",
             KEYCLOAK_HOST_PORT="8081",
             KEYCLOAK_HOSTNAME=keycloak,
-            A500_OIDC_ISSUER=f"{keycloak}/realms/a500",
-            A500_RABBITMQ_BIND_HOST="127.0.0.1",
+            OIDC_ISSUER=f"{keycloak}/realms/a500",
+            RABBITMQ_BIND_HOST="127.0.0.1",
         )
         command = LOCAL["compose_command"](env)
         command[command.index("a500-local")] = "a500-lan"
@@ -73,7 +73,7 @@ def main() -> int:
             while True:
                 try:
                     with urlopen(discovery_url, timeout=2) as response:
-                        if json.load(response).get("issuer") == env["A500_OIDC_ISSUER"]:
+                        if json.load(response).get("issuer") == env["OIDC_ISSUER"]:
                             break
                 except OSError, URLError, ValueError:
                     pass

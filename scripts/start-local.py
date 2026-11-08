@@ -53,17 +53,17 @@ def local_environment() -> dict[str, str]:
                 raise ValueError(f".env line {number}: quote values containing spaces")
             environment[key] = tokens[0] if tokens else ""
     environment.update(os.environ)
-    environment["A500_POSTGRES_PASSWORD"] = (
-        environment.get("A500_POSTGRES_PASSWORD") or "changeme"
+    environment["POSTGRES_PASSWORD"] = (
+        environment.get("POSTGRES_PASSWORD") or "changeme"
     )
     for suffix in ("USERNAME", "PASSWORD", "HOST", "PORT"):
         target = f"AMAZINGDATA_{suffix}"
         if not environment.get(target):
             environment[target] = environment.get(f"AD_{suffix}", "")
-    environment.setdefault("A500_OIDC_ISSUER", "http://localhost:8081/realms/a500")
-    environment.setdefault("A500_OIDC_AUDIENCE", "a500-api")
+    environment.setdefault("OIDC_ISSUER", "http://localhost:8081/realms/a500")
+    environment.setdefault("OIDC_AUDIENCE", "a500-api")
     environment.setdefault(
-        "A500_OIDC_JWKS_URI",
+        "OIDC_JWKS_URI",
         "http://keycloak:8080/realms/a500/protocol/openid-connect/certs",
     )
     environment.setdefault("KEYCLOAK_HOSTNAME", "http://localhost:8081")
@@ -72,7 +72,7 @@ def local_environment() -> dict[str, str]:
 
 
 def compose_command(environment: dict[str, str]) -> list[str]:
-    configured = environment.get("A500_COMPOSE_COMMAND") or environment.get(
+    configured = environment.get("COMPOSE_COMMAND") or environment.get(
         "PODMAN_COMPOSE"
     )
     if configured:
@@ -122,13 +122,13 @@ def check_configuration(environment: dict[str, str]) -> None:
         "AMAZINGDATA_PORT",
         "KEYCLOAK_ADMIN_USERNAME",
         "KEYCLOAK_ADMIN_PASSWORD",
-        "A500_POSTGRES_PASSWORD",
+        "POSTGRES_PASSWORD",
     )
     missing = [name for name in required if not environment.get(name)]
     if missing:
         raise ValueError("Missing settings: " + ", ".join(missing))
-    if environment.get("A500_MARKET_DATA_MODE") not in {"tgw", "replay"}:
-        raise ValueError("Set A500_MARKET_DATA_MODE explicitly to tgw or replay")
+    if environment.get("MARKET_DATA_MODE") not in {"tgw", "replay"}:
+        raise ValueError("Set MARKET_DATA_MODE explicitly to tgw or replay")
     try:
         port = int(environment["AMAZINGDATA_PORT"])
     except ValueError:
@@ -136,13 +136,13 @@ def check_configuration(environment: dict[str, str]) -> None:
     if not 1 <= port <= 65535:
         raise ValueError("AMAZINGDATA_PORT must be between 1 and 65535")
     expected = {
-        "A500_OIDC_ISSUER": "http://localhost:8081/realms/a500",
-        "A500_OIDC_AUDIENCE": "a500-api",
-        "A500_OIDC_JWKS_URI": (
+        "OIDC_ISSUER": "http://localhost:8081/realms/a500",
+        "OIDC_AUDIENCE": "a500-api",
+        "OIDC_JWKS_URI": (
             "http://keycloak:8080/realms/a500/protocol/openid-connect/certs"
         ),
         "KEYCLOAK_HOSTNAME": "http://localhost:8081",
-        "A500_OIDC_CLIENT_ID": "a500-browser-client",
+        "OIDC_CLIENT_ID": "a500-browser-client",
         "KEYCLOAK_HOST_PORT": "8081",
     }
     for name, value in expected.items():
@@ -331,7 +331,7 @@ def main() -> int:
                 env=environment,
                 check=True,
             )
-            gateway_port = environment.get("A500_GATEWAY_HOST_PORT", "8080")
+            gateway_port = environment.get("GATEWAY_HOST_PORT", "8080")
             wait_ready(arguments.timeout, gateway_port)
             admin = keycloak_admin(command, environment)
             configure_browser_client(admin, f"http://localhost:{gateway_port}")
@@ -341,7 +341,7 @@ def main() -> int:
             print(
                 "Provision an enabled user in the a500 realm; no default user exists."
             )
-            print("Market mode: " + environment["A500_MARKET_DATA_MODE"])
+            print("Market mode: " + environment["MARKET_DATA_MODE"])
         elif arguments.action == "stop-frontend":
             subprocess.run(
                 [*command, "stop", "frontend"],
@@ -350,8 +350,8 @@ def main() -> int:
                 check=True,
             )
         elif arguments.action == "replay":
-            if environment["A500_MARKET_DATA_MODE"] != "replay":
-                raise ValueError("Replay requires A500_MARKET_DATA_MODE=replay")
+            if environment["MARKET_DATA_MODE"] != "replay":
+                raise ValueError("Replay requires MARKET_DATA_MODE=replay")
             subprocess.run(
                 [
                     *command,

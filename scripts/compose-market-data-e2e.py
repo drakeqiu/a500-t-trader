@@ -18,7 +18,7 @@ from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = [
-    *shlex.split(os.environ.get("A500_COMPOSE_COMMAND", "docker compose")),
+    *shlex.split(os.environ.get("COMPOSE_COMMAND", "docker compose")),
     "-f",
     str(ROOT / "compose.yaml"),
 ]
@@ -102,14 +102,14 @@ def main() -> None:
     consumer_image = _consumer_image(project)
     environment = {
         **os.environ,
-        "A500_MARKET_DATA_MODE": "tgw",
-        "A500_MARKET_DATA_CONSUMER_IMAGE": consumer_image,
-        "A500_RABBITMQ_HOST_PORT": str(_available_port()),
-        "A500_POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "A500_POSTGRES_PORT": str(_available_port()),
-        "A500_OIDC_ISSUER": "https://identity.example.test",
-        "A500_OIDC_AUDIENCE": "a500-api",
-        "A500_OIDC_JWKS_URI": "https://identity.example.test/jwks",
+        "MARKET_DATA_MODE": "tgw",
+        "MARKET_DATA_CONSUMER_IMAGE": consumer_image,
+        "RABBITMQ_HOST_PORT": str(_available_port()),
+        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+        "POSTGRES_PORT": str(_available_port()),
+        "OIDC_ISSUER": "https://identity.example.test",
+        "OIDC_AUDIENCE": "a500-api",
+        "OIDC_JWKS_URI": "https://identity.example.test/jwks",
         "AMAZINGDATA_USERNAME": "market-data-e2e",
         "AMAZINGDATA_PASSWORD": "market-data-e2e",
         "AMAZINGDATA_HOST": "127.0.0.1",
@@ -126,7 +126,7 @@ def main() -> None:
         )
         port = _published_port(compose, environment)
         url = f"amqp://guest:guest@localhost:{port}/%2F"
-        environment["A500_RABBITMQ_URL"] = url
+        environment["RABBITMQ_URL"] = url
         subprocess.run(
             [
                 *compose,
