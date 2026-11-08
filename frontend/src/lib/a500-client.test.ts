@@ -6,13 +6,14 @@ import {
   getNav,
   getPreview,
   getSignals,
+  getSignalSnapshot,
   getSnapshot,
   parseSignalEvent,
   saveSnapshot,
   streamSignals,
 } from "./a500-client";
 import { parseSnapshotDraft, snapshotDraft } from "./snapshot-draft";
-import type { AccountSnapshot } from "./a500-client";
+import type { AccountSnapshot, Signal } from "./a500-client";
 
 const snapshot: AccountSnapshot = {
   as_of: "2026-11-06T15:00:00+08:00",
@@ -35,6 +36,21 @@ describe("account API", () => {
     expect(() =>
       parseSnapshotDraft({ ...snapshotDraft(snapshot), cost_basis: '{"510500":5.123}' }),
     ).toThrow(/字符串/);
+  });
+  it("rejects blank and malformed amounts while preserving arbitrarily large decimal strings", () => {
+    const large = `9${"0".repeat(120)}.000000000000000001`;
+    expect(
+      parseSnapshotDraft({
+        ...snapshotDraft(snapshot),
+        available_cash: large,
+        cost_basis: `{"510500":"${large}","159919":"4.00"}`,
+      }),
+    ).toMatchObject({ available_cash: large, cost_basis: { "510500": large } });
+    for (const value of ["", " ", "-1", "NaN", "Infinity", "1,000", "1.2.3"]) {
+      expect(() =>
+        parseSnapshotDraft({ ...snapshotDraft(snapshot), available_cash: value }),
+      ).toThrow();
+    }
   });
   it("reads snapshots through the same-origin gateway", async () => {
     const fetchMock = vi
@@ -123,6 +139,69 @@ describe("account API", () => {
       vi.fn().mockResolvedValue(Response.json({ detail: "Preview not found" }, { status: 404 })),
     );
     await expect(getPreview("other-token", "batch-1")).rejects.toMatchObject({ status: 404 });
+  });
+  it("returns strategy metadata and applies only the explicitly selected symbols", async () => {
+    const state: Signal = {
+      schema_version: 1,
+      symbol: "510500",
+      bar_timestamp: "2026-11-06T07:00:00Z",
+      strategy_identity: "intraday-etf-t-v1-rsi:sha",
+      rule_version: "V1.0",
+      parameters: { rsi_period: 14 },
+      parameter_fingerprint: "sha",
+      status: "BUY",
+      direction: "BUY",
+      quantity: 100,
+      reasons: ["reference"],
+      stale: false,
+      execution_eligible: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        signals: [state],
+        strategy: "intraday-etf-t-v1-rsi",
+        parameter_fingerprint: "sha",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getSignalSnapshot("token")).resolves.toEqual({
+      signals: [state],
+      strategy: "intraday-etf-t-v1-rsi",
+      parameter_fingerprint: "sha",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/signals",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer token" }),
+      }),
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        signals: [state],
+        strategy: "intraday-etf-t-v1-rsi",
+        parameter_fingerprint: "sha",
+      }),
+    );
+    await getSignalSnapshot("token", ["510500", "159919"]);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/v1/signals?symbols=510500&symbols=159919",
+      expect.anything(),
+    );
+  });
+  it("preserves the configured-symbol validation response instead of treating it as an empty result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ detail: { unconfigured_symbols: ["999999"] } }, { status: 422 }),
+        ),
+    );
+    await expect(getSignalSnapshot("token", ["999999"])).rejects.toMatchObject({
+      status: 422,
+    });
   });
 });
 describe("SSE protocol", () => {

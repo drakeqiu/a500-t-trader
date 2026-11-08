@@ -19,7 +19,8 @@ Use the single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agen
 ## Local builds and network sources
 
 - Build container images locally with Podman, including Compose builds.
-- For local Python dependency installation and builds, use the Aliyun PyPI mirror (`https://mirrors.aliyun.com/pypi/simple/`); the repository's `uv.toml` already configures uv.
+- For local Python dependency installation and builds, use the Aliyun PyPI mirror; run `uv sync --default-index https://mirrors.aliyun.com/pypi/simple/`.
+- Before committing, refresh the lockfile against the official PyPI index with `UV_INDEX=https://pypi.org/simple uv lock --refresh`.
 - For local TypeScript/JavaScript dependency installation and builds, use the Aliyun npm mirror (`https://registry.npmmirror.com/`), including when using Bun.
 - For local container builds, configure Podman to pull base images through the corresponding DaoCloud registry mirror (for example, `docker.m.daocloud.io` for Docker Hub and `ghcr.m.daocloud.io` for GHCR). Keep image names and GitHub Actions configuration portable; configure mirrors locally rather than hard-coding them into shared Dockerfiles or CI.
 - Access GitHub directly, without a GitHub proxy or mirror. GitHub Actions should use upstream dependency and container registries, not the local mirror settings.

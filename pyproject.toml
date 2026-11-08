@@ -44,10 +44,6 @@ dev = [
   "playwright>=1.55.0,<2.0.0",
 ]
 
-[[tool.uv.index]]
-url = "https://uv.agentsmirror.com/pypi/simple"
-default = true
-
 [tool.uv.sources]
 tgw = { path = "wheels/tgw-1.0.9.2-py3-none-any.whl" }
 AmazingData = { path = "wheels/AmazingData-1.1.9-cp314-none-any.whl" }

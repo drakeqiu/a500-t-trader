@@ -8,51 +8,96 @@ web
 
 ## Users
 
-Primary users are individual ETF traders who monitor strategy signals and manage their own user-entered account snapshot. Account information belongs to the authenticated OIDC subject; signal data is shared across authorized users.
+主要用户是系统所有者本人，用于个人宽基 ETF 投资辅助决策。已确认主要使用节奏是盘中查看日内做 T 策略信号；成交导入、历史行情拉取和资产维护按需进行。不是面向公众的券商交易平台。
+
+个人使用不改变现有认证与数据边界：账户快照、成交导入批次和历史任务按已验证的 OIDC 主体隔离；策略信号与行情为获准用户共享数据，不应描述成根据个人账户实时生成的专属建议。
 
 ## Product Purpose
 
-A web decision-support workspace for monitoring current strategy signals and reviewing user-reported account state, NAV, and imported trade files. Success means users can understand the current signal and account-data limitations, safely maintain their snapshot, and explicitly review and confirm supported trade imports.
+为个人宽基 ETF 投资提供可核查的决策参考：查看当前策略信号及其理由、时间和可用性，结合用户维护的资产信息作出判断。用户自行决定是否交易，并在券商软件中手动执行；本系统不提供自动下单。
+
+成功意味着用户能分清“有参考信号”“等待”“数据不可用”，不把过期信息当成当前建议；需要时能查看资产、维护快照、核对并确认成交导入，以及提交和追踪受支持的历史行情任务。成功标准不是收益承诺或交易次数。
 
 ## Positioning
 
-A read-oriented decision-support desk built on live market data, strategy signals, and explicitly user-entered account data. It is not a broker account system, order-entry terminal, or trade execution service.
+基于现有 Python REST API、行情与策略评估结果的个人 ETF 辅助决策工作台。账户信息由用户提供，未经券商核实；信号是投资决策参考，不是交易指令。产品不是券商账户系统、自动交易机器人或订单执行终端。
 
 ## Operating Context
 
-Users may monitor live signals through an SSE stream and inspect account snapshot/NAV data. They may create or replace their account snapshot and preview then explicitly confirm supported Galaxy Securities trade CSV imports. OIDC identity is provided by a trusted external identity provider; the application validates access tokens and does not handle user passwords or issue tokens.
+- 主要场景：盘中查看已配置 ETF 的当前日内做 T 信号，辨认状态、方向、参考数量、策略理由和事件时间，同时判断数据是否仍有效。交易决定与执行均在系统外完成。
+- 辅助场景：按需查看账户净资产（NAV），维护持仓、保护底仓、可卖数量、成本和可用现金；从券商导出成交文件，在系统内预览、核对并显式确认导入。
+- 历史行情：按标的和日期范围提交历史日线拉取任务，查看进度、失败或取消状态，并读取成功任务的结果。后端已支持此业务，当前前端尚无对应入口。
+- 浏览器登录跳转至 Keycloak／兼容 OIDC 身份提供方；应用不接收用户密码、不签发令牌。当前浏览器使用 Authorization Code + PKCE，access token 仅驻留页面内存；刷新或授权失效后重新登录，不依赖持久化 refresh token。
+- 产品语言为中文，交易日期与业务时间语义以 Asia/Shanghai 为准，时间展示不得掩盖数据所属日期和时效。桌面优先，同时支持移动端使用；具体设备和屏幕规格未另行确认。
 
 ## Capabilities and Constraints
 
-- The Python backend at the repository root, managed by uv, is the only business backend. The existing FastAPI REST APIs are authoritative; the Next.js frontend must not reimplement or alter their business logic.
-- Signal API: authenticated current-signal query and SSE stream with event cursor recovery. Signals can be unavailable or stale; they are informational and do not represent orders or executed trades.
-- Account API: per-authenticated-subject current snapshot, conditional full replacement using ETag preconditions, current NAV, and Galaxy CSV trade-import preview/confirmation. There is no account history query or delete route.
-- Account snapshots and imported trades are user-provided and not broker-verified. Imported trades do not update the account snapshot.
-- NAV is unavailable when the snapshot or required quote is missing, future-dated, stale, or otherwise unusable; the client must not present partial valuation as a complete NAV.
-- The frontend lives in `frontend/`, uses Next.js App Router, TypeScript, Tailwind CSS, and Bun, and manages dependencies independently from Python/uv.
-- First-version workflow scope: signal monitoring, account snapshot and NAV, and trade-file preview and confirmation.
-- Product language is Chinese with Asia/Shanghai timestamps. The local integration runs the frontend, Python APIs, gateway, Keycloak, RabbitMQ and Redis together; browser API requests use same-origin `/api` routes to the existing gateway. Browser sign-in uses OIDC Authorization Code with PKCE; access tokens remain in page memory and refresh tokens are not persisted.
+### 技术与实现边界
+
+- 唯一业务后端位于仓库根目录，由 Python/uv 管理；现有 FastAPI REST API 是业务行为和数据契约的权威来源。前端不得复制策略计算、净值计算或另建业务后端。
+- 前端位于 `frontend/`，使用 Next.js App Router、TypeScript、Tailwind CSS，以 Bun 独立管理依赖。浏览器业务请求走同源 `/api/v1/*` 网关；业务 API 使用 OIDC Bearer access token。
+- 当前前端根路由包含登录页及登录后的单页工作台，已提供信号、账户 NAV、账户快照编辑、成交预览与确认。历史行情任务属于业务范围，但尚未接入前端；不能将 API 已支持等同于页面已交付。
+- “资产设置”当前可确认的是账户快照维护。未确认的策略参数编辑、行情连接配置或其他设置，不应作为现有前端能力承诺。
+
+### 策略信号
+
+- 后端提供当前信号查询与 SSE 订阅，支持事件游标恢复。信号包含策略身份、规则版本、参数指纹、状态、方向、数量、理由和事件时间；当前前端展示其中的主要决策字段。
+- 必须区分等待与不可用。过期、未来或无效事件时间会使当前信号成为 `UNAVAILABLE`，并清空方向和数量；不可用数据不能继续作为当前建议展示。
+- SSE 可能重放历史方向事件；当前前端以新鲜度校验后的当前信号查询结果更新展示，不能把重放事件直接当成新的交易机会。
+- 参考数量及 `execution_eligible` 均不表示已下单、成交或收益保证；信号不是基于当前登录用户账户快照自动定制的交易指令。
+
+### 资产查看与快照维护
+
+- 账户快照及导入成交均为用户提供、未经券商核实的数据。系统不自动同步券商账户；成交导入不会更新账户快照。
+- 快照以六个字段完整替换：`as_of`、`holdings`、`protected_floor`、`sellable`、`cost_basis`、`available_cash`。数量为非负整数，金额为非负十进制字符串，快照时间须包含时区。
+- 保护底仓不能超过持仓，可卖数量不能超过持仓减去保护底仓；具体校验以 REST 契约为准。不得为了简化表单改变约束。
+- 新建与替换必须遵循 ETag 前置条件；冲突不得自动覆盖。当前前端保留编辑草稿，并允许显式读取最新快照。没有账户历史查询或删除路由。
+- 当前 NAV 由后端按现金加持仓市值计算。快照或任一必需报价缺失、未来、过期或不可用时，完整 NAV 不可用；不得把部分估值、零值或历史估值伪装成当前净资产。现有有效期上限为 30 分钟，不能假设收盘后仍可显示有效当前 NAV。
+
+### 成交导入
+
+- 只支持现有银河证券 GB18030 CSV 格式，上限为 5 MiB、10,000 条记录；不宣称兼容任意券商或任意 CSV。
+- 流程是上传、预览汇总与脱敏错误、用户显式确认。预览不写入成交；存在校验错误时不得确认写入；重复确认不会重复插入。
+- 未确认预览的解析记录暂存 15 分钟，不保留原始上传文件；已确认结果可持久查询。当前前端可在同一主体重新授权后恢复已保存的批次标识，但不应承诺过期未确认批次仍可恢复。
+
+### 历史行情拉取
+
+- 后端 `/api/v1/jobs` 支持 `daily_history` 异步任务，按标的和包含端点的日期区间拉取日线；结束日期必须早于 Asia/Shanghai 的今天。不是当日实时行情或任意周期行情下载接口。
+- 支持提交、按任务 ID 查状态、请求取消，以及成功后的分页结果读取；任务与结果按认证主体隔离。现有契约没有任务列表路由，不能假设已支持全部历史任务列表。
+- 状态包括 `queued`、`running`、`succeeded`、`failed`、`cancelled`，另有阶段及分片进度。取消为协作式操作，取消请求被接受不等于任务已取消。
+- 历史持久化须部署者确认授权，并依赖可用的供应商凭据与服务；未获持久化授权时提交返回不可用。任务成功也不保证每个交易日有记录或供应商数据完整。
 
 ## Brand Commitments
 
-The interface is a professional operational web application: prioritize functionality, information hierarchy, and efficient task completion; use a modern, restrained visual language; design desktop-first while supporting mobile. Avoid generic template-like AI dashboard styling. Do not fabricate backend capabilities or imply trading execution, broker verification, or guaranteed outcomes.
+仓库和界面使用 A500／A500 Trader 名称；业务定位为个人宽基 ETF 辅助决策，不因名称自动缩窄为单一 ETF。现有产品记录要求专业、功能优先、清晰的信息层级、桌面优先并兼顾移动端，避免通用模板式仪表盘。
+
+用户明确对现有整体视觉与交互不满意，希望后续重新设计。当前页面、配色、字体和布局只是现状证据，不是必须沿用的视觉约束；新视觉方向本次不确定。文案使用明确的中文业务术语，不暗示自动交易、券商核验或确定收益。
 
 ## Evidence on Hand
 
-- Existing service contracts: `docs/signal-monitoring-api.md` and `docs/account-snapshot-api.md`.
-- Domain terminology and truth constraints: root `CONTEXT.md`.
-- User guide: `docs/user-guide.md`.
-- Existing REST implementations: `src/a500_t_trader/signal_monitor.py` and `src/a500_t_trader/account_snapshot_api.py`.
-- The frontend workspace now exposes the approved signals, conditional snapshot editing, truthful NAV unavailable states, and trade preview/confirmation flows. Account drafts survive ETag conflicts; same-subject reauthorization can restore persisted import batches. No order-entry, deployment management, or account-history workflow is provided.
+- 用户已确认：个人使用、宽基 ETF 辅助决策、盘中查看信号优先、券商软件手动执行、不提供自动下单；本次仅更新产品上下文，不修改功能代码。
+- 领域与术语：根目录 `CONTEXT.md`；操作与风险说明：`docs/user-guide.md`。
+- 信号契约与认证边界：`docs/signal-monitoring-api.md`。
+- 账户快照、NAV 与成交导入契约：`docs/account-snapshot-api.md`。
+- 历史任务、运行依赖与部署边界：`docs/web-deployment.md`，以及 `src/a500_t_trader/jobs_api.py`。
+- 现有前端事实：`frontend/src/app/workspace.tsx`、`frontend/src/lib/a500-client.ts`、`frontend/src/lib/snapshot-draft.ts`；前端运行与认证说明：`frontend/README.md`。
+- 现有后端实现：`src/a500_t_trader/signal_monitor.py`、`src/a500_t_trader/account_snapshot_api.py`。
+- 未提供可用于收益宣传的实盘业绩或保证性证据；不得虚构收益、成交结果或数据完整性证明。
 
 ## Product Principles
 
-1. Preserve the Python REST API as the sole source of business behavior and data contracts.
-2. Make data provenance, freshness, and unavailable states visible wherever they affect decisions.
-3. Keep account updates and trade import confirmation explicit, conditional, and recoverable from errors.
-4. Distinguish strategy signals and imported/user-entered records from broker-confirmed or executed activity.
-5. Design for efficient keyboard-accessible operation across desktop and mobile layouts.
+1. 当前信号优先，但有效性先于方向：数据来源、事件时间、时效和不可用原因不能被视觉表现掩盖。
+2. 决策与执行分离：系统提供参考，用户在券商软件中手动执行；不制造订单、已成交或自动同步的错觉。
+3. Python REST API 是唯一业务事实来源；保留真实能力与限制，不在前端发明计算或承诺未实现的接口。
+4. 资产变更与成交导入必须显式、可核对；保留并发冲突、校验失败、授权失效和批次过期的真实语义。
+5. 个人使用也不能牺牲隐私与操作可达性；保留主体隔离、敏感信息最小留存及桌面／移动端可用性。
 
 ## Accessibility & Inclusion
 
-Support keyboard operation and accessible focus, labels, and status/error feedback across forms and interactive flows. Maintain usable responsive layouts on mobile as well as desktop.
+保留键盘操作、可见焦点、明确的表单标签及可被辅助技术识别的状态／错误反馈。信号状态、风险和校验错误不能仅靠颜色区分；桌面与移动端均需可读、可操作。未另行确认特定辅助技术、特殊人群需求或额外认证标准。
+
+## Open Decisions
+
+- 后续重设计的视觉方向与页面组织尚未确定，本次不选择配色、字体、组件或布局，也不把现有外观设为默认答案。
+- 历史行情前端入口的具体交互及“设置”是否超出账户快照维护，需在对应功能设计时明确；不能借重设计静默扩大功能范围。
+- 具体屏幕规格及新的量化体验目标未确认，不虚构性能指标、使用频率或收益目标。
