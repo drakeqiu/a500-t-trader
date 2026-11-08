@@ -19,6 +19,7 @@ Use the single-context layout: root `CONTEXT.md` and `docs/adr/`. See `docs/agen
 ## Local builds and network sources
 
 - Build container images locally with Podman, including Compose builds.
+- After every local Compose-based test run, stop and remove its containers, then clean up test-created images and other resources.
 - For local Python dependency installation and builds, use the Aliyun PyPI mirror; run `uv sync --default-index https://mirrors.aliyun.com/pypi/simple/`.
 - Before committing, refresh the lockfile against the official PyPI index with `UV_INDEX=https://pypi.org/simple uv lock --refresh`.
 - For local TypeScript/JavaScript dependency installation and builds, use the Aliyun npm mirror (`https://registry.npmmirror.com/`), including when using Bun.
