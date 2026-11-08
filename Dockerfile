@@ -9,20 +9,17 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /uvx /bin/
 WORKDIR /app
-
-COPY pyproject.toml uv.lock README.md ./
+COPY config/ ./config/
 COPY wheels/ ./wheels/
+COPY dist/*.whl ./dist/
 ARG UV_INDEX_URL
 ARG UV_HTTP_TIMEOUT
-RUN --mount=type=cache,id=a500-uv-cache,target=/root/.cache/uv,sharing=locked \
-    if [ -n "$UV_INDEX_URL" ]; then UV_HTTP_TIMEOUT="$UV_HTTP_TIMEOUT" uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev --no-install-project; else uv sync --frozen --no-dev --no-install-project; fi
-COPY src/ ./src/
-COPY config/ ./config/
-RUN --mount=type=cache,id=a500-uv-cache,target=/root/.cache/uv,sharing=locked \
-    if [ -n "$UV_INDEX_URL" ]; then UV_HTTP_TIMEOUT="$UV_HTTP_TIMEOUT" uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev; else uv sync --frozen --no-dev; fi
+RUN if [ -n "$UV_INDEX_URL" ]; then \
+        python -m pip install --no-cache-dir --timeout "${UV_HTTP_TIMEOUT:-180}" --index-url "$UV_INDEX_URL" --find-links=/app/wheels /app/dist/*.whl; \
+    else \
+        python -m pip install --no-cache-dir --find-links=/app/wheels /app/dist/*.whl; \
+    fi
 
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1
 ENTRYPOINT []

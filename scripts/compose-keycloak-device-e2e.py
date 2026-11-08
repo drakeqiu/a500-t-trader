@@ -4,6 +4,7 @@ import argparse
 import base64
 import json
 import os
+import runpy
 import secrets
 import shlex
 import socket
@@ -20,6 +21,7 @@ from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL = runpy.run_path(str(ROOT / "scripts" / "start-local.py"))
 REALM = "a500"
 CLIENT_ID = "a500-device-client"
 API_AUDIENCE = "a500-api"
@@ -508,22 +510,24 @@ def main(*, mock_market_data: bool = False) -> None:
     other_name = f"e2e-user-{secrets.token_hex(8)}"
     other_password = secrets.token_urlsafe(32)
     base_url = f"http://localhost:{keycloak_port}"
-    environment = {
-        **os.environ,
-        "KEYCLOAK_ADMIN_USERNAME": admin_name,
-        "KEYCLOAK_ADMIN_PASSWORD": admin_password,
-        "KEYCLOAK_HOSTNAME": base_url,
-        "KEYCLOAK_HOST_PORT": str(keycloak_port),
-        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "POSTGRES_PORT": str(_available_port()),
-        "OIDC_ISSUER": f"{base_url}/realms/{REALM}",
-        "OIDC_AUDIENCE": API_AUDIENCE,
-        "OIDC_JWKS_URI": (
-            f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
-        ),
-        "MARKET_DATA_MODE": "replay",
-        # Only an explicit test-mode override may replace the live provider.
-    }
+    environment = LOCAL["configure_local_build_environment"](
+        {
+            **os.environ,
+            "KEYCLOAK_ADMIN_USERNAME": admin_name,
+            "KEYCLOAK_ADMIN_PASSWORD": admin_password,
+            "KEYCLOAK_HOSTNAME": base_url,
+            "KEYCLOAK_HOST_PORT": str(keycloak_port),
+            "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+            "POSTGRES_PORT": str(_available_port()),
+            "OIDC_ISSUER": f"{base_url}/realms/{REALM}",
+            "OIDC_AUDIENCE": API_AUDIENCE,
+            "OIDC_JWKS_URI": (
+                f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
+            ),
+            "MARKET_DATA_MODE": "replay",
+            # Only an explicit test-mode override may replace the live provider.
+        }
+    )
     if mock_market_data:
         print("验收使用测试专用模拟行情，非真实 TGW 行情", flush=True)
         for name in required:
@@ -566,6 +570,12 @@ def main(*, mock_market_data: bool = False) -> None:
         environment.update(TLS_CERT=str(cert), TLS_KEY=str(key))
         TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
         try:
+            subprocess.run(
+                ["uv", "build", "--wheel"],
+                cwd=ROOT,
+                env=environment,
+                check=True,
+            )
             # Build every service first; Podman Compose may otherwise try to pull
             # local images for dependencies that aren't listed on `up`.
             subprocess.run(

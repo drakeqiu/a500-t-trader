@@ -33,6 +33,20 @@ def test_local_environment_defaults_build_mirrors(
     assert environment["APT_MIRROR"] == "mirrors.bfsu.edu.cn"
 
 
+def test_local_environment_defaults_empty_build_mirrors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UV_INDEX_URL", "")
+    monkeypatch.setenv("APT_MIRROR", "")
+    monkeypatch.setenv("UV_HTTP_TIMEOUT", "")
+
+    environment = LOCAL.local_environment()
+
+    assert environment["UV_INDEX_URL"] == "https://mirrors.aliyun.com/pypi/simple/"
+    assert environment["UV_HTTP_TIMEOUT"] == "180"
+    assert environment["APT_MIRROR"] == "mirrors.bfsu.edu.cn"
+
+
 def test_local_environment_preserves_configured_build_mirrors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
