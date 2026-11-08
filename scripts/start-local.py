@@ -32,9 +32,7 @@ SERVICES = (
 
 def configure_local_build_environment(environment: dict[str, str]) -> dict[str, str]:
     """Fill local APT/PyPI build settings while preserving non-empty overrides."""
-    environment["APT_MIRROR"] = (
-        environment.get("APT_MIRROR") or "mirrors.bfsu.edu.cn"
-    )
+    environment["APT_MIRROR"] = environment.get("APT_MIRROR") or "mirrors.bfsu.edu.cn"
     environment["UV_INDEX_URL"] = (
         environment.get("UV_INDEX_URL") or "https://mirrors.aliyun.com/pypi/simple/"
     )

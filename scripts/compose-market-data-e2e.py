@@ -150,7 +150,7 @@ def main() -> None:
             cwd=ROOT,
             env=environment,
             check=True,
-            timeout=300,
+            timeout=600,
         )
 
         connection = None
