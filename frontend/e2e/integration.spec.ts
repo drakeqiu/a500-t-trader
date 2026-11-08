@@ -6,11 +6,12 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 const fixture = `http://127.0.0.1:${process.env.E2E_FIXTURE_PORT || "38100"}`;
 
 async function connect(page: Page, subject: string, heading = "策略信号") {
+  const origin = new URL(test.info().project.use.baseURL!).origin;
   const issuedToken = page.waitForResponse(
-    (response) => response.url() === `${fixture}/fixture-idp/token` && response.ok(),
+    (response) => response.url() === `${origin}/fixture-idp/token` && response.ok(),
   );
   await page.getByRole("button", { name: "安全连接", exact: true }).first().click();
-  await page.waitForURL(`${fixture}/fixture-idp/authorize**`);
+  await page.waitForURL(`${origin}/fixture-idp/authorize**`);
   const authorization = new URL(page.url());
   expect(authorization.searchParams.get("client_id")).toBe("a500-browser-client");
   expect(authorization.searchParams.get("redirect_uri")).toBe(

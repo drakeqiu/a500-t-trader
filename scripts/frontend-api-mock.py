@@ -1,9 +1,7 @@
-"""Deterministic HTTP mocks used by the frontend Playwright suite.
+"""Deterministic in-memory OIDC and API fixtures for frontend development and tests.
 
-The fixture provides a local OIDC provider and canned, in-memory API responses.
-It never starts application API services or connects to PostgreSQL, Redis, or market
-data. Run only through Playwright, or: uv run python
-scripts/frontend-api-mock.py --test-mode --port 38100.
+Run with ``uv run python scripts/frontend-api-mock.py --test-mode --port 38100``.
+The fixture never starts application API services or connects to data stores.
 """
 
 from __future__ import annotations
@@ -57,7 +55,7 @@ def create_fixture(port: int) -> FastAPI:
     signal_subscribers: set[asyncio.Queue[tuple[str, dict[str, object]] | None]] = set()
     signal_event_sequence = 0
     stream_generation = 0
-    issuer = f"http://127.0.0.1:{port}/fixture-idp"
+    issuer = os.getenv("FIXTURE_ISSUER", f"http://127.0.0.1:{port}/fixture-idp")
     app = FastAPI(title="Frontend API mock fixture")
     app.add_middleware(
         CORSMiddleware,
@@ -103,6 +101,14 @@ def create_fixture(port: int) -> FastAPI:
             "reasons": ["deterministic API mock; not live"],
             "stale": False,
         }
+
+    if os.getenv("FIXTURE_DEMO_DATA") == "1":
+        signal_states.update(
+            {
+                "563360": make_signal_state("BUY", "563360"),
+                "510300": make_signal_state("SELL", "510300"),
+            }
+        )
 
     def send_signal(state: dict[str, object]) -> str:
         nonlocal signal_event_sequence
@@ -155,14 +161,18 @@ def create_fixture(port: int) -> FastAPI:
         return {"mode": "deterministic-browser-test", "live_idp": False}
 
     @app.get("/fixture-idp/.well-known/openid-configuration")
-    async def discovery():
+    async def discovery(request: Request):
+        fixture_issuer = issuer
+        if os.getenv("FIXTURE_DYNAMIC_ORIGIN") == "1":
+            fixture_issuer = f"{str(request.base_url).rstrip('/')}/fixture-idp"
         return {
-            "issuer": issuer,
-            "authorization_endpoint": f"{issuer}/authorize",
-            "token_endpoint": f"{issuer}/token",
+            "issuer": fixture_issuer,
+            "authorization_endpoint": f"{fixture_issuer}/authorize",
+            "token_endpoint": f"{fixture_issuer}/token",
         }
 
     def validate_authorization(
+        request: Request,
         client_id: str,
         redirect_uri: str,
         response_type: str,
@@ -171,7 +181,14 @@ def create_fixture(port: int) -> FastAPI:
         code_challenge: str,
         code_challenge_method: str,
     ) -> None:
-        expected_redirect = f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}/"
+        expected_redirect = (
+            str(request.base_url)
+            if os.getenv("FIXTURE_DYNAMIC_ORIGIN") == "1"
+            else os.getenv(
+                "FIXTURE_REDIRECT_URI",
+                f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}/",
+            )
+        )
         if (
             client_id != "a500-browser-client"
             or redirect_uri != expected_redirect
@@ -185,6 +202,7 @@ def create_fixture(port: int) -> FastAPI:
 
     @app.get("/fixture-idp/authorize", response_class=HTMLResponse)
     async def authorize(
+        request: Request,
         client_id: str,
         redirect_uri: str,
         response_type: str,
@@ -202,7 +220,19 @@ def create_fixture(port: int) -> FastAPI:
             "code_challenge": code_challenge,
             "code_challenge_method": code_challenge_method,
         }
-        validate_authorization(**values)
+        validate_authorization(request=request, **values)
+        subject = os.getenv("FIXTURE_AUTO_SUBJECT")
+        if subject:
+            code = secrets.token_urlsafe(32)
+            codes[code] = {
+                "subject": subject,
+                "challenge": code_challenge,
+                "redirect_uri": redirect_uri,
+            }
+            return RedirectResponse(
+                f"{redirect_uri}?{urlencode({'code': code, 'state': state})}",
+                status_code=303,
+            )
         hidden = "".join(
             f"<input type='hidden' name='{name}' "
             f"value='{html.escape(value, quote=True)}'>"
@@ -218,6 +248,7 @@ def create_fixture(port: int) -> FastAPI:
 
     @app.post("/fixture-idp/authorize")
     async def approve(
+        request: Request,
         client_id: str = Form(),
         redirect_uri: str = Form(),
         response_type: str = Form(),
@@ -228,6 +259,7 @@ def create_fixture(port: int) -> FastAPI:
         subject: str = Form(),
     ):
         validate_authorization(
+            request,
             client_id,
             redirect_uri,
             response_type,
