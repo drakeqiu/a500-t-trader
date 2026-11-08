@@ -20,6 +20,13 @@ export type AccountNav = {
   available_cash?: string | null;
   account_snapshot_as_of?: string | null;
   calculated_at?: string | null;
+  holdings?: Array<{
+    symbol: string;
+    quantity: number;
+    last_price: string;
+    market_value: string;
+    as_of: string;
+  }>;
   classification?: string;
   reason?: string;
 };
@@ -41,8 +48,41 @@ export type ImportPreview = {
   error_details: Array<{ row?: number; field?: string; reason?: string; code?: string }>;
   confirmed?: unknown;
 };
+export type HistoryJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type HistoryJob = {
+  type: "daily_history";
+  id: string;
+  symbol: string;
+  start_date: string;
+  end_date: string;
+  status: HistoryJobStatus;
+  stage: string;
+  cancel_requested: boolean;
+  total_chunks: number;
+  completed_chunks: number;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  error: string | null;
+};
+export type HistoryBar = {
+  timestamp: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: number;
+  [key: string]: unknown;
+};
+export type HistoryResults = {
+  job_id: string;
+  total: number;
+  limit: number;
+  offset: number;
+  bars: HistoryBar[];
+};
 export type SignalEvent = { event: string; id?: string; data: unknown };
-type SignalResponse = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
+export type SignalSnapshot = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
 const apiOrigin = "/api";
 
 export class ApiError extends Error {
@@ -97,8 +137,18 @@ function request(path: string, token: string, init?: RequestInit) {
 async function api<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   return responseJson<T>(await request(path, token, init));
 }
+export async function getSignalSnapshot(
+  token: string,
+  symbols?: string[],
+  signal?: AbortSignal,
+): Promise<SignalSnapshot> {
+  const query = new URLSearchParams();
+  symbols?.forEach((symbol) => query.append("symbols", symbol));
+  const suffix = query.size ? `?${query}` : "";
+  return api<SignalSnapshot>(`/v1/signals${suffix}`, token, { signal });
+}
 export async function getSignals(token: string, signal?: AbortSignal): Promise<Signal[]> {
-  return (await api<SignalResponse>("/v1/signals", token, { signal })).signals;
+  return (await getSignalSnapshot(token, undefined, signal)).signals;
 }
 export async function getNav(token: string, signal?: AbortSignal): Promise<AccountNav> {
   const response = await request("/v1/account-nav", token, { signal });
@@ -154,6 +204,40 @@ export async function confirmPreview(token: string, batchId: string, signal?: Ab
     signal,
   });
   return getPreview(token, batchId, signal);
+}
+export function createHistoryJob(
+  token: string,
+  input: { symbol: string; start_date: string; end_date: string },
+  signal?: AbortSignal,
+) {
+  return api<HistoryJob>("/v1/jobs", token, {
+    method: "POST",
+    signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "daily_history", ...input }),
+  });
+}
+export function getHistoryJob(token: string, jobId: string, signal?: AbortSignal) {
+  return api<HistoryJob>(`/v1/jobs/${encodeURIComponent(jobId)}`, token, { signal });
+}
+export function cancelHistoryJob(token: string, jobId: string, signal?: AbortSignal) {
+  return api<HistoryJob>(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`, token, {
+    method: "POST",
+    signal,
+  });
+}
+export function getHistoryResults(
+  token: string,
+  jobId: string,
+  offset: number,
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams({ limit: "50", offset: String(offset) });
+  return api<HistoryResults>(
+    `/v1/jobs/${encodeURIComponent(jobId)}/results?${query}`,
+    token,
+    { signal },
+  );
 }
 export function parseSignalEvent(block: string): SignalEvent | null {
   let event = "message";

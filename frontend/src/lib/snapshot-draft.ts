@@ -1,5 +1,6 @@
 import type { AccountSnapshot } from "./a500-client";
 
+const decimalString = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 export type SnapshotDraft = Record<keyof AccountSnapshot, string>;
 export const snapshotFields = [
   ["as_of", "快照时间（含时区）"],
@@ -33,22 +34,25 @@ export function parseSnapshotDraft(draft: SnapshotDraft): AccountSnapshot {
     } catch {
       throw new Error(`${snapshotFields.find(([key]) => key === field)?.[1]}须为有效 JSON 对象。`);
     }
-    if (!value || typeof value !== "object" || Array.isArray(value))
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`${field} 须为标的到数值的 JSON 对象。`);
-    for (const amount of Object.values(value)) {
-      if (
-        field === "cost_basis"
-          ? typeof amount !== "string"
-          : !Number.isSafeInteger(amount) || (amount as number) < 0
-      ) {
-        throw new Error(
-          field === "cost_basis"
-            ? "成本基础须使用十进制字符串，不能使用 JSON 数字。"
-            : `${field} 数量须为非负安全整数。`,
-        );
+    }
+    for (const [symbol, amount] of Object.entries(value)) {
+      if (field === "cost_basis") {
+        if (typeof amount !== "string") {
+          throw new Error("成本基础须使用十进制字符串，不能使用 JSON 数字。");
+        }
+        if (!decimalString.test(amount)) {
+          throw new Error(`成本基础 ${symbol} 须为有效的非负十进制字符串。`);
+        }
+      } else if (!Number.isSafeInteger(amount) || (amount as number) < 0) {
+        throw new Error(`${field} 数量须为非负安全整数。`);
       }
     }
     mappings[field] = value as Record<string, number | string>;
+  }
+  if (!decimalString.test(draft.available_cash)) {
+    throw new Error("可用现金须为有效的非负十进制字符串。");
   }
   return {
     as_of: draft.as_of,
