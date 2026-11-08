@@ -30,6 +30,18 @@ SERVICES = (
 )
 
 
+def configure_local_build_environment(environment: dict[str, str]) -> dict[str, str]:
+    """Fill local APT/PyPI build settings while preserving non-empty overrides."""
+    environment["APT_MIRROR"] = (
+        environment.get("APT_MIRROR") or "mirrors.bfsu.edu.cn"
+    )
+    environment["UV_INDEX_URL"] = (
+        environment.get("UV_INDEX_URL") or "https://mirrors.aliyun.com/pypi/simple/"
+    )
+    environment["UV_HTTP_TIMEOUT"] = environment.get("UV_HTTP_TIMEOUT") or "180"
+    return environment
+
+
 def local_environment() -> dict[str, str]:
     """Read literal dotenv values, never execute the user's configuration file."""
     environment: dict[str, str] = {}
@@ -67,9 +79,7 @@ def local_environment() -> dict[str, str]:
         "http://keycloak:8080/realms/a500/protocol/openid-connect/certs",
     )
     environment.setdefault("KEYCLOAK_HOSTNAME", "http://localhost:8081")
-    environment.setdefault("APT_MIRROR", "mirrors.bfsu.edu.cn")
-    environment.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
-    environment.setdefault("UV_HTTP_TIMEOUT", "180")
+    configure_local_build_environment(environment)
     # Compose must use the sanitized literal environment, not parse .env again.
     return environment
 
@@ -326,6 +336,12 @@ def main() -> int:
         check_configuration(environment)
         command = compose_command(environment)
         if arguments.action == "up":
+            subprocess.run(
+                ["uv", "build", "--wheel"],
+                cwd=ROOT,
+                env=environment,
+                check=True,
+            )
             subprocess.run(
                 [*command, "up", "-d", "--build", *SERVICES],
                 cwd=ROOT,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import secrets
 import shlex
 import socket
@@ -17,6 +18,7 @@ from a500_t_trader.market_data import Trade
 from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL = runpy.run_path(str(ROOT / "scripts" / "start-local.py"))
 COMPOSE = [
     *shlex.split(os.environ.get("COMPOSE_COMMAND", "docker compose")),
     "-f",
@@ -100,23 +102,31 @@ def _compose_command(project: str) -> list[str]:
 def main() -> None:
     project = _project_name()
     consumer_image = _consumer_image(project)
-    environment = {
-        **os.environ,
-        "MARKET_DATA_MODE": "tgw",
-        "MARKET_DATA_CONSUMER_IMAGE": consumer_image,
-        "RABBITMQ_HOST_PORT": str(_available_port()),
-        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "POSTGRES_PORT": str(_available_port()),
-        "OIDC_ISSUER": "https://identity.example.test",
-        "OIDC_AUDIENCE": "a500-api",
-        "OIDC_JWKS_URI": "https://identity.example.test/jwks",
-        "AMAZINGDATA_USERNAME": "market-data-e2e",
-        "AMAZINGDATA_PASSWORD": "market-data-e2e",
-        "AMAZINGDATA_HOST": "127.0.0.1",
-        "AMAZINGDATA_PORT": "1",
-    }
+    environment = LOCAL["configure_local_build_environment"](
+        {
+            **os.environ,
+            "MARKET_DATA_MODE": "tgw",
+            "MARKET_DATA_CONSUMER_IMAGE": consumer_image,
+            "RABBITMQ_HOST_PORT": str(_available_port()),
+            "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+            "POSTGRES_PORT": str(_available_port()),
+            "OIDC_ISSUER": "https://identity.example.test",
+            "OIDC_AUDIENCE": "a500-api",
+            "OIDC_JWKS_URI": "https://identity.example.test/jwks",
+            "AMAZINGDATA_USERNAME": "market-data-e2e",
+            "AMAZINGDATA_PASSWORD": "market-data-e2e",
+            "AMAZINGDATA_HOST": "127.0.0.1",
+            "AMAZINGDATA_PORT": "1",
+        }
+    )
     compose = _compose_command(project)
     try:
+        subprocess.run(
+            ["uv", "build", "--wheel"],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
         subprocess.run(
             [*compose, "up", "-d", "rabbitmq", "redis"],
             cwd=ROOT,

@@ -60,6 +60,12 @@ def main() -> int:
         command[command.index("a500-local")] = "a500-lan"
         if args.action == "up":
             subprocess.run(
+                ["uv", "build", "--wheel"],
+                cwd=ROOT,
+                env=env,
+                check=True,
+            )
+            subprocess.run(
                 [*command, "up", "-d", "--build", *LOCAL["SERVICES"]],
                 cwd=ROOT,
                 env=env,
