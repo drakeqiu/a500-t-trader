@@ -2,7 +2,7 @@
 
 Next.js App Router 工作台，调用仓库唯一的 Python REST 业务后端，不实现第二套业务 API 或 OAuth token broker。
 
-### 统一本地启动
+### 真实服务统一启动
 
 在仓库根目录按 [根 README](../README.md#本地前后端集成) 配置 AmazingData、临时 Keycloak 管理员凭据和行情模式，然后执行：
 
@@ -12,9 +12,20 @@ python3 scripts/start-local.py
 
 打开 **<http://localhost:8080>**（不要替换为 `127.0.0.1`）；本地 Keycloak 为 `http://localhost:8081`，必须由管理员在 `a500` Realm 创建获准用户。没有默认用户或注册入口。启动器构建前端和 Python 服务，保持 RabbitMQ/Redis 原有拓扑；不是 mock 或行情采集器。
 
-### 开发与公开配置
+### 前端 mock 开发
 
-Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重新执行 `python3 scripts/start-local.py`，构建并重建 Compose 服务。网关将 UI 与 API 统一暴露在同一来源；不支持通过宿主机独立 Next 开发服务器访问 API。
+需要直接预览页面和内存 mock 数据时，在 `frontend/` 运行：
+
+```bash
+bun run dev
+```
+
+打开 <http://localhost:3000>，点击一次“安全连接”即可进入自动授权的 `local-demo` mock 会话；信号页会展示内存 fixture 的 `BUY`/`SELL` 示例。此模式不需要 Keycloak、业务 API、数据库或行情服务，示例不是实时行情或交易建议。数据仅驻留在 mock 进程内存中，重启会清空。此开发入口只用于演示和开发，不能承载真实账户或生产流量。
+网关监听 `0.0.0.0`，mock issuer、discovery 与回调 URI 均跟随浏览器访问的来源；从其他机器访问时，使用该机器可达的宿主机 IP 或域名。
+
+### 真实集成公开配置
+
+Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重新执行 `python3 scripts/start-local.py`，构建并重建 Compose 服务。网关将 UI 与 API 统一暴露在同一来源；不支持通过宿主机独立 Next 开发服务器访问真实 API。
 
 - 浏览器使用同源 `/api/v1/*`，Nginx 网关转发至业务 API；Bearer、ETag 前置条件、CSV multipart 与 SSE 游标均经由网关传递。Next 不承担 API 代理，不需要 API CORS。
 - `NEXT_PUBLIC_OIDC_ISSUER`：浏览器可访问的 issuer；集成默认 `http://localhost:8081/realms/a500`。discovery 必须提供 authorization endpoint 和 token endpoint。

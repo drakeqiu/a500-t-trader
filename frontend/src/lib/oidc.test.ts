@@ -48,6 +48,24 @@ describe("authorization code with PKCE", () => {
     expect(sessionStorage.getItem(key)).toBeNull();
   });
 
+  it("resolves a same-origin relative issuer against the browser origin", async () => {
+    const relativeIssuer = `${location.origin}/fixture-idp`;
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        issuer: relativeIssuer,
+        authorization_endpoint: `${relativeIssuer}/authorize`,
+        token_endpoint: `${relativeIssuer}/token`,
+      }),
+    );
+    vi.stubEnv("NEXT_PUBLIC_OIDC_ISSUER", "/fixture-idp");
+    vi.stubGlobal("fetch", fetchMock);
+    const { beginAuthorization } = await import("./oidc");
+    const authorization = new URL(await beginAuthorization());
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`${relativeIssuer}/.well-known/openid-configuration`);
+    expect(authorization.origin).toBe(location.origin);
+  });
+
   it("uses random state and S256, consumes the callback before exchanging and never stores the token", async () => {
     const fetchMock = vi
       .fn()

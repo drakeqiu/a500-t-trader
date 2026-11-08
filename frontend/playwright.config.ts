@@ -35,14 +35,15 @@ export default defineConfig({
       command: `uv run python scripts/frontend-api-mock.py --test-mode --port ${fixturePort}`,
       cwd: "..",
       url: `${fixtureOrigin}/__fixture/health`,
+      env: { ...process.env, FIXTURE_DYNAMIC_ORIGIN: "1" },
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `bun run dev --hostname 127.0.0.1 --port ${nextPort}`,
+      command: `bun x next dev --hostname 127.0.0.1 --port ${nextPort}`,
       url: `http://127.0.0.1:${nextPort}`,
       env: {
-        NEXT_PUBLIC_OIDC_ISSUER: `${fixtureOrigin}/fixture-idp`,
+        NEXT_PUBLIC_OIDC_ISSUER: "/fixture-idp",
         NEXT_PUBLIC_OIDC_CLIENT_ID: "a500-browser-client",
         NEXT_DIST_DIR: `.next-e2e-${webPort}`,
       },
