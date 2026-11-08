@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).parents[1] / "scripts" / "start-local.py"
 SPEC = importlib.util.spec_from_file_location("start_local", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -20,7 +19,9 @@ def test_startup_services_include_gateway_api_dependencies() -> None:
     assert services.index("jobs-api") < services.index("gateway")
 
 
-def test_local_environment_defaults_build_mirrors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_local_environment_defaults_build_mirrors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("UV_INDEX_URL", raising=False)
     monkeypatch.delenv("APT_MIRROR", raising=False)
     monkeypatch.delenv("UV_HTTP_TIMEOUT", raising=False)
