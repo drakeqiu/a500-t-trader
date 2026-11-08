@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Linux 主机、可工作的 Docker Engine 和 Compose 插件，能拉取基础镜像并访问构建依赖；下面命令使用 `docker compose`。rootless Podman 可使用 `podman-compose`，但网络和卷权限需按其环境处理。
-- 在仓库 `wheels/` 放置项目 `deps-v1` release 提供的 `AmazingData-1.1.9-cp314-none-any.whl` 和 `tgw-1.0.9.2-py3-none-any.whl`。前端镜像使用 Bun 构建，后端镜像使用 uv；无需在宿主机安装它们。构建网络需能访问依赖源，可用 `UV_INDEX_URL` 指定 Python 包索引。
+- 本地完整启动脚本默认使用 `https://mirrors.aliyun.com/pypi/simple/` 和 `mirrors.bfsu.edu.cn` 作为 PyPI、Debian APT 镜像，并将 uv 下载超时设为 180 秒；可通过 `.env` 或 shell 环境变量 `UV_INDEX_URL`、`APT_MIRROR`、`UV_HTTP_TIMEOUT` 覆盖。uv wheel 缓存由容器构建器跨镜像构建复用，避免服务镜像重复下载依赖。基础容器镜像走容器引擎的 registry mirror：Podman 本地配置 Docker Hub 的 `docker.m.daocloud.io`、GHCR 的 `ghcr.m.daocloud.io`；不要改共享 Compose 文件中的上游镜像名。
 - 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 和历史任务 worker 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
 - 凭据通过受保护的环境变量或未提交、限制访问的 `.env` 提供，不写入镜像或仓库。下例以交互式 shell 输入敏感值，避免直接写入命令历史；不要在共享终端输出环境变量或令牌。
 

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.14-slim
 
 ARG APT_MIRROR
@@ -14,10 +15,13 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY wheels/ ./wheels/
 ARG UV_INDEX_URL
-RUN if [ -n "$UV_INDEX_URL" ]; then uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev --no-install-project; else uv sync --frozen --no-dev --no-install-project; fi
+ARG UV_HTTP_TIMEOUT
+RUN --mount=type=cache,id=a500-uv-cache,target=/root/.cache/uv,sharing=locked \
+    if [ -n "$UV_INDEX_URL" ]; then UV_HTTP_TIMEOUT="$UV_HTTP_TIMEOUT" uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev --no-install-project; else uv sync --frozen --no-dev --no-install-project; fi
 COPY src/ ./src/
 COPY config/ ./config/
-RUN if [ -n "$UV_INDEX_URL" ]; then uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev; else uv sync --frozen --no-dev; fi
+RUN --mount=type=cache,id=a500-uv-cache,target=/root/.cache/uv,sharing=locked \
+    if [ -n "$UV_INDEX_URL" ]; then UV_HTTP_TIMEOUT="$UV_HTTP_TIMEOUT" uv sync --index-url "$UV_INDEX_URL" --frozen --no-dev; else uv sync --frozen --no-dev; fi
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1

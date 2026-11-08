@@ -38,7 +38,6 @@ def main() -> int:
                 "host must be a LAN IPv4 address, not loopback or a wildcard"
             )
         env = LOCAL["local_environment"]()
-        env["UV_INDEX_URL"] = "https://mirrors.aliyun.com/pypi/simple/"
         env.update(
             KEYCLOAK_ADMIN_USERNAME="admin",
             KEYCLOAK_ADMIN_PASSWORD="changeme",
