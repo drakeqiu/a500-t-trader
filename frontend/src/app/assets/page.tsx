@@ -742,11 +742,8 @@ function SnapshotView({ snapshot }: { snapshot: NonNullable<SnapshotResult>["sna
   const entries = [
     ["快照时间（含时区）", snapshot.as_of],
     ["可用现金", amount(snapshot.available_cash)],
-    ["持仓数量", snapshot.holdings],
-    ["保护底仓", snapshot.protected_floor],
-    ["可卖数量", snapshot.sellable],
-    ["成本基础", snapshot.cost_basis],
   ] as const;
+  const symbols = Object.keys(snapshot.holdings);
 
   return (
     <div className="snapshot-readonly">
@@ -756,19 +753,44 @@ function SnapshotView({ snapshot }: { snapshot: NonNullable<SnapshotResult>["sna
           <div key={label}>
             <dt>{label}</dt>
             <dd>
-              {typeof value === "string" ? (
-                label === "快照时间（含时区）" ? (
-                  <time dateTime={snapshot.as_of}>{timeLabel(value)}</time>
-                ) : (
-                  value
-                )
+              {label === "快照时间（含时区）" ? (
+                <time dateTime={snapshot.as_of}>{timeLabel(value)}</time>
               ) : (
-                <pre>{JSON.stringify(value, null, 2)}</pre>
+                value
               )}
             </dd>
           </div>
         ))}
       </dl>
+      <section className="snapshot-positions" aria-labelledby="snapshot-positions-title">
+        <h3 id="snapshot-positions-title">证券持仓</h3>
+        {symbols.length === 0 ? (
+          <p className="snapshot-positions-empty">当前快照未记录证券持仓。</p>
+        ) : (
+          <table className="snapshot-position-table" aria-label="证券持仓">
+            <thead>
+              <tr>
+                <th scope="col">证券代码</th>
+                <th scope="col">持仓数量</th>
+                <th scope="col">保护底仓</th>
+                <th scope="col">可卖数量</th>
+                <th scope="col">成本基础</th>
+              </tr>
+            </thead>
+            <tbody>
+              {symbols.map((symbol) => (
+                <tr key={symbol}>
+                  <th scope="row">{symbol}</th>
+                  <td data-label="持仓数量">{snapshot.holdings[symbol]}</td>
+                  <td data-label="保护底仓">{snapshot.protected_floor[symbol]}</td>
+                  <td data-label="可卖数量">{snapshot.sellable[symbol]}</td>
+                  <td data-label="成本基础">{snapshot.cost_basis[symbol] ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   );
 }

@@ -208,7 +208,11 @@ test("authenticates on /assets and creates an account snapshot through the API",
   await expect(
     page.getByText("账户快照已保存。正在从服务端重新读取完整净资产估值。"),
   ).toBeVisible();
-  await expect(page.getByText("¥125.50")).toBeVisible();
+  const positions = page.getByRole("table", { name: "证券持仓" });
+  await expect(positions.getByRole("row", { name: /510300/ })).toBeVisible();
+  await expect(positions.getByRole("columnheader", { name: "保护底仓" })).toBeVisible();
+  await expect(positions.getByRole("cell", { name: "80" })).toBeVisible();
+  await expect(positions.getByRole("cell", { name: "3.8500" })).toBeVisible();
 });
 
 test("validates snapshot amounts and preserves oversized decimal precision on repeat submits", async ({
