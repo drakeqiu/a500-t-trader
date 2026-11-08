@@ -566,12 +566,21 @@ def main(*, mock_market_data: bool = False) -> None:
         environment.update(TLS_CERT=str(cert), TLS_KEY=str(key))
         TLS_CONTEXT = ssl.create_default_context(cafile=str(cert))
         try:
+            # Build every service first; Podman Compose may otherwise try to pull
+            # local images for dependencies that aren't listed on `up`.
+            subprocess.run(
+                [*compose, "build"],
+                cwd=ROOT,
+                env=environment,
+                check=True,
+                timeout=600,
+            )
+
             subprocess.run(
                 [
                     *compose,
                     "up",
                     "-d",
-                    "--build",
                     "keycloak",
                     "signal-api",
                     "account-api",

@@ -48,6 +48,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-signal-calculator", "--purpose", "signal-calculator"]
     environment:
@@ -67,6 +68,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-signal-api"]
     environment:
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
@@ -99,6 +101,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-account-api"]
     environment:
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
@@ -125,6 +128,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.jobs_api"]
     environment:
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
@@ -149,6 +153,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.jobs"]
     environment:
       POSTGRES_HOST: postgres
@@ -174,6 +179,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.history_dispatch"]
     environment:
       POSTGRES_HOST: postgres
@@ -194,6 +200,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
     environment: &market-data-env
       MARKET_DATA_MODE: ${MARKET_DATA_MODE:?MARKET_DATA_MODE must be tgw or replay}
@@ -210,6 +217,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-market-data-consumer", "--purpose", "audit", "--max-age-seconds", "30"]
     environment: *market-data-env
     depends_on:
@@ -223,6 +231,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-market-data-replay"]
     environment: *market-data-env
