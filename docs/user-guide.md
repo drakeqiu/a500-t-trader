@@ -152,7 +152,7 @@ python -m a500_t_trader premarket \
   --config strategy.json --account account.json --output plan-2026-10-30.json
 ```
 
-监控仍使用同一 PostgreSQL 证据库。以下命令假定已设置 `A500_DATABASE_URL`；也可使用 `--database` 显式指定 PostgreSQL URL。配置方法见[根 README](../README.md#本地前后端集成)。盘后按交易日生成复盘：
+监控仍使用同一 PostgreSQL 证据库。以下命令假定已设置 `DATABASE_URL`；也可使用 `--database` 显式指定 PostgreSQL URL。配置方法见[根 README](../README.md#本地前后端集成)。盘后按交易日生成复盘：
 
 ```bash
 python -m a500_t_trader postmarket \
@@ -238,26 +238,26 @@ broker 发布失败时，可将 `LatestStatePublisher` 作为 collector 的 `Pub
 命令行需要接入方提供真实的 tgw 连接工厂和配置，不含容器或 tgw 凭据假设：
 
 ```sh
-export A500_MARKET_DATA_MODE=tgw
-export A500_RABBITMQ_URL='amqp://user:password@localhost:5672/%2F'
-export A500_TGW_CONNECTION_FACTORY='my_tgw_adapter:create_connection'
+export MARKET_DATA_MODE=tgw
+export RABBITMQ_URL='amqp://user:password@localhost:5672/%2F'
+export TGW_CONNECTION_FACTORY='my_tgw_adapter:create_connection'
 a500-market-data-collector \
   --symbols 563360,510300 \
   --tgw-config ./tgw-connection.json
 ```
 
-也可用 `--factory package.module:callable` 指定工厂。工厂形如 `def create_connection(config: CollectorConfig) -> PushConnection`，`config.connection_options` 是 `--tgw-config` JSON 对象；工厂负责按实际部署环境建立并返回已确认连接的对象。采集器要求 `A500_MARKET_DATA_MODE=tgw`，只写入 `market.events.tgw`。命令行会分别报告连接与订阅状态，SIGINT/SIGTERM 会触发有序关闭。
+也可用 `--factory package.module:callable` 指定工厂。工厂形如 `def create_connection(config: CollectorConfig) -> PushConnection`，`config.connection_options` 是 `--tgw-config` JSON 对象；工厂负责按实际部署环境建立并返回已确认连接的对象。采集器要求 `MARKET_DATA_MODE=tgw`，只写入 `market.events.tgw`。命令行会分别报告连接与订阅状态，SIGINT/SIGTERM 会触发有序关闭。
 
-离线开发可设置 `A500_MARKET_DATA_MODE=replay`，从历史 1 分钟行情文件向隔离的 `market.events.replay` 发布：
+离线开发可设置 `MARKET_DATA_MODE=replay`，从历史 1 分钟行情文件向隔离的 `market.events.replay` 发布：
 
 ```sh
-A500_MARKET_DATA_MODE=replay docker compose --profile replay up -d --build
-A500_MARKET_DATA_MODE=replay docker compose run --rm replay \
+MARKET_DATA_MODE=replay docker compose --profile replay up -d --build
+MARKET_DATA_MODE=replay docker compose run --rm replay \
   a500-market-data-replay --file data/market-history/563360_1m_20261102.json \
   --symbol 563360 --start-time 2026-11-02T10:00:00+08:00 --speed 10
 ```
 
-`--start-time` 前的已完成 bar 作为 `warmup: true` 立即送出；从起始时刻起按原始间隔除以 `--speed` 播放，默认速度为 1，文件到末尾即停止。Replay consumer 用事件携带的回放时钟做新鲜度判断，TGW consumer 仍使用系统时钟。省略或设置其他 `A500_MARKET_DATA_MODE` 值会拒绝启动。Compose 默认不启动采集器；TGW 模式仍需外部已验证采集器。
+`--start-time` 前的已完成 bar 作为 `warmup: true` 立即送出；从起始时刻起按原始间隔除以 `--speed` 播放，默认速度为 1，文件到末尾即停止。Replay consumer 用事件携带的回放时钟做新鲜度判断，TGW consumer 仍使用系统时钟。省略或设置其他 `MARKET_DATA_MODE` 值会拒绝启动。Compose 默认不启动采集器；TGW 模式仍需外部已验证采集器。
 
 ## 8. 交易日状态
 

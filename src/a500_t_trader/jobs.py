@@ -583,17 +583,17 @@ def process_job(
 
 
 def worker_main() -> None:
-    if os.environ.get("A500_HISTORY_PERSISTENCE_PERMITTED", "").lower() != "true":
+    if os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower() != "true":
         _LOG.info("History worker disabled: persistence permission not configured")
         return
     from .history_dispatch import HistoryConsumer
 
     try:
-        retention_days = int(os.environ.get("A500_JOB_RETENTION_DAYS", "30"))
+        retention_days = int(os.environ.get("JOB_RETENTION_DAYS", "30"))
         if retention_days < 1:
             raise ValueError
     except ValueError:
-        raise SystemExit("A500_JOB_RETENTION_DAYS must be a positive integer") from None
+        raise SystemExit("JOB_RETENTION_DAYS must be a positive integer") from None
     repository = JobRepository(database_url())
     HistoryConsumer(repository, retention_days=retention_days).run()
 

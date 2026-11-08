@@ -34,8 +34,8 @@ def register_commands(
     daily.add_argument("--end-date", required=True, type=date.fromisoformat)
     daily.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     daily.add_argument("--confirm-history-persistence-permitted", action="store_true")
@@ -47,8 +47,8 @@ def register_commands(
     indicators.add_argument("--start-date", required=True, type=date.fromisoformat)
     indicators.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     indicators.add_argument(
@@ -70,8 +70,8 @@ def register_commands(
     backtest.add_argument("--interval-minutes", type=int, choices=(1, 5), default=1)
     backtest.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     backtest.add_argument("--cost-bps", type=Decimal, default=Decimal(0))
@@ -93,16 +93,16 @@ def register_commands(
     )
     cleanup.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
     )
     show = commands.add_parser(
         "backtest-show", help="show one run and its exact bar snapshot"
     )
     show.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
     )
     selected_run = show.add_mutually_exclusive_group(required=True)
     selected_run.add_argument("--latest", action="store_true")

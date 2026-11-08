@@ -136,7 +136,7 @@ def create_app(
     """Construct read-only web service; it never connects to a market/broker source."""
     if redis is None:
         redis = Redis.from_url(
-            os.environ.get("A500_REDIS_URL", "redis://localhost:6379/0"),
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             decode_responses=True,
         )
     if config is None:

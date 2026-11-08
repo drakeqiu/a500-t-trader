@@ -24,8 +24,8 @@ def register_commands(
     )
     account_record.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     fill_record = commands.add_parser(
@@ -39,8 +39,8 @@ def register_commands(
     fill_record.add_argument("--notes", default="")
     fill_record.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     fill_import = commands.add_parser(
@@ -49,8 +49,8 @@ def register_commands(
     fill_import.add_argument("--file", required=True, help="GB18030 Galaxy CSV file")
     fill_import.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
     fill_import.add_argument(
@@ -61,8 +61,8 @@ def register_commands(
     )
     ledger_show.add_argument(
         "--database",
-        default=os.environ.get("A500_DATABASE_URL"),
-        required=not bool(os.environ.get("A500_DATABASE_URL")),
+        default=os.environ.get("DATABASE_URL"),
+        required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
 

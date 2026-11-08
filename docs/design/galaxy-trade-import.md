@@ -45,8 +45,8 @@
 增加 CLI 子命令，建议形式：
 
 ```text
-python -m a500_t_trader import-fills --file fills.csv --database "$A500_DATABASE_URL"
-python -m a500_t_trader import-fills --file fills.csv --database "$A500_DATABASE_URL" --confirm
+python -m a500_t_trader import-fills --file fills.csv --database "$DATABASE_URL"
+python -m a500_t_trader import-fills --file fills.csv --database "$DATABASE_URL" --confirm
 ```
 
 不带 `--confirm` 时只解析、校验、查重并输出预览结果，不写数据库；带 `--confirm` 时执行同样的校验，并仅在文件无错误后写入。预览与确认阶段应分别报告有效记录数、新增数、已存在重复数和错误数；错误包含 CSV 行号及具体字段/原因。存在任何解析、校验或标识冲突错误时，退出失败且不写入任何行。成功写入时输出新增数及导入记录 ID（或等价的明确成功结果）。

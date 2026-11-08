@@ -58,9 +58,9 @@ class OIDCAuthenticator:
 
     @classmethod
     def from_environment(cls) -> OIDCAuthenticator:
-        issuer = os.environ.get("A500_OIDC_ISSUER")
-        audience = os.environ.get("A500_OIDC_AUDIENCE")
-        jwks_uri = os.environ.get("A500_OIDC_JWKS_URI")
+        issuer = os.environ.get("OIDC_ISSUER")
+        audience = os.environ.get("OIDC_AUDIENCE")
+        jwks_uri = os.environ.get("OIDC_JWKS_URI")
         if not issuer or not audience or not jwks_uri:
             raise RuntimeError("OIDC issuer, audience, and JWKS URI must be configured")
         return cls(issuer, audience, jwks_uri)

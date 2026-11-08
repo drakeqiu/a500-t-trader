@@ -12,12 +12,12 @@ from psycopg import sql
 @contextmanager
 def _isolated_postgres_url() -> Iterator[str]:
     """Use a private schema on the explicitly configured PostgreSQL test server."""
-    base_url = os.environ.get("A500_TEST_DATABASE_URL")
+    base_url = os.environ.get("TEST_DATABASE_URL")
     if not base_url:
-        pytest.fail("A500_TEST_DATABASE_URL must point to a PostgreSQL test database")
+        pytest.fail("TEST_DATABASE_URL must point to a PostgreSQL test database")
     parts = urlsplit(base_url)
     if parts.scheme not in ("postgres", "postgresql"):
-        pytest.fail("A500_TEST_DATABASE_URL must be a PostgreSQL URL")
+        pytest.fail("TEST_DATABASE_URL must be a PostgreSQL URL")
     schema = "a500_test_" + uuid.uuid4().hex
     params = parse_qsl(parts.query, keep_blank_values=True)
     options = [value for key, value in params if key == "options"]

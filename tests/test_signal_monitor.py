@@ -45,9 +45,9 @@ def test_signal_api_default_app_imports_without_connecting_to_redis() -> None:
             "-c",
             (
                 "import os; "
-                "os.environ['A500_OIDC_ISSUER']='https://issuer.example'; "
-                "os.environ['A500_OIDC_AUDIENCE']='a500-api'; "
-                "os.environ['A500_OIDC_JWKS_URI']='https://issuer.example/jwks'; "
+                "os.environ['OIDC_ISSUER']='https://issuer.example'; "
+                "os.environ['OIDC_AUDIENCE']='a500-api'; "
+                "os.environ['OIDC_JWKS_URI']='https://issuer.example/jwks'; "
                 "from a500_t_trader.signal_api import app; "
                 "assert app.title == 'A500 signal monitor'"
             ),

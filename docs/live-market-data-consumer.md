@@ -3,12 +3,12 @@
 消费者只接收采集器发布的规范化 JSON 事件，不导入或调用 tgw SDK。安装项目依赖后，可独立启动一个用途实例：
 
 ```sh
- A500_MARKET_DATA_MODE=tgw \
- A500_RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F \
+ MARKET_DATA_MODE=tgw \
+ RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F \
  a500-market-data-consumer --purpose signals --max-age-seconds 30
 ```
 
-事件将以 JSON 行输出到标准输出。消费者必须显式选择 `A500_MARKET_DATA_MODE=tgw|replay`。同用途、同模式的多个进程共享 `market.consumer.<purpose>.<mode>` durable queue；TGW 与回放使用不同 exchange/queue。所有队列订阅 `snapshot.*`、`minute_bar.*` 与 `trade.*` 路由。
+事件将以 JSON 行输出到标准输出。消费者必须显式选择 `MARKET_DATA_MODE=tgw|replay`。同用途、同模式的多个进程共享 `market.consumer.<purpose>.<mode>` durable queue；TGW 与回放使用不同 exchange/queue。所有队列订阅 `snapshot.*`、`minute_bar.*` 与 `trade.*` 路由。
 
 ## 投递和事件身份
 

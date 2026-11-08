@@ -6,7 +6,7 @@
 
 ## Compose 部署
 
-Compose 要求统一 OIDC 配置 `A500_OIDC_ISSUER`、`A500_OIDC_AUDIENCE`、`A500_OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；浏览器使用 Authorization Code + PKCE，不提供 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
+Compose 要求统一 OIDC 配置 `OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI`，以及账户 API 所需的 AmazingData 配置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。issuer、JWKS URI 和 `a500-api` audience 由账户 API 与信号 API 共享。调用方直接向受信任身份提供方获取 Bearer access token；浏览器使用 Authorization Code + PKCE，不提供 token broker。缺少必需值时 Compose 配置失败，不启动匿名 API。issuer 应填写 IdP 声明的规范地址。
 
 浏览器与后端的统一本地启动见 [根 README](../README.md#本地前后端集成)：`python3 scripts/start-local.py` 组合基础 Compose、Keycloak、`compose.web.yaml` 和 `compose.web-http.yaml`。浏览器访问 `http://localhost:8080`，Nginx 将同源 `/api/v1/*` 路由到内部 API，保留 Bearer 与 `Last-Event-ID`，代理超时为一小时。页面 token 只留内存，不自动用 refresh token；刷新或失效后重新登录，可复用 Keycloak 会话。直接 API 调用方也使用相同网关路径。
 
@@ -40,7 +40,7 @@ uv run python -c 'import os, runpy; env = runpy.run_path("scripts/start-local.py
 
 后端镜像已包含 TGW SDK 所需的 Kerberos 运行库；修改镜像依赖后需重新构建。
 
-也可在受保护的执行环境直接设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT` 后运行 `uv run python scripts/compose-keycloak-device-e2e.py`。不带 `--mock-market-data` 时账户 API 始终连接真实服务，缺少或不可用的凭据不能完成真实验收；生产 Compose 不包含测试覆盖。默认使用 Docker Compose，Podman Compose 通过 `PODMAN_COMPOSE=podman-compose` 选择。该脚本构建所需前端和 API，以独立项目名隔离服务与卷，随机选择本机 Keycloak 和 gateway host port。行情 Compose 验收另运行 `uv run python scripts/compose-market-data-e2e.py`，Podman Compose 使用 `A500_COMPOSE_COMMAND=podman-compose`。
+也可在受保护的执行环境直接设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT` 后运行 `uv run python scripts/compose-keycloak-device-e2e.py`。不带 `--mock-market-data` 时账户 API 始终连接真实服务，缺少或不可用的凭据不能完成真实验收；生产 Compose 不包含测试覆盖。默认使用 Docker Compose，Podman Compose 通过 `PODMAN_COMPOSE=podman-compose` 选择。该脚本构建所需前端和 API，以独立项目名隔离服务与卷，随机选择本机 Keycloak 和 gateway host port。行情 Compose 验收另运行 `uv run python scripts/compose-market-data-e2e.py`，Podman Compose 使用 `COMPOSE_COMMAND=podman-compose`。
 
 设备授权流程中，应用先向 IdP 的设备授权端点申请设备码和用户码，展示 IdP 返回的验证 URI、用户码及轮询间隔；用户在另一设备打开验证 URI 并登录 Keycloak、确认授权。客户端按 IdP 返回的间隔轮询 token 端点，依照 OAuth 2.0 Device Authorization Grant 处理 `authorization_pending`、`slow_down`、`access_denied` 和过期结果，不得在每次 pending 时加速轮询。Keycloak discovery 地址为 `http://127.0.0.1:8081/realms/a500/.well-known/openid-configuration`；可从 discovery 读取 `device_authorization_endpoint`、`token_endpoint` 与 `jwks_uri`。本地 Keycloak 端点分别为 `/realms/a500/protocol/openid-connect/auth/device` 和 `/realms/a500/protocol/openid-connect/token`。直接使用 OAuth 客户端命令行工具时，参数对应 client ID `a500-device-client`、scope `openid`，并按该工具的设备授权实现展示验证 URI/码及轮询令牌端点；不要把用户密码发送给 A500 API。
 可用 `curl` 观察完整协议交互（以下变量仅为示例配置，不含凭据）：
@@ -87,23 +87,23 @@ curl -H "Authorization: Bearer ${ACCESS_TOKEN}" \
 生产部署可连接组织管理的外部 Keycloak/兼容 OIDC IdP，无须部署 Compose 中的 `keycloak` 服务。由 IdP 管理员创建支持 Authorization Code 和 PKCE S256 的 public client，关闭自助注册，不创建默认用户，并配置 access token 含 `a500-api` audience；提供获准用户，精确允许浏览器 UI 来源与根路径回调 URI。部署环境设置规范 issuer、可由 API 访问的 JWKS URI、共享 audience 和浏览器 client ID，例如：
 
 ```sh
-export A500_OIDC_ISSUER=https://identity.example.internal/realms/a500
-export A500_OIDC_AUDIENCE=a500-api
-export A500_OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
-export A500_OIDC_CLIENT_ID=a500-browser-client
+export OIDC_ISSUER=https://identity.example.internal/realms/a500
+export OIDC_AUDIENCE=a500-api
+export OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
+export OIDC_CLIENT_ID=a500-browser-client
 ```
 
-实际值必须与 IdP 配置一致，issuer 必须与令牌 `iss` 完全匹配，JWKS URI 必须可从 API 容器网络访问；`A500_OIDC_CLIENT_ID` 默认为 `a500-browser-client`，不是 API 的认证凭据。前端公开 issuer 和 client ID 在镜像构建时写入，修改后必须重新构建前端镜像并重建容器；公开 issuer 必须可从浏览器访问。`KEYCLOAK_ADMIN_USERNAME` 和 `KEYCLOAK_ADMIN_PASSWORD` 仅用于本地 Keycloak bootstrap 管理员；生产外部 IdP 的管理员凭据应由运行环境的密钥管理/secret 注入提供，不得写入镜像、仓库、文档或应用 `.env`。Compose 使用 `.env` 时文件必须未提交且限制访问。
+实际值必须与 IdP 配置一致，issuer 必须与令牌 `iss` 完全匹配，JWKS URI 必须可从 API 容器网络访问；`OIDC_CLIENT_ID` 默认为 `a500-browser-client`，不是 API 的认证凭据。前端公开 issuer 和 client ID 在镜像构建时写入，修改后必须重新构建前端镜像并重建容器；公开 issuer 必须可从浏览器访问。`KEYCLOAK_ADMIN_USERNAME` 和 `KEYCLOAK_ADMIN_PASSWORD` 仅用于本地 Keycloak bootstrap 管理员；生产外部 IdP 的管理员凭据应由运行环境的密钥管理/secret 注入提供，不得写入镜像、仓库、文档或应用 `.env`。Compose 使用 `.env` 时文件必须未提交且限制访问。
 
 完整配置、HTTP/HTTPS 选择、证书、身份提供方、迁移和运维操作见[统一 Web 部署指南](web-deployment.md)。`compose.web.yaml` 仅提供公共服务定义，必须额外叠加且仅选择一个模式文件；例如外部 IdP 的 HTTP 部署：
 
 ```sh
-export A500_MARKET_DATA_MODE=tgw
+export MARKET_DATA_MODE=tgw
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml up -d --build
 docker compose -f compose.yaml -f compose.web.yaml -f compose.web-http.yaml ps
 ```
 
-HTTP 默认绑定 `127.0.0.1:8080`，仅适合可信网络或外部 TLS 终止；HTTPS 使用 `compose.web-https.yaml`，默认 `127.0.0.1:8443`，证书路径通过 `A500_TLS_CERT` 和 `A500_TLS_KEY` 提供。`A500_GATEWAY_HOST` 和 `A500_GATEWAY_HOST_PORT` 可覆盖监听地址和端口。浏览器与直接 API 调用均使用 `/api/v1/*`，旧 `/v1/*` 不再提供。账户数据库持久化在 `account-data` 卷；账户 API 需要可用的 AmazingData 凭据与服务。独立行情消费者不需 Web 配置，见[行情 Compose 指南](single-host-market-data-compose.md)。
+HTTP 默认绑定 `127.0.0.1:8080`，仅适合可信网络或外部 TLS 终止；HTTPS 使用 `compose.web-https.yaml`，默认 `127.0.0.1:8443`，证书路径通过 `TLS_CERT` 和 `TLS_KEY` 提供。`GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 可覆盖监听地址和端口。浏览器与直接 API 调用均使用 `/api/v1/*`，旧 `/v1/*` 不再提供。账户数据库持久化在 `account-data` 卷；账户 API 需要可用的 AmazingData 凭据与服务。独立行情消费者不需 Web 配置，见[行情 Compose 指南](single-host-market-data-compose.md)。
 
 所有信号查询和 SSE 订阅均由应用验证 Bearer access token 的签名、issuer、audience 与有效期；反向代理认证不得替代此应用层边界。网关不开放原信号 `/docs`、`/redoc` 与 `/openapi.json`，账户 schema 可通过 `/api/account/openapi.json` 访问并要求有效 Bearer token。有效共享 audience 的获准用户读取相同的行情与信号，不按 token 主体隔离。`/healthz` 仅供 Compose 内部健康探针使用，Nginx gateway 对此路径返回 `404`，不得将探针地址作为外部服务路由。未认证或无效令牌返回 `401`，并附 `WWW-Authenticate: Bearer`。
 

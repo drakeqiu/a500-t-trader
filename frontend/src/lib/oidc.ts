@@ -1,5 +1,5 @@
-const issuer = process.env.NEXT_PUBLIC_A500_OIDC_ISSUER?.replace(/\/$/, "");
-const clientId = process.env.NEXT_PUBLIC_A500_OIDC_CLIENT_ID || "a500-browser-client";
+const issuer = process.env.NEXT_PUBLIC_OIDC_ISSUER?.replace(/\/$/, "");
+const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "a500-browser-client";
 const transactionKey = "a500.oidc.transaction";
 const transactionLifetime = 10 * 60 * 1000;
 export const configurationReady = Boolean(issuer);
@@ -78,7 +78,7 @@ export function pkceChallenge(verifier: string): string {
 }
 
 async function discover(signal?: AbortSignal) {
-  if (!issuer) throw new Error("缺少 NEXT_PUBLIC_A500_OIDC_ISSUER 配置。");
+  if (!issuer) throw new Error("缺少 NEXT_PUBLIC_OIDC_ISSUER 配置。");
   const response = await fetch(`${issuer}/.well-known/openid-configuration`, {
     cache: "no-store",
     signal,

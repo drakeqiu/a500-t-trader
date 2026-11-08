@@ -27,9 +27,9 @@ class HistoryPublisher:
         if channel is None:
             import pika  # type: ignore[import-untyped]
 
-            rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
+            rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
-                raise ValueError("A500_RABBITMQ_URL is required")
+                raise ValueError("RABBITMQ_URL is required")
             self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
             channel = self._connection.channel()
             self._properties = pika.BasicProperties(
@@ -85,9 +85,9 @@ class HistoryConsumer:
         if channel is None:
             import pika
 
-            rabbit_url = url or os.environ.get("A500_RABBITMQ_URL")
+            rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
-                raise ValueError("A500_RABBITMQ_URL is required")
+                raise ValueError("RABBITMQ_URL is required")
             self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
             channel = self._connection.channel()
         self._channel = channel

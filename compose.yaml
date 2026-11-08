@@ -5,11 +5,11 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
-      POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
-      POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-a500}
+      POSTGRES_USER: ${POSTGRES_USER:-a500}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
-      - "127.0.0.1:${A500_POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 2s
@@ -23,7 +23,7 @@ services:
     image: rabbitmq:4.1-alpine
     hostname: rabbitmq
     ports:
-      - "${A500_RABBITMQ_BIND_HOST:-0.0.0.0}:${A500_RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_BIND_HOST:-0.0.0.0}:${RABBITMQ_HOST_PORT:-5672}:5672"
     healthcheck:
       test: ["CMD", "su", "rabbitmq", "-s", "/bin/sh", "-c", "rabbitmq-diagnostics -q ping"]
       interval: 2s
@@ -51,9 +51,9 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-signal-calculator", "--purpose", "signal-calculator"]
     environment:
-      A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
-      A500_REDIS_URL: redis://redis:6379/0
+      MARKET_DATA_MODE: ${MARKET_DATA_MODE:?MARKET_DATA_MODE must be tgw or replay}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -69,11 +69,11 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-signal-api"]
     environment:
-      A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
-      A500_OIDC_AUDIENCE: ${A500_OIDC_AUDIENCE:?A500_OIDC_AUDIENCE is required}
-      A500_OIDC_JWKS_URI: ${A500_OIDC_JWKS_URI:?A500_OIDC_JWKS_URI is required}
-      A500_REDIS_URL: redis://redis:6379/0
-      A500_SIGNAL_API_HOST: 0.0.0.0
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI is required}
+      REDIS_URL: redis://redis:6379/0
+      SIGNAL_API_HOST: 0.0.0.0
     expose:
       - "8000"
     healthcheck:
@@ -101,17 +101,17 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-account-api"]
     environment:
-      A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
-      A500_OIDC_AUDIENCE: ${A500_OIDC_AUDIENCE:?A500_OIDC_AUDIENCE is required}
-      A500_OIDC_JWKS_URI: ${A500_OIDC_JWKS_URI:?A500_OIDC_JWKS_URI is required}
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI is required}
       AMAZINGDATA_USERNAME: ${AMAZINGDATA_USERNAME:?AMAZINGDATA_USERNAME is required}
       AMAZINGDATA_PASSWORD: ${AMAZINGDATA_PASSWORD:?AMAZINGDATA_PASSWORD is required}
       AMAZINGDATA_HOST: ${AMAZINGDATA_HOST:?AMAZINGDATA_HOST is required}
       AMAZINGDATA_PORT: ${AMAZINGDATA_PORT:?AMAZINGDATA_PORT is required}
-      A500_POSTGRES_HOST: postgres
-      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
-      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
-      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-a500}
+      POSTGRES_USER: ${POSTGRES_USER:-a500}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     expose:
       - "8000"
     depends_on:
@@ -127,15 +127,15 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["python", "-m", "a500_t_trader.jobs_api"]
     environment:
-      A500_OIDC_ISSUER: ${A500_OIDC_ISSUER:?A500_OIDC_ISSUER is required}
-      A500_OIDC_AUDIENCE: ${A500_OIDC_AUDIENCE:?A500_OIDC_AUDIENCE is required}
-      A500_OIDC_JWKS_URI: ${A500_OIDC_JWKS_URI:?A500_OIDC_JWKS_URI is required}
-      A500_POSTGRES_HOST: postgres
-      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
-      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
-      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
-      A500_HISTORY_PERSISTENCE_PERMITTED: ${A500_HISTORY_PERSISTENCE_PERMITTED:-false}
-      A500_JOB_RETENTION_DAYS: ${A500_JOB_RETENTION_DAYS:-30}
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE is required}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-a500}
+      POSTGRES_USER: ${POSTGRES_USER:-a500}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      HISTORY_PERSISTENCE_PERMITTED: ${HISTORY_PERSISTENCE_PERMITTED:-false}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
     expose:
       - "8000"
     depends_on:
@@ -151,17 +151,17 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["python", "-m", "a500_t_trader.jobs"]
     environment:
-      A500_POSTGRES_HOST: postgres
-      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
-      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
-      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-a500}
+      POSTGRES_USER: ${POSTGRES_USER:-a500}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
       AMAZINGDATA_USERNAME: ${AMAZINGDATA_USERNAME:?AMAZINGDATA_USERNAME is required}
       AMAZINGDATA_PASSWORD: ${AMAZINGDATA_PASSWORD:?AMAZINGDATA_PASSWORD is required}
       AMAZINGDATA_HOST: ${AMAZINGDATA_HOST:?AMAZINGDATA_HOST is required}
       AMAZINGDATA_PORT: ${AMAZINGDATA_PORT:?AMAZINGDATA_PORT is required}
-      A500_HISTORY_PERSISTENCE_PERMITTED: ${A500_HISTORY_PERSISTENCE_PERMITTED:-false}
-      A500_JOB_RETENTION_DAYS: ${A500_JOB_RETENTION_DAYS:-30}
+      HISTORY_PERSISTENCE_PERMITTED: ${HISTORY_PERSISTENCE_PERMITTED:-false}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-30}
     depends_on:
       postgres:
         condition: service_healthy
@@ -176,11 +176,11 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["python", "-m", "a500_t_trader.history_dispatch"]
     environment:
-      A500_POSTGRES_HOST: postgres
-      A500_POSTGRES_DB: ${A500_POSTGRES_DB:-a500}
-      A500_POSTGRES_USER: ${A500_POSTGRES_USER:-a500}
-      A500_POSTGRES_PASSWORD: ${A500_POSTGRES_PASSWORD:?A500_POSTGRES_PASSWORD is required}
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-a500}
+      POSTGRES_USER: ${POSTGRES_USER:-a500}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:
       postgres:
         condition: service_healthy
@@ -196,15 +196,15 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
     environment: &market-data-env
-      A500_MARKET_DATA_MODE: ${A500_MARKET_DATA_MODE:?A500_MARKET_DATA_MODE must be tgw or replay}
-      A500_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      MARKET_DATA_MODE: ${MARKET_DATA_MODE:?MARKET_DATA_MODE must be tgw or replay}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
 
   consumer-audit:
-    image: ${A500_MARKET_DATA_CONSUMER_IMAGE:-a500-market-data-consumer:local}
+    image: ${MARKET_DATA_CONSUMER_IMAGE:-a500-market-data-consumer:local}
     build:
       context: .
       dockerfile: Dockerfile

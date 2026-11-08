@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed", type=float, default=1.0)
     args = parser.parse_args(argv)
     if market_data_mode() is not MarketDataMode.REPLAY:
-        parser.error("replay requires A500_MARKET_DATA_MODE=replay")
+        parser.error("replay requires MARKET_DATA_MODE=replay")
     bars = load_history(args.file, args.symbol)
     publisher = RabbitMQPublisher(exchange=MarketDataMode.REPLAY.exchange)
     try:

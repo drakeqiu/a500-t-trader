@@ -69,7 +69,7 @@ python -m a500_t_trader premarket \
   --config strategy.json --account account.json --output plan-2026-10-30.json
 ```
 
-使用 `monitor` 时将 `--database` 指向需复用的同一 PostgreSQL 数据库 URL，或设置 `A500_DATABASE_URL` 并省略该选项。以下例子使用已配置的 `A500_DATABASE_URL`；配置方法见[根 README](../README.md#本地前后端集成)。收盘后运行：
+使用 `monitor` 时将 `--database` 指向需复用的同一 PostgreSQL 数据库 URL，或设置 `DATABASE_URL` 并省略该选项。以下例子使用已配置的 `DATABASE_URL`；配置方法见[根 README](../README.md#本地前后端集成)。收盘后运行：
 
 ```bash
 python -m a500_t_trader postmarket \
