@@ -157,7 +157,11 @@ def _check_browser_login(
         browser = playwright.chromium.launch()
         try:
             page = browser.new_page(ignore_https_errors=https)
-            page.goto(gateway_url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(
+                f"{gateway_url.rstrip('/')}/signals",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
             page.get_by_role("banner").get_by_role(
                 "button", name="安全连接", exact=True
             ).click()
