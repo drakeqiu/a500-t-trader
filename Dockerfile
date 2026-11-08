@@ -10,6 +10,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY config/ ./config/
 COPY wheels/ ./wheels/
 COPY dist/*.whl ./dist/
 ARG UV_INDEX_URL
