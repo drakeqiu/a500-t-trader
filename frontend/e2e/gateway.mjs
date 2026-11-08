@@ -1,9 +1,9 @@
 // Same-origin gateway for frontend development and browser tests; production uses Nginx.
 import http from "node:http";
 
-const [webPort, nextPort, fixturePort, bindHost = "127.0.0.1"] = process.argv.slice(2, 6).map(
-  (value, index) => (index < 3 ? Number(value) : value),
-);
+const [webPort, nextPort, fixturePort, bindHost = "127.0.0.1"] = process.argv
+  .slice(2, 6)
+  .map((value, index) => (index < 3 ? Number(value) : value));
 const apiHost = (request) => request.url === "/api/v1" || request.url.startsWith("/api/v1/");
 const fixtureHost = (request) => request.url.startsWith("/fixture-idp/");
 
