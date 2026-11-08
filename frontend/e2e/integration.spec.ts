@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-// Real Python account/signal routes, ephemeral SQLite and fixture Redis.
-// Only identity authorization and market-state inputs are deterministic fixtures;
-// this suite is not evidence of a live Keycloak or market-provider connection.
+// Business REST/SSE calls use deterministic in-memory API mocks and fixture identity.
+// This suite exercises browser workflows, not live Keycloak or market-provider access.
 const fixture = `http://127.0.0.1:${process.env.A500_E2E_FIXTURE_PORT || "38100"}`;
 
 async function connect(page: Page, subject: string, heading = "策略信号") {
@@ -99,7 +98,7 @@ test("navigates all four business routes without losing their page identity", as
   }
 });
 
-test("returns to a protected route after Keycloak authorization and disconnects the session", async ({
+test("returns to a protected route after fixture authorization and disconnects the session", async ({
   page,
 }) => {
   await page.goto("/data/history");
@@ -138,7 +137,7 @@ test("signs in when SubtleCrypto is unavailable on HTTP", async ({ page }) => {
   expect(token).toBeTruthy();
 });
 
-test("imports trades from /data/trades only after reviewing the real preview", async ({
+test("imports trades from /data/trades after reviewing the mocked preview", async ({
   page,
   request,
 }) => {
@@ -256,7 +255,7 @@ test("validates snapshot amounts and preserves oversized decimal precision on re
   ).toBeVisible();
 });
 
-test("creates and edits an account; a real 412 retains the draft until explicitly replaced", async ({
+test("creates and edits an account; a mocked 412 retains the draft until explicitly replaced", async ({
   page,
   context,
   request,
@@ -394,7 +393,7 @@ test("shows sanitized row errors, restores preview after reauthorization, and co
   await expect(duplicateCount.locator("dd")).toHaveText("1");
 });
 
-test("consumes real SSE and resumes its cursor; expired history resets to authoritative current state", async ({
+test("consumes mocked SSE and resumes its cursor; expired history resets to current mock state", async ({
   page,
   request,
 }) => {
@@ -417,10 +416,6 @@ test("consumes real SSE and resumes its cursor; expired history resets to author
   });
   await request.post(`${fixture}/__fixture/signals/WAIT`);
   const cursors: string[] = [];
-  let signalReads = 0;
-  page.on("response", (response) => {
-    if (new URL(response.url()).pathname === "/api/v1/signals") signalReads += 1;
-  });
   page.on("request", (outgoing) => {
     if (new URL(outgoing.url()).pathname === "/api/v1/signals/stream") {
       cursors.push(outgoing.headers()["last-event-id"] || "");

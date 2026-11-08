@@ -33,7 +33,7 @@ uv run python -m a500_t_trader
 ```
 
 普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试，fixture 驱动的测试仍会正常运行。
-数据库相关测试和前端 Playwright fixture 需要设置 `A500_TEST_DATABASE_URL`，指向可用的 PostgreSQL 测试数据库，例如 `postgresql://a500:password@127.0.0.1:5432/a500_test`。该用户必须有在数据库中创建 schema 的权限；每个测试和浏览器 fixture 会创建并删除各自的 schema。请使用专用测试数据库并保护连接凭据。
+数据库相关 Python 测试需设置 `A500_TEST_DATABASE_URL`，指向可用的 PostgreSQL 测试数据库；每个测试会创建并删除独立 schema。前端 Playwright 使用本地 OIDC 与内存 REST/SSE API mock，不启动业务后端，也不连接 PostgreSQL 或 Redis。
 Starlette 测试客户端使用开发依赖 `httpx2`；`uv sync --locked` 会一并安装。
 在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查。
 若本地仓库 `.env` 使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT`，可在当前 shell 中

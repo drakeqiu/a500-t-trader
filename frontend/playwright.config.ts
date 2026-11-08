@@ -32,7 +32,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `uv run python scripts/frontend-integration-fixture.py --test-mode --port ${fixturePort}`,
+      command: `uv run python scripts/frontend-api-mock.py --test-mode --port ${fixturePort}`,
       cwd: "..",
       url: `${fixtureOrigin}/__fixture/health`,
       reuseExistingServer: false,
