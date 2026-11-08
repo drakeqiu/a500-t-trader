@@ -50,6 +50,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
     command: ["a500-signal-calculator", "--purpose", "signal-calculator"]
     environment:
       MARKET_DATA_MODE: ${MARKET_DATA_MODE:?MARKET_DATA_MODE must be tgw or replay}
@@ -68,6 +69,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-signal-api"]
     environment:
@@ -101,6 +103,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-account-api"]
     environment:
@@ -128,6 +131,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.jobs_api"]
     environment:
@@ -153,6 +157,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.jobs"]
     environment:
@@ -179,6 +184,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["python", "-m", "a500_t_trader.history_dispatch"]
     environment:
@@ -200,6 +206,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-market-data-consumer", "--purpose", "signals", "--max-age-seconds", "30"]
     environment: &market-data-env
@@ -217,6 +224,7 @@ services:
       dockerfile: Dockerfile
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
         APT_MIRROR: ${APT_MIRROR:-}
     command: ["a500-market-data-consumer", "--purpose", "audit", "--max-age-seconds", "30"]
     environment: *market-data-env
@@ -233,6 +241,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-}
     command: ["a500-market-data-replay"]
     environment: *market-data-env
     volumes:

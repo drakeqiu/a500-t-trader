@@ -67,6 +67,9 @@ def local_environment() -> dict[str, str]:
         "http://keycloak:8080/realms/a500/protocol/openid-connect/certs",
     )
     environment.setdefault("KEYCLOAK_HOSTNAME", "http://localhost:8081")
+    environment.setdefault("APT_MIRROR", "mirrors.bfsu.edu.cn")
+    environment.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
+    environment.setdefault("UV_HTTP_TIMEOUT", "180")
     # Compose must use the sanitized literal environment, not parse .env again.
     return environment
 
