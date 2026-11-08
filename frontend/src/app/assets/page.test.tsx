@@ -55,10 +55,18 @@ function fillPosition(row = 1) {
 }
 
 describe("assets route", () => {
-  it("shows saved snapshot read-only, then explains structured position fields", async () => {
+  it("shows saved positions as a labeled table instead of raw JSON", async () => {
     getSnapshot.mockResolvedValue(stored);
     render(<AssetsPage />);
     expect(await screen.findByText("¥125.5000")).toBeTruthy();
+    const table = screen.getByRole("table", { name: "证券持仓" });
+    expect(table).toBeTruthy();
+    expect(screen.getByRole("row", { name: /510300/ })).toBeTruthy();
+    for (const label of ["持仓数量", "保护底仓", "可卖数量", "成本基础"]) {
+      expect(screen.getByRole("columnheader", { name: label })).toBeTruthy();
+    }
+    expect(screen.getByText("3.8500")).toBeTruthy();
+    expect(screen.queryByText(/\{/)).toBeNull();
     expect(screen.queryByLabelText("可用现金")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "编辑快照" }));
     expect((screen.getByLabelText("可用现金") as HTMLInputElement).value).toBe("125.5000");
@@ -66,6 +74,23 @@ describe("assets route", () => {
     expect((screen.getByLabelText("第 1 行持有总份额") as HTMLInputElement).value).toBe("100");
     expect(screen.queryByLabelText(/JSON/)).toBeNull();
     expect(screen.getByText(/不打算卖出的保留份额/)).toBeTruthy();
+  });
+
+  it("explains when a saved snapshot has no positions", async () => {
+    getSnapshot.mockResolvedValue({
+      ...stored,
+      snapshot: {
+        ...snapshot,
+        holdings: {},
+        protected_floor: {},
+        sellable: {},
+        cost_basis: {},
+      },
+    });
+    render(<AssetsPage />);
+    expect(await screen.findByText("当前快照未记录证券持仓。")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "证券持仓" })).toBeTruthy();
+    expect(screen.queryByText("{}")).toBeNull();
   });
 
   it("asks before discarding a dirty draft and keeps it when the user continues editing", async () => {
