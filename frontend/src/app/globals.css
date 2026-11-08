@@ -1034,6 +1034,95 @@ code {
   font-weight: 400;
   line-height: 1.5;
 }
+.snapshot-time-action {
+  align-self: flex-start;
+}
+.position-editor {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+.position-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.position-editor-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.position-editor-heading p,
+.position-empty {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.position-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.position-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--rule);
+}
+.position-row legend {
+  padding: 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.position-row label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 580;
+}
+.position-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 41px;
+  padding: 10px 11px;
+  border: 1px solid #cbd4ce;
+  border-radius: 0;
+  background: #fff;
+  color: var(--ink);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.position-row input::placeholder {
+  color: #66716b;
+  opacity: 1;
+}
+.position-remove {
+  min-height: 41px;
+  white-space: nowrap;
+}
+.position-empty {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px dashed var(--rule);
+}
+.position-hints {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin-top: 12px;
+}
+.position-hints small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .asset-conflict {
   display: flex;
   align-items: center;
@@ -1072,6 +1161,12 @@ code {
   .asset-section-heading {
     align-items: flex-start;
   }
+  .position-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .position-hints {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 560px) {
   .page-heading,
@@ -1087,6 +1182,15 @@ code {
   }
   .asset-actions .refresh-button {
     flex: 1 1 auto;
+  }
+  .position-editor-heading {
+    flex-direction: column;
+  }
+  .position-editor-heading .refresh-button {
+    width: 100%;
+  }
+  .position-row {
+    grid-template-columns: 1fr;
   }
   .nav-metadata,
   .snapshot-readonly dl,

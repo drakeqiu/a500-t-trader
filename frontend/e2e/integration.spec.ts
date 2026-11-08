@@ -28,12 +28,14 @@ async function connect(page: Page, subject: string, heading = "策略信号") {
 }
 
 async function fillSnapshot(page: Page, cash = "125.50") {
-  await page.getByLabel("快照时间（含时区）").fill(new Date().toISOString());
+  await page.getByLabel("快照时间").fill(new Date().toISOString());
   await page.getByLabel("可用现金", { exact: true }).fill(cash);
-  await page.getByLabel("持仓数量（JSON）").fill('{"510300":100}');
-  await page.getByLabel("保护底仓（JSON）").fill('{"510300":20}');
-  await page.getByLabel("可卖数量（JSON）").fill('{"510300":80}');
-  await page.getByLabel("成本基础（JSON）").fill('{"510300":"3.8500"}');
+  await page.getByRole("button", { name: "添加证券" }).click();
+  await page.getByLabel("第 1 行证券代码").fill("510300");
+  await page.getByLabel("第 1 行持有总份额").fill("100");
+  await page.getByLabel("第 1 行保护底仓").fill("20");
+  await page.getByLabel("第 1 行当前可卖").fill("80");
+  await page.getByLabel("第 1 行成本基础").fill("3.8500");
 }
 
 async function saveSnapshot(page: Page, status: number) {
@@ -234,16 +236,11 @@ test("validates snapshot amounts and preserves oversized decimal precision on re
   expect(snapshotWrites).toBe(0);
 
   await page.getByLabel("可用现金", { exact: true }).fill(large);
-  await page.getByLabel("持仓数量（JSON）").fill("{}");
-  await page.getByLabel("保护底仓（JSON）").fill("{}");
-  await page.getByLabel("可卖数量（JSON）").fill("{}");
-  await page.getByLabel("成本基础（JSON）").fill("{}");
   const saved = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/account-snapshot") && response.request().method() === "PUT",
   );
-  await page.getByLabel("快照时间（含时区）").evaluate((input: HTMLInputElement) => {
-    input.form?.requestSubmit();
+  await page.getByLabel("快照时间").evaluate((input: HTMLInputElement) => {
     input.form?.requestSubmit();
   });
   const response = await saved;
