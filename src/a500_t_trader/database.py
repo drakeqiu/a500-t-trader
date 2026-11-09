@@ -43,6 +43,7 @@ def initialize_database(dsn: str) -> None:
             (1, account_migration.migrate),
             (2, backtest_migration.migrate),
             (3, strategy_migration.migrate),
+            (4, backtest_migration.migrate_daily_trading_date),
         )
         for version, migrate in migrations:
             if version not in applied:

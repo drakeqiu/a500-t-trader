@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -44,12 +45,17 @@ def test_shared_daily_history_merges_coverage_and_replaces_observations(
     assert rows is not None
     assert [row.timestamp.day for row in rows] == [2, 5]
     assert rows[0].close == Decimal("2")
+    alternate_timestamp = datetime(2026, 1, 2, 15, tzinfo=SHANGHAI)
+    later_observation = replace(
+        _bar("510300", 2, "20"), timestamp=alternate_timestamp
+    )
     repository.save_daily_history(
-        (_bar("510300", 5, "5"), _bar("510300", 2, "20")), start, end
+        (_bar("510300", 5, "5"), later_observation), start, end
     )
     rows = repository.get_shared_daily_history("510300", start, end)
     assert rows is not None
     assert [row.timestamp.day for row in rows] == [2, 5]
+    assert rows[0].timestamp.hour == 15
     assert rows[0].close == Decimal("20")
     assert repository.get_shared_daily_history("510301", start, end) is None
 
@@ -132,10 +138,41 @@ def test_successful_job_persists_shared_history_and_snapshot_remains_subject_sco
     assert repository.get_shared_daily_history(
         "563360", date(2024, 1, 1), date(2024, 12, 31)
     ) == ()
+    refreshed = _bar("563360", 2, "9", year=2023)
     repository.save_daily_history(
-        (_bar("563360", 2, "9"),), date(2023, 1, 1), date(2023, 12, 31)
+        (refreshed,), date(2023, 1, 1), date(2023, 12, 31)
     )
+    assert repository.get_shared_daily_history(
+        "563360", date(2023, 1, 2), date(2023, 1, 2)
+    ) == (refreshed,)
+
+    class ProviderMustNotRun:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            raise AssertionError("cached observations should avoid provider fetch")
+
     with TestClient(app) as client:
+        cached_job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-01-01",
+                "end_date": "2024-12-31",
+            },
+        ).json()
+        assert process_one(
+            JobRepository(postgres_url), lambda: ProviderMustNotRun()
+        )
+        cached_result = client.get(
+            f"/v1/jobs/{cached_job['id']}/results", headers=headers
+        ).json()
+        assert cached_result["bars"][0]["close"] == "1"
+        assert repository.get_shared_daily_history(
+            "563360", date(2023, 1, 2), date(2023, 1, 2)
+        ) == (refreshed,)
         unchanged = client.get(
             f"/v1/jobs/{job['id']}/results", headers=headers
         ).json()

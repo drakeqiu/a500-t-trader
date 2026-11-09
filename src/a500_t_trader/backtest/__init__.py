@@ -12,7 +12,7 @@ from typing import Protocol
 import psycopg
 
 from ..database import initialize_database
-from ..market_data import DailyBar, MinuteBar
+from ..market_data import SHANGHAI, DailyBar, MinuteBar
 from ..strategy.premarket import AccountSnapshot, PlanConfig
 from .certification import (
     CertificationEvidence as CertificationEvidence,
@@ -429,11 +429,18 @@ class BacktestRepository:
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
+                trading_date = bar.timestamp.astimezone(SHANGHAI).date().isoformat()
                 db.execute(
-                    "INSERT INTO shared_daily_bars VALUES (%s, %s, %s) "
-                    "ON CONFLICT(symbol, timestamp) "
-                    "DO UPDATE SET bar_json=excluded.bar_json",
-                    (bar.symbol, bar.timestamp.isoformat(), _daily_bar_json(bar)),
+                    "INSERT INTO shared_daily_bars "
+                    "(symbol,timestamp,bar_json,trading_date) VALUES (%s,%s,%s,%s) "
+                    "ON CONFLICT (symbol,trading_date) DO UPDATE SET "
+                    "timestamp=excluded.timestamp,bar_json=excluded.bar_json",
+                    (
+                        bar.symbol,
+                        bar.timestamp.isoformat(),
+                        _daily_bar_json(bar),
+                        trading_date,
+                    ),
                 )
             db.execute(
                 "INSERT INTO shared_daily_history_ranges "
@@ -470,22 +477,11 @@ class BacktestRepository:
                     )
             if not complete:
                 return None
-            if end_date < date.max:
-                rows = db.execute(
-                    "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
-                    "AND timestamp>=%s AND timestamp<%s ORDER BY timestamp",
-                    (
-                        symbol,
-                        start_date.isoformat(),
-                        date.fromordinal(end_date.toordinal() + 1).isoformat(),
-                    ),
-                ).fetchall()
-            else:
-                rows = db.execute(
-                    "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
-                    "AND timestamp>=%s ORDER BY timestamp",
-                    (symbol, start_date.isoformat()),
-                ).fetchall()
+            rows = db.execute(
+                "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
+                "AND trading_date>=%s AND trading_date<=%s ORDER BY trading_date",
+                (symbol, start_date.isoformat(), end_date.isoformat()),
+            ).fetchall()
         return tuple(_daily_bar_from_json(row[0]) for row in rows)
 
     def cleanup_shared_history(self) -> int:
