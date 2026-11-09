@@ -541,6 +541,12 @@ test("creates a history task without treating acceptance as completion", async (
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText("等待执行")).toBeVisible();
   await expect(page.getByText("提交成功不代表行情已拉取完成。")).toBeVisible();
+  await expect(
+    page.getByText("任务成功后，共享历史行情会独立提供给其他行情页面；此处仅跟踪任务状态与进度。"),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "刷新状态" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "请求取消" })).toBeVisible();
+  await expect(page.getByText("查看结果")).toHaveCount(0);
   await expect(page.getByText("已完成", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("progressbar")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
