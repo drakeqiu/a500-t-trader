@@ -185,6 +185,23 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         assert client.get(
             f"/v1/jobs/{first['id']}/results", headers=headers
         ).status_code == 404
+        from a500_t_trader.backtest import BacktestRepository
+
+        BacktestRepository(postgres_url).save_daily_history(
+            (
+                DailyBar(
+                    symbol="563360",
+                    timestamp=datetime(2023, 1, 2, tzinfo=SHANGHAI),
+                    open=Decimal("9"),
+                    high=Decimal("9"),
+                    low=Decimal("9"),
+                    close=Decimal("9"),
+                    volume=900,
+                ),
+            ),
+            date(2023, 1, 1),
+            date(2023, 12, 31),
+        )
         provider.fail = False
         second = client.post("/v1/jobs", headers=headers, json=body).json()
         assert process_one(JobRepository(postgres_url), lambda: provider)
@@ -193,9 +210,14 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         ).status_code == 404
     from a500_t_trader.backtest import BacktestRepository
 
-    assert BacktestRepository(postgres_url).get_shared_daily_history(
+    history = BacktestRepository(postgres_url).get_shared_daily_history(
         "563360", date(2023, 1, 1), date(2024, 12, 31)
-    ) is not None
+    )
+    assert history is not None
+    assert [(bar.timestamp.year, bar.close) for bar in history] == [
+        (2023, Decimal("9")),
+        (2024, Decimal("1")),
+    ]
     with psycopg.connect(postgres_url) as db:
         staged = db.execute(
             "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",

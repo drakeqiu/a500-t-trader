@@ -118,8 +118,13 @@ class JobRepository:
                 job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
                     ON DELETE CASCADE,
                 bar_date DATE NOT NULL, bar_json JSONB NOT NULL,
+                fetched BOOLEAN NOT NULL DEFAULT true,
                 PRIMARY KEY (job_id, bar_date)
             )""")
+            db.execute(
+                "ALTER TABLE daily_history_job_fetched_bars "
+                "ADD COLUMN IF NOT EXISTS fetched BOOLEAN NOT NULL DEFAULT true"
+            )
 
     def _connect(self) -> psycopg.Connection[Any]:
         return psycopg.connect(self.dsn, row_factory=dict_row)
@@ -397,18 +402,22 @@ class JobRepository:
                     (symbol, start, end, Jsonb(bars)),
                 )
             for bar in bars:
-                if fetched:
-                    db.execute(
-                        """INSERT INTO daily_history_job_fetched_bars
-                        (job_id,bar_date,bar_json) VALUES (%s,%s,%s)
-                        ON CONFLICT (job_id,bar_date) DO UPDATE
-                        SET bar_json=excluded.bar_json""",
-                        (
-                            job_id,
-                            _bar_date(bar["timestamp"]),
-                            Jsonb(bar),
-                        ),
-                    )
+                db.execute(
+                    """INSERT INTO daily_history_job_fetched_bars
+                    (job_id,bar_date,bar_json,fetched) VALUES (%s,%s,%s,%s)
+                    ON CONFLICT (job_id,bar_date) DO UPDATE
+                    SET bar_json=CASE WHEN excluded.fetched
+                        THEN excluded.bar_json
+                        ELSE daily_history_job_fetched_bars.bar_json END,
+                        fetched=daily_history_job_fetched_bars.fetched
+                            OR excluded.fetched""",
+                    (
+                        job_id,
+                        _bar_date(bar["timestamp"]),
+                        Jsonb(bar),
+                        fetched,
+                    ),
+                )
             db.execute(
                 """UPDATE daily_history_jobs SET completed_chunks=completed_chunks+1,
                 updated_at=now() WHERE id=%s""",
@@ -439,7 +448,7 @@ class JobRepository:
             if row["status"] == "succeeded":
                 db.execute("SELECT pg_advisory_xact_lock(500001)")
                 bars = db.execute(
-                    "SELECT bar_json FROM daily_history_job_fetched_bars "
+                    "SELECT bar_json, fetched FROM daily_history_job_fetched_bars "
                     "WHERE job_id=%s ORDER BY bar_date",
                     (job_id,),
                 ).fetchall()
@@ -453,12 +462,13 @@ class JobRepository:
                         (symbol,timestamp,bar_json,trading_date)
                         VALUES (%s,%s,%s,%s) ON CONFLICT (symbol,trading_date)
                         DO UPDATE SET timestamp=excluded.timestamp,
-                        bar_json=excluded.bar_json""",
+                        bar_json=excluded.bar_json WHERE %s""",
                         (
                             row["symbol"],
                             bar["timestamp"],
                             json.dumps(bar, separators=(",", ":")),
                             trading_date.isoformat(),
+                            bar_row["fetched"],
                         ),
                     )
                 db.execute(
