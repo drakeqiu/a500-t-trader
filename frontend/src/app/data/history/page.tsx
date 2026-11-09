@@ -6,9 +6,7 @@ import {
   cancelHistoryJob,
   createHistoryJob,
   getHistoryJob,
-  getHistoryResults,
   type HistoryJob,
-  type HistoryResults,
 } from "@/lib/a500-client";
 import { AppShell } from "@/components/app-shell";
 import { PageHeading } from "@/components/page-heading";
@@ -16,7 +14,6 @@ import { beginAuthorization, configurationReady } from "@/lib/oidc";
 import { getAccessToken, subscribeSession } from "@/lib/session";
 
 const storageKey = "a500.history-job-ids";
-const pageSize = 50;
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const statusLabels: Record<HistoryJob["status"], string> = {
   queued: "等待执行",
@@ -92,10 +89,6 @@ function HistoryPage() {
   const [notice, setNotice] = useState("");
   const [jobErrors, setJobErrors] = useState<Record<string, string>>({});
   const [unresolvedIds, setUnresolvedIds] = useState<string[]>([]);
-  const resultRequests = useRef(new Map<string, AbortController>());
-  const [resultBusy, setResultBusy] = useState<string[]>([]);
-  const [resultErrors, setResultErrors] = useState<Record<string, string>>({});
-  const [results, setResults] = useState<Record<string, HistoryResults>>({});
   const request = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
@@ -109,7 +102,6 @@ function HistoryPage() {
   useEffect(
     () => () => {
       request.current?.abort();
-      resultRequests.current.forEach((controller) => controller.abort());
     },
     [],
   );
@@ -300,23 +292,6 @@ function HistoryPage() {
       }
     });
 
-  const fetchResults = async (job: HistoryJob, offset = 0) => {
-    if (!token || resultRequests.current.has(job.id)) return;
-    const controller = new AbortController();
-    resultRequests.current.set(job.id, controller);
-    setResultBusy((current) => (current.includes(job.id) ? current : [...current, job.id]));
-    setResultErrors((current) => ({ ...current, [job.id]: "" }));
-    try {
-      const page = await getHistoryResults(token, job.id, offset, requestSignal(controller.signal));
-      setResults((current) => ({ ...current, [job.id]: page }));
-    } catch (reason) {
-      if (!abortError(reason))
-        setResultErrors((current) => ({ ...current, [job.id]: messageFor(reason) }));
-    } finally {
-      resultRequests.current.delete(job.id);
-      setResultBusy((current) => current.filter((id) => id !== job.id));
-    }
-  };
   const refreshTask = (jobId: string) =>
     runRequest(async (signal) => {
       try {
@@ -352,11 +327,6 @@ function HistoryPage() {
     setJobs((current) => {
       const next = current.filter((job) => job.id !== jobId);
       saveIds([...next.map((job) => job.id), ...unresolvedIds]);
-      return next;
-    });
-    setResults((current) => {
-      const next = { ...current };
-      delete next[jobId];
       return next;
     });
     setJobErrors((current) => {
@@ -448,7 +418,7 @@ function HistoryPage() {
                 </button>
               </div>
               <p className="history-form-note">
-                任务成功后可分页查看后端保存的日线记录；成功不代表每个交易日都有数据。
+                任务成功后，共享历史行情会独立提供给其他行情页面；此处仅跟踪任务状态与进度。
               </p>
             </section>
             {error && (
@@ -517,16 +487,9 @@ function HistoryPage() {
                               Math.floor((job.completed_chunks / job.total_chunks) * 100),
                             )
                         : null;
-                    const result = results[job.id];
                     return (
                       <article className="history-job" key={job.id}>
                         <div className="history-job-head">
-                          <div>
-                            <h3>{job.symbol}</h3>
-                            <p>
-                              {job.start_date} 至 {job.end_date}
-                            </p>
-                          </div>
                           <span className={`history-status is-${job.status}`}>
                             {statusLabels[job.status]}
                           </span>
@@ -604,42 +567,10 @@ function HistoryPage() {
                           {!terminal.has(job.status) && (
                             <button
                               className="trade-import-secondary"
-                              disabled={resultBusy.includes(job.id) || busy}
+                              disabled={busy}
                               onClick={() => cancel(job)}
                             >
                               {job.cancel_requested ? "正在取消…" : "请求取消"}
-                            </button>
-                          )}
-                          {job.status === "succeeded" && (
-                            <button
-                              className="trade-import-secondary"
-                              disabled={resultBusy.includes(job.id)}
-                              onClick={() =>
-                                result ? fetchResults(job, result.offset) : fetchResults(job)
-                              }
-                            >
-                              {resultBusy.includes(job.id)
-                                ? "正在读取…"
-                                : result
-                                  ? "刷新结果"
-                                  : "查看结果"}
-                            </button>
-                          )}
-                          {job.status === "failed" && (
-                            <button
-                              className="trade-import-secondary"
-                              disabled={busy}
-                              onClick={() => {
-                                setSymbol(job.symbol);
-                                setStartDate(job.start_date);
-                                setEndDate(job.end_date);
-                                setNotice(
-                                  "已载入原任务参数；请确认后创建新的拉取任务。后端不支持原任务重试。",
-                                );
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                            >
-                              重新拉取
                             </button>
                           )}
                           {terminal.has(job.status) && (
@@ -655,82 +586,6 @@ function HistoryPage() {
                             刷新状态
                           </button>
                         </div>
-                        {resultErrors[job.id] && (
-                          <p className="history-error" role="alert">
-                            {resultErrors[job.id]}
-                          </p>
-                        )}
-                        {resultErrors[job.id] && results[job.id] && (
-                          <p className="history-muted">
-                            以下为此前成功读取的结果；本次读取未成功，数据可能不是最新页。
-                          </p>
-                        )}
-                        {result && (
-                          <div className="history-results">
-                            <div className="history-result-heading">
-                              <h4>行情结果</h4>
-                              <span>共 {result.total} 条 · 按日期升序</span>
-                            </div>
-                            {result.bars.length === 0 ? (
-                              <p className="history-muted">后端未返回日线记录。</p>
-                            ) : (
-                              <div className="history-table-wrap">
-                                <table>
-                                  <thead>
-                                    <tr>
-                                      <th>交易日</th>
-                                      <th>开盘</th>
-                                      <th>最高</th>
-                                      <th>最低</th>
-                                      <th>收盘</th>
-                                      <th>成交量</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {result.bars.map((bar) => (
-                                      <tr key={bar.timestamp}>
-                                        <td>{bar.timestamp?.slice(0, 10) ?? "—"}</td>
-                                        <td>{bar.open}</td>
-                                        <td>{bar.high}</td>
-                                        <td>{bar.low}</td>
-                                        <td>{bar.close}</td>
-                                        <td>{Number(bar.volume).toLocaleString("zh-CN")}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                            <div className="history-pagination">
-                              <span>
-                                {result.total === 0
-                                  ? "0 条"
-                                  : `${result.offset + 1}–${Math.min(result.offset + result.bars.length, result.total)} / ${result.total} 条`}
-                              </span>
-                              <div>
-                                <button
-                                  className="trade-import-secondary"
-                                  disabled={result.offset <= 0 || resultBusy.includes(job.id)}
-                                  onClick={() =>
-                                    fetchResults(job, Math.max(0, result.offset - pageSize))
-                                  }
-                                >
-                                  上一页
-                                </button>
-                                <button
-                                  className="trade-import-secondary"
-                                  disabled={
-                                    result.offset + result.bars.length >= result.total ||
-                                    resultBusy.includes(job.id)
-                                  }
-                                  onClick={() => fetchResults(job, result.offset + pageSize)}
-                                >
-                                  下一页
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </article>
                     );
                   })}

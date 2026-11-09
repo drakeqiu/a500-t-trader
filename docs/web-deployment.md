@@ -166,12 +166,11 @@ curl -sS -X POST "$WEB_URL/api/v1/jobs" \
 # 使用提交响应中的任务 ID
 curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID"
 curl -sS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID/cancel"
-curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID/results?limit=100&offset=0"
 ```
 
-提交返回 HTTP 202 和任务信息；状态为 `queued`、`running`、`succeeded`、`failed` 或 `cancelled`。`stage` 表示 `queued`、`checking_cache`、`querying`、`saving` 或 `finished`，`completed_chunks` 和 `total_chunks` 表示分片进度。结果分页包含 `job_id`、`total`、`limit`、`offset` 和 `bars`；客户端应按偏移量读取，并只使用成功任务的结果。取消为后台协作式操作，`cancel_requested` 表示请求已接受，查看状态确认最终结果。
+提交返回 HTTP 202 和任务信息；状态为 `queued`、`running`、`succeeded`、`failed` 或 `cancelled`。`stage` 表示 `queued`、`checking_cache`、`querying`、`saving` 或 `finished`，`completed_chunks` 和 `total_chunks` 表示分片进度。取消为后台协作式操作，`cancel_requested` 表示请求已接受，查看状态确认最终结果。任务成功时将暂存行情及其查询覆盖一并发布到共享历史存储；任务状态不提供行情结果快照。
 
-worker 按自然年分片查询并持久化进度，可在进程中断后恢复未完成工作；任务结果固定，不因随后缓存变化而改变。同一 `jobs-worker` 进程惰性创建并复用一个供应商 Provider，多个任务共享该进程中的登录状态；供应商调用在 worker 内串行执行。重启 worker 会重新创建 Provider 并登录。只有具备可信覆盖记录的缓存可免去供应商查询；既有 CLI 共享缓存不自动视为可信。供应商返回的数据可能缺失或不完整，成功不保证每个交易日均有记录，也不保证供应商数据完整。部署者须监控 worker、PostgreSQL 和供应商连接；单机 Compose 和数据卷不提供高可用保证。
+worker 按自然年分片查询并持久化进度，可在进程中断后恢复未完成工作。同一 `jobs-worker` 进程惰性创建并复用一个供应商 Provider，多个任务共享该进程中的登录状态；供应商调用在 worker 内串行执行。重启 worker 会重新创建 Provider 并登录。只有具备可信覆盖记录的缓存可免去供应商查询；既有 CLI 共享缓存不自动视为可信。供应商返回的数据可能缺失或不完整，成功不保证每个交易日均有记录，也不保证供应商数据完整。部署者须监控 worker、PostgreSQL 和供应商连接；单机 Compose 和数据卷不提供高可用保证。
 
 ## 证书轮换
 
