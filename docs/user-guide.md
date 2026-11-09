@@ -22,10 +22,10 @@ uv sync --locked
 在仓库根目录创建本地 `.env` 文件：
 
 ```dotenv
-AMAZINGDATA_USERNAME=your_username
-AMAZINGDATA_PASSWORD=your_password
-AMAZINGDATA_HOST=your.amazingdata.host
-AMAZINGDATA_PORT=12345
+AD_USERNAME=your_username
+AD_PASSWORD=your_password
+AD_HOST=your.amazingdata.host
+AD_PORT=12345
 ```
 
 账号、主机和端口的具体值及开通方式由服务方提供；不要把真实凭据提交到版本库或写入日志。仓库的 `.gitignore` 已排除 `.env`。也可以通过进程环境变量设置同名配置；环境变量优先于 `.env`。端口必须是 `1` 到 `65535` 的整数。

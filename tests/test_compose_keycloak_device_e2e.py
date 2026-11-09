@@ -17,8 +17,8 @@ def test_main_requires_real_provider_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
-        monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
-    with pytest.raises(RuntimeError, match="AMAZINGDATA_USERNAME"):
+        monkeypatch.delenv(f"AD_{name}", raising=False)
+    with pytest.raises(RuntimeError, match="AD_USERNAME"):
         E2E.main()
 
 

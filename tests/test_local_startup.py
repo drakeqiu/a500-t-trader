@@ -12,11 +12,55 @@ LOCAL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LOCAL)
 
 
-def test_startup_services_include_gateway_api_dependencies() -> None:
+def test_startup_services_include_history_worker_and_dispatcher() -> None:
     services = LOCAL.SERVICES
 
     assert "jobs-api" in services
+    assert "jobs-worker" in services
+    assert "history-dispatcher" in services
     assert services.index("jobs-api") < services.index("gateway")
+
+
+def test_local_environment_keeps_provider_configuration_ad_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "AD_USERNAME=trader\nAD_PASSWORD=secret\nAD_HOST=market.example\nAD_PORT=9876\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
+        monkeypatch.delenv(f"AD_{name}", raising=False)
+        monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
+
+    environment = LOCAL.local_environment()
+
+    assert environment["AD_USERNAME"] == "trader"
+    assert environment["AD_PORT"] == "9876"
+    assert not any(name.startswith("AMAZINGDATA_") for name in environment)
+
+
+def test_local_environment_enables_history_persistence_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    monkeypatch.delenv("HISTORY_PERSISTENCE_PERMITTED", raising=False)
+
+    assert LOCAL.local_environment()["HISTORY_PERSISTENCE_PERMITTED"] == "true"
+
+
+def test_local_environment_preserves_explicit_persistence_opt_out(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    monkeypatch.setenv("HISTORY_PERSISTENCE_PERMITTED", "false")
+
+    assert LOCAL.local_environment()["HISTORY_PERSISTENCE_PERMITTED"] == "false"
 
 
 def test_local_environment_defaults_build_mirrors(

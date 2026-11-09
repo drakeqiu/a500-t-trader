@@ -490,10 +490,10 @@ def _check_no_plaintext(port: int) -> None:
 def main(*, mock_market_data: bool = False) -> None:
     global TLS_CONTEXT
     required = (
-        "AMAZINGDATA_USERNAME",
-        "AMAZINGDATA_PASSWORD",
-        "AMAZINGDATA_HOST",
-        "AMAZINGDATA_PORT",
+        "AD_USERNAME",
+        "AD_PASSWORD",
+        "AD_HOST",
+        "AD_PORT",
     )
     missing = [name for name in required if not os.environ.get(name)]
     if missing and not mock_market_data:

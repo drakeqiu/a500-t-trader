@@ -7,7 +7,7 @@
 - 安装 Docker Engine 与 Docker Compose 插件，或 rootless Podman 与 `podman-compose`，并能拉取 Python、RabbitMQ 等所需镜像。完整应用的本地集成、HTTP/HTTPS 和生产部署见[统一 Web 部署指南](web-deployment.md)；本页独立行情消费者与回放只需基础 `compose.yaml`，无需 `compose.web.yaml`、模式文件或 UI。
 - 使用 rootless Podman Compose 时，本项目配置让服务以独立容器运行，不加入 Podman pod。
 - 检出项目代码；本地构建需要项目锁定的供应商 wheel，位于 `wheels/`（这些文件通过项目 `deps-v1` release 分发）。
-- 基础 Compose 文件中的账户及 OIDC 必填变量在解析时也需提供，即使只选择消费者：`OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI`、`AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`。通过受保护环境变量或未提交的 `.env` 提供；仅启动消费者时不会因此启动账户 API 或 IdP。
+- 基础 Compose 文件中的账户及 OIDC 必填变量在解析时也需提供，即使只选择消费者：`OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI`、`AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT`。通过受保护环境变量或未提交的 `.env` 提供；仅启动消费者时不会因此启动账户 API 或 IdP。
 - TGW collector 不由 Compose 启动。TGW SDK 运行时、许可、网络与 Python 3.14 供应商支持及自动恢复尚未完成验证；必须由已验证的外部采集器发布规范化事件。
 
 ## 网络

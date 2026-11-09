@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd  # type: ignore[import-untyped]
 import pytest
 
+from a500_t_trader.cli.runtime import _error_category
 from a500_t_trader.market_data import CapabilityUnavailableError, MarketDataService
 from a500_t_trader.market_data.providers.amazingdata import AmazingDataProvider
 
@@ -133,6 +134,21 @@ def test_daily_history_queries_day_period_and_returns_validated_daily_bars() -> 
     assert bars[0].close == Decimal("1.23")
     assert bars[0].amount == Decimal("1230.0")
     assert api.calls == [("kline", ["563360.SH"], 20261101, 20261103, 10008)]
+
+
+def test_daily_history_permission_error_is_classified_as_permission() -> None:
+    class PermissionDenied(VendorAPI):
+        def query_kline(
+            self, codes: list[str], start: int, end: int, period: int
+        ) -> dict[str, object]:
+            raise RuntimeError("permission denied")
+
+    provider = _provider(PermissionDenied(), datetime(2026, 11, 5, 12, tzinfo=SHANGHAI))
+
+    with pytest.raises(CapabilityUnavailableError) as error:
+        provider.get_daily_history("563360", date(2026, 11, 1), date(2026, 11, 3))
+
+    assert _error_category(error.value) == "permission"
 
 
 def test_bar_query_rejects_timestamps_misaligned_to_interval() -> None:

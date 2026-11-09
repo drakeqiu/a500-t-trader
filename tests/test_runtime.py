@@ -13,11 +13,37 @@ from a500_t_trader.cli.runtime import (
 
 def _config() -> dict[str, str]:
     return {
-        "AMAZINGDATA_USERNAME": "trader",
-        "AMAZINGDATA_PASSWORD": "top-secret",
-        "AMAZINGDATA_HOST": "market.example",
-        "AMAZINGDATA_PORT": "9876",
+        "AD_USERNAME": "trader",
+        "AD_PASSWORD": "top-secret",
+        "AD_HOST": "market.example",
+        "AD_PORT": "9876",
     }
+
+
+def test_legacy_amazingdata_environment_names_are_not_accepted(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def sdk_factory(*_args: object) -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    with pytest.raises(ConfigurationError):
+        create_provider_from_env(
+            env={
+                "AMAZINGDATA_USERNAME": "trader",
+                "AMAZINGDATA_PASSWORD": "top-secret",
+                "AMAZINGDATA_HOST": "market.example",
+                "AMAZINGDATA_PORT": "9876",
+            },
+            env_file=tmp_path / "missing.env",
+            home=tmp_path / "home",
+            provider_factory=sdk_factory,
+        )
+
+    assert calls == 0
 
 
 def test_loads_existing_env_file_and_prepares_mdga_directory_before_sdk(
@@ -25,10 +51,10 @@ def test_loads_existing_env_file_and_prepares_mdga_directory_before_sdk(
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "AMAZINGDATA_USERNAME=trader\n"
-        "AMAZINGDATA_PASSWORD='top-secret'\n"
-        "AMAZINGDATA_HOST=market.example\n"
-        "AMAZINGDATA_PORT=9876\n",
+        "AD_USERNAME=trader\n"
+        "AD_PASSWORD='top-secret'\n"
+        "AD_HOST=market.example\n"
+        "AD_PORT=9876\n",
         encoding="utf-8",
     )
     home = tmp_path / "home"
@@ -49,13 +75,41 @@ def test_loads_existing_env_file_and_prepares_mdga_directory_before_sdk(
     assert result is not None
 
 
+def test_process_ad_configuration_overrides_dotenv(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "AD_USERNAME=file-user\n"
+        "AD_PASSWORD=file-password\n"
+        "AD_HOST=file.example\n"
+        "AD_PORT=1234\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str, str, int]] = []
+
+    create_provider_from_env(
+        env={
+            "AD_USERNAME": "process-user",
+            "AD_PASSWORD": "process-password",
+            "AD_HOST": "process.example",
+            "AD_PORT": "5678",
+        },
+        env_file=env_file,
+        home=tmp_path / "home",
+        provider_factory=lambda username, password, host, port: calls.append(
+            (username, password, host, port)
+        ),
+    )
+
+    assert calls == [("process-user", "process-password", "process.example", 5678)]
+
+
 def test_environment_overrides_env_file_without_exposing_credentials(
     tmp_path: Path,
 ) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("AMAZINGDATA_PASSWORD=file-secret\n", encoding="utf-8")
+    env_file.write_text("AD_PASSWORD=file-secret\n", encoding="utf-8")
     values = _config()
-    values["AMAZINGDATA_PASSWORD"] = "environment-secret"
+    values["AD_PASSWORD"] = "environment-secret"
     calls: list[str] = []
 
     create_provider_from_env(
@@ -72,7 +126,7 @@ def test_invalid_configuration_is_categorized_before_sdk_initialization(
     tmp_path: Path,
 ) -> None:
     values = _config()
-    del values["AMAZINGDATA_PORT"]
+    del values["AD_PORT"]
     calls = 0
 
     def sdk_factory(*_args: object) -> object:
@@ -82,7 +136,10 @@ def test_invalid_configuration_is_categorized_before_sdk_initialization(
 
     with pytest.raises(ConfigurationError):
         create_provider_from_env(
-            env=values, home=tmp_path / "home", provider_factory=sdk_factory
+            env=values,
+            env_file=tmp_path / "missing.env",
+            home=tmp_path / "home",
+            provider_factory=sdk_factory,
         )
 
     assert calls == 0

@@ -11,7 +11,7 @@
 
 ## 本地集成：真实服务和开发 Keycloak
 
-仅保证同一主机的浏览器访问。先设置 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、`AMAZINGDATA_PORT`（启动器也接受对应 `AD_` 别名，可放在未提交的 `.env` 中），再执行：
+本地集成启动器和 Compose 服务使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 配置行情服务；可放在未提交的 `.env` 中。启动本地集成：
 
 ```bash
 read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
@@ -21,7 +21,7 @@ export MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
-启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也可指定 `--timeout 300`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
+启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`，以支持历史行情任务。也可指定 `--timeout 300`。本地启动器默认开启历史行情持久化；启动前仍须确认 AmazingData 条款允许持久化，如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
 
 在同一台机器访问 <http://localhost:8081>，使用刚设置的管理员登录，在 `a500` Realm 中创建并启用用户、设置密码；没有默认用户，自助注册关闭。打开 <http://localhost:8080>，通过 Keycloak 登录。客户端须精确允许浏览器来源和根路径回调 URI；不要将 `localhost` 替换为 `127.0.0.1`。
 
@@ -58,6 +58,14 @@ python3 scripts/start-local.py down
 
 将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Keycloak 端口；同步配置浏览器客户端允许来源和回调 URI。HTTP 与默认凭据仅适合受防火墙保护的可信局域网，禁止暴露到公网；RabbitMQ 不应暴露给不受信网络。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
 
+LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-worker` 直接使用 `.env` 中的 `AD_*` 配置，不依赖盘中行情。启动器也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`。确认 AmazingData 条款允许持久化后，直接运行：
+
+```bash
+./scripts/start-lan-replay.py 192.168.1.10
+```
+
+本地启动器默认开启持久化；如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。
+
 ## 实际单机部署
 
 ### 配置身份和外部服务
@@ -72,11 +80,11 @@ export OIDC_ISSUER=https://identity.example.internal/realms/a500
 export OIDC_AUDIENCE=a500-api
 export OIDC_JWKS_URI=https://identity.example.internal/realms/a500/protocol/openid-connect/certs
 export OIDC_CLIENT_ID=a500-browser-client
-read -r -p 'AmazingData username: ' AMAZINGDATA_USERNAME
-read -r -s -p 'AmazingData password: ' AMAZINGDATA_PASSWORD; printf '\n'
-read -r -p 'AmazingData host: ' AMAZINGDATA_HOST
-read -r -p 'AmazingData port: ' AMAZINGDATA_PORT
-export AMAZINGDATA_USERNAME AMAZINGDATA_PASSWORD AMAZINGDATA_HOST AMAZINGDATA_PORT
+read -r -p 'AmazingData username: ' AD_USERNAME
+read -r -s -p 'AmazingData password: ' AD_PASSWORD; printf '\n'
+read -r -p 'AmazingData host: ' AD_HOST
+read -r -p 'AmazingData port: ' AD_PORT
+export AD_USERNAME AD_PASSWORD AD_HOST AD_PORT
 ```
 
 `OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
@@ -163,7 +171,7 @@ curl -sS -H "Authorization: Bearer $ACCESS_TOKEN" "$WEB_URL/api/v1/jobs/JOB_ID/r
 
 提交返回 HTTP 202 和任务信息；状态为 `queued`、`running`、`succeeded`、`failed` 或 `cancelled`。`stage` 表示 `queued`、`checking_cache`、`querying`、`saving` 或 `finished`，`completed_chunks` 和 `total_chunks` 表示分片进度。结果分页包含 `job_id`、`total`、`limit`、`offset` 和 `bars`；客户端应按偏移量读取，并只使用成功任务的结果。取消为后台协作式操作，`cancel_requested` 表示请求已接受，查看状态确认最终结果。
 
-worker 按自然年分片查询并持久化进度，可在进程中断后恢复未完成工作；任务结果固定，不因随后缓存变化而改变。只有具备可信覆盖记录的缓存可免去供应商查询；既有 CLI 共享缓存不自动视为可信。供应商返回的数据可能缺失或不完整，成功不保证每个交易日均有记录，也不保证供应商数据完整。部署者须监控 worker、PostgreSQL 和供应商连接；单机 Compose 和数据卷不提供高可用保证。
+worker 按自然年分片查询并持久化进度，可在进程中断后恢复未完成工作；任务结果固定，不因随后缓存变化而改变。同一 `jobs-worker` 进程惰性创建并复用一个供应商 Provider，多个任务共享该进程中的登录状态；供应商调用在 worker 内串行执行。重启 worker 会重新创建 Provider 并登录。只有具备可信覆盖记录的缓存可免去供应商查询；既有 CLI 共享缓存不自动视为可信。供应商返回的数据可能缺失或不完整，成功不保证每个交易日均有记录，也不保证供应商数据完整。部署者须监控 worker、PostgreSQL 和供应商连接；单机 Compose 和数据卷不提供高可用保证。
 
 ## 证书轮换
 

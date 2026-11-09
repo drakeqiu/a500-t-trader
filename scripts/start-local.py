@@ -25,6 +25,8 @@ SERVICES = (
     "signal-api",
     "account-api",
     "jobs-api",
+    "jobs-worker",
+    "history-dispatcher",
     "gateway",
     "frontend",
 )
@@ -66,17 +68,13 @@ def local_environment() -> dict[str, str]:
     environment["POSTGRES_PASSWORD"] = (
         environment.get("POSTGRES_PASSWORD") or "changeme"
     )
-    for suffix in ("USERNAME", "PASSWORD", "HOST", "PORT"):
-        target = f"AMAZINGDATA_{suffix}"
-        if not environment.get(target):
-            environment[target] = environment.get(f"AD_{suffix}", "")
     environment.setdefault("OIDC_ISSUER", "http://localhost:8081/realms/a500")
     environment.setdefault("OIDC_AUDIENCE", "a500-api")
     environment.setdefault(
         "OIDC_JWKS_URI",
         "http://keycloak:8080/realms/a500/protocol/openid-connect/certs",
     )
-    environment.setdefault("KEYCLOAK_HOSTNAME", "http://localhost:8081")
+    environment.setdefault("HISTORY_PERSISTENCE_PERMITTED", "true")
     configure_local_build_environment(environment)
     # Compose must use the sanitized literal environment, not parse .env again.
     return environment
@@ -125,10 +123,10 @@ def compose_command(environment: dict[str, str]) -> list[str]:
 
 def check_configuration(environment: dict[str, str]) -> None:
     required = (
-        "AMAZINGDATA_USERNAME",
-        "AMAZINGDATA_PASSWORD",
-        "AMAZINGDATA_HOST",
-        "AMAZINGDATA_PORT",
+        "AD_USERNAME",
+        "AD_PASSWORD",
+        "AD_HOST",
+        "AD_PORT",
         "KEYCLOAK_ADMIN_USERNAME",
         "KEYCLOAK_ADMIN_PASSWORD",
         "POSTGRES_PASSWORD",
@@ -139,11 +137,11 @@ def check_configuration(environment: dict[str, str]) -> None:
     if environment.get("MARKET_DATA_MODE") not in {"tgw", "replay"}:
         raise ValueError("Set MARKET_DATA_MODE explicitly to tgw or replay")
     try:
-        port = int(environment["AMAZINGDATA_PORT"])
+        port = int(environment["AD_PORT"])
     except ValueError:
-        raise ValueError("AMAZINGDATA_PORT must be an integer") from None
+        raise ValueError("AD_PORT must be an integer") from None
     if not 1 <= port <= 65535:
-        raise ValueError("AMAZINGDATA_PORT must be between 1 and 65535")
+        raise ValueError("AD_PORT must be between 1 and 65535")
     expected = {
         "OIDC_ISSUER": "http://localhost:8081/realms/a500",
         "OIDC_AUDIENCE": "a500-api",
