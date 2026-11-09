@@ -1,7 +1,78 @@
-node_modules
-.next
-out
-build
-coverage
-next-env.d.ts
-bun.lock
+# ===========================
+# 构建产物与编译输出
+# ===========================
+.next*/
+.vercel/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Vite 临时缓存
+.vite/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# ===========================
+# 依赖与锁文件
+# ===========================
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+
+# ===========================
+# 生成代码与第三方源码
+# ===========================
+# shadcn/ui 自动生成的组件（保持原始格式，避免更新时 diff 混乱）
+src/components/ui/
+src/lib/
+components.json
+
+# 其他自动生成的文件（根据项目实际路径调整）
+src/generated/
+*.generated.*
+*.d.ts
+
+# ===========================
+# 日志与临时文件
+# ===========================
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+*.tmp
+
+# ===========================
+# 环境变量
+# ===========================
+.env
+.env.*
+!.env.example
+
+# ===========================
+# 编辑器与工具配置
+# ===========================
+.idea/
+.history/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ===========================
+# 静态资源（Prettier 不处理二进制/媒体文件）
+# ===========================
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
