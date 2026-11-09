@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
@@ -291,8 +292,16 @@ class JobRepository:
         }
 
     def claim(self, job_id: str | uuid.UUID | None = None) -> dict[str, Any] | None:
+        started = time.monotonic()
+        _LOG.info("History claim started job_id=%s", job_id)
         token = uuid.uuid4()
+        _LOG.info("History claim database connect starting job_id=%s", job_id)
         with self._connect() as db:
+            _LOG.info(
+                "History claim database connected job_id=%s elapsed_ms=%d",
+                job_id,
+                int((time.monotonic() - started) * 1000),
+            )
             # A cancelled task with a dead worker is finalized on recovery.
             db.execute(
                 """UPDATE daily_history_jobs SET status='cancelled',
@@ -303,6 +312,7 @@ class JobRepository:
                     AND (%s::uuid IS NULL OR id=%s)""",
                 (job_id, job_id),
             )
+            _LOG.info("History claim candidate query starting job_id=%s", job_id)
             row = db.execute(
                 """WITH candidate AS (
                 SELECT id FROM daily_history_jobs
@@ -319,6 +329,12 @@ class JobRepository:
                     j.completed_chunks, j.total_chunks, j.lease_token""",
                 (job_id, job_id, token, _LEASE_SECONDS),
             ).fetchone()
+        _LOG.info(
+            "History claim finished job_id=%s claimed=%s elapsed_ms=%d",
+            job_id,
+            row is not None,
+            int((time.monotonic() - started) * 1000),
+        )
         return row
 
     def expired_job_ids(self, limit: int = 100) -> list[uuid.UUID]:
@@ -487,14 +503,32 @@ def _run_job(
     try:
         provider = None
         for index in range(job["completed_chunks"], job["total_chunks"]):
+            chunk_started = time.monotonic()
+            _LOG.info(
+                "History chunk started job_id=%s chunk=%d/%d",
+                job_id,
+                index + 1,
+                job["total_chunks"],
+            )
             if not repository.set_stage(job_id, token, "checking_cache"):
                 repository.finish(job_id, token)
                 return
             year = job["start_date"].year + index
             start = max(job["start_date"], date(year, 1, 1))
             end = min(job["end_date"], date(year, 12, 31))
+            _LOG.info(
+                "History cache lookup starting job_id=%s chunk=%d",
+                job_id,
+                index + 1,
+            )
             bars = repository.cached(job["symbol"], start, end)
             fetched = bars is None
+            _LOG.info(
+                "History cache lookup finished job_id=%s chunk=%d hit=%s",
+                job_id,
+                index + 1,
+                not fetched,
+            )
             if fetched:
                 if not repository.set_stage(job_id, token, "querying"):
                     repository.finish(job_id, token)
@@ -505,13 +539,37 @@ def _run_job(
                         return
                     try:
                         if provider is None:
+                            _LOG.info(
+                                "History provider creation starting job_id=%s",
+                                job_id,
+                            )
                             provider = provider_factory()
+                            _LOG.info(
+                                "History provider creation finished job_id=%s",
+                                job_id,
+                            )
+                        query_started = time.monotonic()
+                        _LOG.info(
+                            "History provider query starting job_id=%s chunk=%d "
+                            "attempt=%d",
+                            job_id,
+                            index + 1,
+                            attempt + 1,
+                        )
                         bars = [
                             _bar_payload(bar)
                             for bar in provider.get_daily_history(
                                 job["symbol"], start, end
                             )
                         ]
+                        _LOG.info(
+                            "History provider query finished job_id=%s chunk=%d "
+                            "bars=%d elapsed_ms=%d",
+                            job_id,
+                            index + 1,
+                            len(bars),
+                            int((time.monotonic() - query_started) * 1000),
+                        )
                         break
                     except Exception as error:
                         cause = error
@@ -527,6 +585,15 @@ def _run_job(
                         category = _error_category(cause)
                         if isinstance(error, RecoverableNetworkError):
                             category = "network"
+                        _LOG.warning(
+                            "History provider query failed job_id=%s chunk=%d "
+                            "attempt=%d error_type=%s category=%s",
+                            job_id,
+                            index + 1,
+                            attempt + 1,
+                            type(error).__name__,
+                            category,
+                        )
                         if category != "network" or attempt + 1 == _MAX_ATTEMPTS:
                             message = {
                                 "network": "Daily history provider network unavailable",
@@ -542,11 +609,23 @@ def _run_job(
             if not repository.set_stage(job_id, token, "saving"):
                 repository.finish(job_id, token)
                 return
+            _LOG.info(
+                "History checkpoint starting job_id=%s chunk=%d bars=%d",
+                job_id,
+                index + 1,
+                len(bars),
+            )
             if not repository.checkpoint(
                 job_id, token, job["symbol"], start, end, bars, fetched
             ):
                 repository.finish(job_id, token)
                 return
+            _LOG.info(
+                "History chunk finished job_id=%s chunk=%d elapsed_ms=%d",
+                job_id,
+                index + 1,
+                int((time.monotonic() - chunk_started) * 1000),
+            )
         repository.finish(job_id, token)
     except psycopg.Error:
         raise
@@ -583,6 +662,21 @@ def process_job(
 
 
 def worker_main() -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    for logger_name in (
+        __name__,
+        "a500_t_trader.jobs",
+        "a500_t_trader.history_dispatch",
+        "a500_t_trader.market_data.providers.amazingdata",
+    ):
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+        logger.propagate = False
+
     if os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower() != "true":
         _LOG.info("History worker disabled: persistence permission not configured")
         return
@@ -595,6 +689,7 @@ def worker_main() -> None:
     except ValueError:
         raise SystemExit("JOB_RETENTION_DAYS must be a positive integer") from None
     repository = JobRepository(database_url())
+    _LOG.info("History worker starting with boundary instrumentation enabled")
     HistoryConsumer(repository, retention_days=retention_days).run()
 
 

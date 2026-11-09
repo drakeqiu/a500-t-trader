@@ -14,10 +14,10 @@ from typing import cast
 from ..market_data.providers.amazingdata import AmazingDataProvider
 
 _REQUIRED_SETTINGS = (
-    "AMAZINGDATA_USERNAME",
-    "AMAZINGDATA_PASSWORD",
-    "AMAZINGDATA_HOST",
-    "AMAZINGDATA_PORT",
+    "AD_USERNAME",
+    "AD_PASSWORD",
+    "AD_HOST",
+    "AD_PORT",
 )
 _TRANSIENT_ERRNOS = {
     errno.ECONNABORTED,
@@ -63,17 +63,18 @@ def create_provider_from_env[ProviderT](
     process_env = os.environ if env is None else env
     settings = _read_dotenv(Path(env_file))
     settings.update(process_env)
+
     if any(not settings.get(key) for key in _REQUIRED_SETTINGS):
-        raise ConfigurationError("Missing required AmazingData configuration")
-    username = settings["AMAZINGDATA_USERNAME"]
-    password = settings["AMAZINGDATA_PASSWORD"]
-    host = settings["AMAZINGDATA_HOST"]
+        raise ConfigurationError("Missing required AD provider configuration")
+    username = settings["AD_USERNAME"]
+    password = settings["AD_PASSWORD"]
+    host = settings["AD_HOST"]
     try:
-        port = int(settings["AMAZINGDATA_PORT"])
+        port = int(settings["AD_PORT"])
     except ValueError:
-        raise ConfigurationError("AMAZINGDATA_PORT must be an integer") from None
+        raise ConfigurationError("AD_PORT must be an integer") from None
     if not 1 <= port <= 65535:
-        raise ConfigurationError("AMAZINGDATA_PORT must be a valid TCP port")
+        raise ConfigurationError("AD_PORT must be a valid TCP port")
 
     home_path = (
         Path(home) if home is not None else Path(settings.get("HOME") or Path.home())

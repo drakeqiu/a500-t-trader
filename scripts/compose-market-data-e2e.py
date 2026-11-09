@@ -113,10 +113,10 @@ def main() -> None:
             "OIDC_ISSUER": "https://identity.example.test",
             "OIDC_AUDIENCE": "a500-api",
             "OIDC_JWKS_URI": "https://identity.example.test/jwks",
-            "AMAZINGDATA_USERNAME": "market-data-e2e",
-            "AMAZINGDATA_PASSWORD": "market-data-e2e",
-            "AMAZINGDATA_HOST": "127.0.0.1",
-            "AMAZINGDATA_PORT": "1",
+            "AD_USERNAME": "market-data-e2e",
+            "AD_PASSWORD": "market-data-e2e",
+            "AD_HOST": "127.0.0.1",
+            "AD_PORT": "1",
         }
     )
     compose = _compose_command(project)

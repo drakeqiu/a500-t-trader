@@ -35,27 +35,12 @@ uv run python -m a500_t_trader
 普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试，fixture 驱动的测试仍会正常运行。
 数据库相关 Python 测试需设置 `TEST_DATABASE_URL`，指向可用的 PostgreSQL 测试数据库；每个测试会创建并删除独立 schema。前端 Playwright 使用本地 OIDC 与内存 REST/SSE API mock，不启动业务后端，也不连接 PostgreSQL 或 Redis。
 Starlette 测试客户端使用开发依赖 `httpx2`；`uv sync --locked` 会一并安装。
-在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查。
-若本地仓库 `.env` 使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT`，可在当前 shell 中
-安全映射到测试所需变量后运行（命令不会输出变量值）：
-
-```bash
-set -a
-source .env
-export AMAZINGDATA_USERNAME="$AD_USERNAME"
-export AMAZINGDATA_PASSWORD="$AD_PASSWORD"
-export AMAZINGDATA_HOST="$AD_HOST"
-export AMAZINGDATA_PORT="$AD_PORT"
-set +a
-uv run pytest -m live
-```
-
-也可在已提供 `AMAZINGDATA_USERNAME`、`AMAZINGDATA_PASSWORD`、`AMAZINGDATA_HOST`、
-`AMAZINGDATA_PORT` 的环境中直接运行：
+在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查。将 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 配置在受保护的环境或仓库外 `.env` 文件中后运行：
 
 ```bash
 uv run pytest -m live
 ```
+
 
 实时测试不会跳过缺失配置、连接失败、权限不足或必要行情数据缺失的情况；这些问题会使测试失败。
 

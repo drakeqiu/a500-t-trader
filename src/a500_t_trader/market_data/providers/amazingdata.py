@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,7 @@ from .. import (
     normalize_symbol,
 )
 
+_LOG = logging.getLogger(__name__)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -34,28 +36,42 @@ class AmazingDataProvider:
         market_data: Any | None = None,
         clock: Callable[[], datetime] = datetime.now,
     ) -> None:
+        self._clock = clock
         if login_fn is None:
             from AmazingData.login.tgw_login import login  # type: ignore[import-untyped]
 
             login_fn = login
-        self._clock = clock
+        _LOG.info("AmazingData provider initialization stage=login_start")
         try:
             authenticated = login_fn(
                 username, password, host, port, api_mode="kInternetMode"
             )
         except Exception as error:
+            _LOG.warning(
+                "AmazingData provider initialization stage=login_failed error_type=%s",
+                type(error).__name__,
+            )
             raise CapabilityUnavailableError(
                 f"AmazingData login failed: {error}"
             ) from error
         if not authenticated:
+            _LOG.warning("AmazingData provider initialization stage=login_rejected")
             raise CapabilityUnavailableError("AmazingData login was rejected")
+        _LOG.info("AmazingData provider initialization stage=login_succeeded")
         if market_data is None:
+            _LOG.info("AmazingData provider initialization stage=market_data_start")
             try:
                 market_data = _make_market_data()
             except Exception as error:
+                _LOG.warning(
+                    "AmazingData provider initialization "
+                    "stage=market_data_failed error_type=%s",
+                    type(error).__name__,
+                )
                 raise CapabilityUnavailableError(
                     f"AmazingData market-data initialization failed: {error}"
                 ) from error
+            _LOG.info("AmazingData provider initialization stage=market_data_ready")
         self._market_data = market_data
 
     def get_snapshot(self, symbol: str) -> Snapshot:
@@ -212,7 +228,7 @@ class AmazingDataProvider:
             )
         except Exception as error:
             raise CapabilityUnavailableError(
-                f"AmazingData daily-history query unavailable or unauthorized: {error}"
+                f"AmazingData daily-history query failed: {error}"
             ) from error
         bars: list[DailyBar] = []
         seen: set[date] = set()
@@ -272,8 +288,13 @@ def _make_market_data() -> Any:
     from AmazingData.query_api.base_data import BaseData  # type: ignore[import-untyped]
     from AmazingData.query_api.market_data import MarketData
 
+    _LOG.info("AmazingData provider initialization stage=calendar_start")
     calendar = BaseData().get_calendar(market="SH")
-    return MarketData(calendar)
+    _LOG.info("AmazingData provider initialization stage=calendar_ready")
+    _LOG.info("AmazingData provider initialization stage=market_data_client_start")
+    market_data = MarketData(calendar)
+    _LOG.info("AmazingData provider initialization stage=market_data_client_ready")
+    return market_data
 
 
 def _vendor_symbol(symbol: str) -> str:

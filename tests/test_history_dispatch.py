@@ -148,8 +148,17 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     from a500_t_trader.market_data import DailyBar
 
     repository = JobRepository(postgres_url)
+
     notified = repository.create("alice", "563360", "2020-01-01", "2020-12-31")
+    second_notified = repository.create("alice", "563362", "2020-01-01", "2020-12-31")
     unrelated = repository.create("alice", "563361", "2020-01-01", "2020-12-31")
+
+    factory_calls = 0
+
+    def provider_factory() -> Provider:
+        nonlocal factory_calls
+        factory_calls += 1
+        return Provider()
 
     class Provider:
         def get_daily_history(
@@ -172,7 +181,7 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
             self.settled = Event()
 
         def _finish_delivery(self) -> None:
-            if len(self.acks) + len(self.nacks) == 3:
+            if len(self.acks) + len(self.nacks) == 4:
                 self.settled.set()
 
         def exchange_declare(self, **kwargs: object) -> None:
@@ -202,7 +211,9 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     held_lease = repository.claim(unrelated["id"])
     assert held_lease is not None
     channel = Channel()
-    consumer = HistoryConsumer(repository, channel=channel, provider_factory=Provider)
+    consumer = HistoryConsumer(
+        repository, channel=channel, provider_factory=provider_factory
+    )
     consumer._on_message(
         channel,
         SimpleNamespace(delivery_tag=1),
@@ -217,6 +228,12 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     )
     consumer._on_message(
         channel,
+        SimpleNamespace(delivery_tag=4),
+        None,
+        json.dumps({"job_id": second_notified["id"]}).encode(),
+    )
+    consumer._on_message(
+        channel,
         SimpleNamespace(delivery_tag=3),
         None,
         json.dumps({"job_id": unrelated["id"]}).encode(),
@@ -224,16 +241,18 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     assert channel.settled.wait(5)
     consumer.close()
 
-    assert sorted(channel.acks + channel.nacks) == [1, 2, 3]
+    assert sorted(channel.acks + channel.nacks) == [1, 2, 3, 4]
     assert channel.nacks == []
+    assert factory_calls == 1
     with psycopg.connect(postgres_url) as db:
         statuses = db.execute(
-            "SELECT id, status FROM daily_history_jobs WHERE id IN (%s, %s)",
-            (notified["id"], unrelated["id"]),
+            "SELECT id, status FROM daily_history_jobs WHERE id IN (%s, %s, %s)",
+            (notified["id"], second_notified["id"], unrelated["id"]),
         ).fetchall()
 
     assert {str(identifier): status for identifier, status in statuses} == {
         notified["id"]: "succeeded",
+        second_notified["id"]: "succeeded",
         unrelated["id"]: "running",
     }
 

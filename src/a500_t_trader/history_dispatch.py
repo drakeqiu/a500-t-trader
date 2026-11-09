@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from typing import Any
 
 from .database import database_url
@@ -77,8 +78,10 @@ class HistoryConsumer:
         retention_days: int = 30,
     ) -> None:
         self.repository = repository
-        self.retention_days = retention_days
         self._provider_factory = provider_factory
+        self.retention_days = retention_days
+        self._provider: Any | None = None
+        self._provider_lock = Lock()
         self._last_cleanup = 0.0
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._connection: Any | None = None
@@ -105,7 +108,14 @@ class HistoryConsumer:
 
         if self._provider_factory is None:
             return process_job(self.repository, job_id)
-        return process_job(self.repository, job_id, self._provider_factory)
+        with self._provider_lock:
+            return process_job(self.repository, job_id, self._get_provider)
+
+    def _get_provider(self) -> Any:
+        if self._provider is None:
+            assert self._provider_factory is not None
+            self._provider = self._provider_factory()
+        return self._provider
 
     def _on_message(
         self, channel: Any, method: Any, properties: Any, body: bytes
@@ -122,28 +132,60 @@ class HistoryConsumer:
 
         delivery_tag = method.delivery_tag
         connection = channel.connection
+        _LOG.info("History delivery received job_id=%s", job_id)
 
         def process() -> None:
+            started = time.monotonic()
+            _LOG.info("History executor started job_id=%s", job_id)
             try:
+                _LOG.info("History processing started job_id=%s", job_id)
                 claimed = self._process(job_id)
+                _LOG.info(
+                    "History processing finished job_id=%s claimed=%s elapsed_ms=%d",
+                    job_id,
+                    claimed,
+                    int((time.monotonic() - started) * 1000),
+                )
                 queued = not claimed and self.repository.status(job_id) == "queued"
                 ack = not queued
-            except Exception:
-                _LOG.exception("History notification processing failed; requeueing")
+            except Exception as error:
+                _LOG.error(
+                    "History notification processing failed job_id=%s "
+                    "error_type=%s; requeueing",
+                    job_id,
+                    type(error).__name__,
+                )
                 ack = False
 
             def settle() -> None:
                 if not channel.is_open:
+                    _LOG.warning(
+                        "History settlement skipped: channel closed job_id=%s",
+                        job_id,
+                    )
                     return
                 if ack:
                     channel.basic_ack(delivery_tag=delivery_tag)
+                    _LOG.info("History delivery acknowledged job_id=%s", job_id)
                 else:
                     channel.basic_nack(delivery_tag=delivery_tag, requeue=True)
+                    _LOG.info("History delivery requeued job_id=%s", job_id)
 
             if connection.is_open:
                 connection.add_callback_threadsafe(settle)
+                _LOG.debug("History settlement scheduled job_id=%s", job_id)
+            else:
+                _LOG.warning(
+                    "History settlement unavailable: connection closed job_id=%s",
+                    job_id,
+                )
 
-        self._executor.submit(process)
+        future = self._executor.submit(process)
+        _LOG.debug(
+            "History executor submission complete job_id=%s done=%s",
+            job_id,
+            future.done(),
+        )
 
     def _recover_expired(self) -> None:
         def recover() -> None:
