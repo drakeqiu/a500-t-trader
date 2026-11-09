@@ -105,6 +105,8 @@ python -m a500_t_trader monitor \
 
 `daily-history` 查询标准化日线 OHLCV；`daily-indicators` 使用收盘价计算 SMA(5)、SMA(20) 和 Wilder RSI(14)。每个 API 返回行算一个观测，不补齐缺失交易日；达到窗口前指标为 `null`。这些指标仅描述历史数据，不构成策略信号。
 
+成功的历史日线任务还会将观测到的日 K 线及包含端点的查询覆盖范围写入共享存储；覆盖范围与行情行分开记录，因此成功空结果也可识别为完整覆盖。后端消费者可通过 `BacktestRepository.get_shared_daily_history(symbol, start_date, end_date)` 读取：未覆盖或覆盖有缺口返回 `None`，完整覆盖返回按日期排序的实际观测行（可能为空）。重叠或相邻范围可合并；任务清理不会删除共享历史，也不会自动使其过期。任务结果仍是按认证主体隔离的固定快照，不新增 HTTP 路由。
+
 ```bash
 python -m a500_t_trader daily-history --symbol 510300 \
   --start-date 2026-10-01 --end-date 2026-10-30 \
