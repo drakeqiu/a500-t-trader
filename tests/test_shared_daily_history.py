@@ -31,12 +31,8 @@ def test_shared_daily_history_merges_coverage_and_replaces_observations(
     repository = BacktestRepository(postgres_url)
     start, end = date(2026, 1, 1), date(2026, 1, 6)
     assert repository.get_shared_daily_history("510300", start, end) is None
-    repository.save_daily_history(
-        (_bar("510300", 2, "2"),), start, date(2026, 1, 2)
-    )
-    repository.save_daily_history(
-        (_bar("510300", 5, "5"),), date(2026, 1, 5), end
-    )
+    repository.save_daily_history((_bar("510300", 2, "2"),), start, date(2026, 1, 2))
+    repository.save_daily_history((_bar("510300", 5, "5"),), date(2026, 1, 5), end)
     assert repository.get_shared_daily_history("510300", start, end) is None
     repository.save_daily_history(
         (), date(2026, 1, 3), date(2026, 1, 4), symbol="510300"
@@ -46,9 +42,7 @@ def test_shared_daily_history_merges_coverage_and_replaces_observations(
     assert [row.timestamp.day for row in rows] == [2, 5]
     assert rows[0].close == Decimal("2")
     alternate_timestamp = datetime(2026, 1, 2, 15, tzinfo=SHANGHAI)
-    later_observation = replace(
-        _bar("510300", 2, "20"), timestamp=alternate_timestamp
-    )
+    later_observation = replace(_bar("510300", 2, "20"), timestamp=alternate_timestamp)
     repository.save_daily_history(
         (_bar("510300", 5, "5"), later_observation), start, end
     )
@@ -70,18 +64,27 @@ def test_shared_daily_history_distinguishes_gaps_and_includes_boundaries(
     repository.save_daily_history(
         (), date(2026, 1, 4), date(2026, 1, 5), symbol="510301"
     )
-    assert repository.get_shared_daily_history(
-        "510301", date(2026, 1, 1), date(2026, 1, 5)
-    ) is None
-    assert repository.get_shared_daily_history(
-        "510301", date(2026, 1, 1), date(2026, 1, 2)
-    ) == ()
+    assert (
+        repository.get_shared_daily_history(
+            "510301", date(2026, 1, 1), date(2026, 1, 5)
+        )
+        is None
+    )
+    assert (
+        repository.get_shared_daily_history(
+            "510301", date(2026, 1, 1), date(2026, 1, 2)
+        )
+        == ()
+    )
     repository.save_daily_history(
         (), date(2026, 1, 3), date(2026, 1, 3), symbol="510301"
     )
-    assert repository.get_shared_daily_history(
-        "510301", date(2026, 1, 1), date(2026, 1, 5)
-    ) == ()
+    assert (
+        repository.get_shared_daily_history(
+            "510301", date(2026, 1, 1), date(2026, 1, 5)
+        )
+        == ()
+    )
 
 
 def test_shared_daily_history_merges_overlapping_ranges(postgres_url: str) -> None:
@@ -92,9 +95,12 @@ def test_shared_daily_history_merges_overlapping_ranges(postgres_url: str) -> No
     repository.save_daily_history(
         (), date(2026, 1, 3), date(2026, 1, 6), symbol="510302"
     )
-    assert repository.get_shared_daily_history(
-        "510302", date(2026, 1, 1), date(2026, 1, 6)
-    ) == ()
+    assert (
+        repository.get_shared_daily_history(
+            "510302", date(2026, 1, 1), date(2026, 1, 6)
+        )
+        == ()
+    )
 
 
 def test_successful_job_persists_shared_history_and_snapshot_remains_subject_scoped(
@@ -122,26 +128,28 @@ def test_successful_job_persists_shared_history_and_snapshot_remains_subject_sco
             },
         ).json()
         assert process_one(JobRepository(postgres_url), lambda: Provider())
-        original = client.get(
-            f"/v1/jobs/{job['id']}/results", headers=headers
-        ).json()
+        original = client.get(f"/v1/jobs/{job['id']}/results", headers=headers).json()
         assert original["total"] == 1
-        assert client.get(
-            f"/v1/jobs/{job['id']}/results",
-            headers={"Authorization": "Bearer bob"},
-        ).status_code == 404
+        assert (
+            client.get(
+                f"/v1/jobs/{job['id']}/results",
+                headers={"Authorization": "Bearer bob"},
+            ).status_code
+            == 404
+        )
     repository = BacktestRepository(postgres_url)
     shared = repository.get_shared_daily_history(
         "563360", date(2023, 1, 1), date(2024, 12, 31)
     )
     assert shared is not None and [bar.timestamp.year for bar in shared] == [2023]
-    assert repository.get_shared_daily_history(
-        "563360", date(2024, 1, 1), date(2024, 12, 31)
-    ) == ()
-    refreshed = _bar("563360", 2, "9", year=2023)
-    repository.save_daily_history(
-        (refreshed,), date(2023, 1, 1), date(2023, 12, 31)
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2024, 1, 1), date(2024, 12, 31)
+        )
+        == ()
     )
+    refreshed = _bar("563360", 2, "9", year=2023)
+    repository.save_daily_history((refreshed,), date(2023, 1, 1), date(2023, 12, 31))
     assert repository.get_shared_daily_history(
         "563360", date(2023, 1, 2), date(2023, 1, 2)
     ) == (refreshed,)
@@ -163,9 +171,7 @@ def test_successful_job_persists_shared_history_and_snapshot_remains_subject_sco
                 "end_date": "2024-12-31",
             },
         ).json()
-        assert process_one(
-            JobRepository(postgres_url), lambda: ProviderMustNotRun()
-        )
+        assert process_one(JobRepository(postgres_url), lambda: ProviderMustNotRun())
         cached_result = client.get(
             f"/v1/jobs/{cached_job['id']}/results", headers=headers
         ).json()
@@ -173,14 +179,15 @@ def test_successful_job_persists_shared_history_and_snapshot_remains_subject_sco
         assert repository.get_shared_daily_history(
             "563360", date(2023, 1, 2), date(2023, 1, 2)
         ) == (refreshed,)
-        unchanged = client.get(
-            f"/v1/jobs/{job['id']}/results", headers=headers
-        ).json()
+        unchanged = client.get(f"/v1/jobs/{job['id']}/results", headers=headers).json()
         assert unchanged == original
     JobRepository(postgres_url).cleanup(0)
-    assert repository.get_shared_daily_history(
-        "563360", date(2023, 1, 1), date(2024, 12, 31)
-    ) is not None
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2024, 12, 31)
+        )
+        is not None
+    )
 
 
 def test_failed_job_does_not_publish_partial_shared_history(
@@ -208,9 +215,12 @@ def test_failed_job_does_not_publish_partial_shared_history(
         )
         process_one(JobRepository(postgres_url), lambda: Provider())
     repository = BacktestRepository(postgres_url)
-    assert repository.get_shared_daily_history(
-        "563360", date(2023, 1, 1), date(2024, 12, 31)
-    ) is None
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2024, 12, 31)
+        )
+        is None
+    )
 
 
 def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> None:
@@ -232,13 +242,19 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
             def get_daily_history(
                 self, symbol: str, start_date: date, end_date: date
             ) -> tuple[DailyBar, ...]:
-                assert client.post(
-                    f"/v1/jobs/{job['id']}/cancel", headers=headers
-                ).status_code == 200
+                assert (
+                    client.post(
+                        f"/v1/jobs/{job['id']}/cancel", headers=headers
+                    ).status_code
+                    == 200
+                )
                 return (_bar(symbol, 2, "1", year=2023),)
 
         assert process_one(JobRepository(postgres_url), lambda: Provider())
     repository = BacktestRepository(postgres_url)
-    assert repository.get_shared_daily_history(
-        "563360", date(2023, 1, 1), date(2023, 12, 31)
-    ) is None
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2023, 12, 31)
+        )
+        is None
+    )

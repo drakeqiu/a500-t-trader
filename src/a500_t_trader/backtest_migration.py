@@ -67,9 +67,7 @@ def migrate_daily_trading_date(db: psycopg.Connection) -> None:
             ) ranked WHERE position > 1
         )
     """)
-    db.execute(
-        "ALTER TABLE shared_daily_bars ALTER COLUMN trading_date SET NOT NULL"
-    )
+    db.execute("ALTER TABLE shared_daily_bars ALTER COLUMN trading_date SET NOT NULL")
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS shared_daily_bars_symbol_trading_date_idx "
         "ON shared_daily_bars (symbol, trading_date)"

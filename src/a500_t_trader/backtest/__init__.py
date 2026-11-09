@@ -472,9 +472,7 @@ class BacktestRepository:
                     if range_end >= end_date:
                         complete = True
                         break
-                    next_uncovered = range_end.fromordinal(
-                        range_end.toordinal() + 1
-                    )
+                    next_uncovered = range_end.fromordinal(range_end.toordinal() + 1)
             if not complete:
                 return None
             rows = db.execute(
