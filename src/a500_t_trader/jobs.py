@@ -22,7 +22,7 @@ from .cli.runtime import (
     _error_category,
     create_provider_from_env,
 )
-from .database import database_url
+from .database import database_url, initialize_database
 from .market_data import SHANGHAI, DailyBar, normalize_symbol
 
 _LOG = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ class JobRepository:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
+        initialize_database(dsn)
         with self._connect() as db:
             # Serialize concurrent startup migrations, including first deployment.
             db.execute("SELECT pg_advisory_xact_lock(500004)")
@@ -438,7 +439,7 @@ class JobRepository:
         self, job_id: uuid.UUID, token: uuid.UUID, error: str | None = None
     ) -> None:
         with self._connect() as db:
-            db.execute(
+            row = db.execute(
                 """UPDATE daily_history_jobs SET
                 status=CASE WHEN cancel_requested THEN 'cancelled'
                     WHEN %s::text IS NOT NULL THEN 'failed' ELSE 'succeeded' END,
@@ -448,9 +449,37 @@ class JobRepository:
                 WHERE id=%s AND status='running' AND lease_token=%s
                     AND lease_until > now()
                     AND (cancel_requested OR %s::text IS NOT NULL
-                        OR completed_chunks=total_chunks)""",
+                        OR completed_chunks=total_chunks)
+                RETURNING status, symbol, start_date, end_date""",
                 (error, error, job_id, token, error),
-            )
+            ).fetchone()
+            if row is not None and row["status"] == "succeeded":
+                db.execute("SELECT pg_advisory_xact_lock(500001)")
+                bars = db.execute(
+                    "SELECT bar_json FROM daily_history_job_bars "
+                    "WHERE job_id=%s ORDER BY bar_date",
+                    (job_id,),
+                ).fetchall()
+                for (bar,) in bars:
+                    db.execute(
+                        "INSERT INTO shared_daily_bars VALUES (%s, %s, %s) "
+                        "ON CONFLICT(symbol, timestamp) "
+                        "DO UPDATE SET bar_json=excluded.bar_json",
+                        (
+                            row["symbol"],
+                            bar["timestamp"],
+                            json.dumps(bar, separators=(",", ":")),
+                        ),
+                    )
+                db.execute(
+                    "INSERT INTO shared_daily_history_ranges "
+                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                    (
+                        row["symbol"],
+                        row["start_date"].isoformat(),
+                        row["end_date"].isoformat(),
+                    ),
+                )
 
     def cleanup(self, retention_days: int) -> None:
         with self._connect() as db:

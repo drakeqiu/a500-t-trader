@@ -133,8 +133,12 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
                 bars = cast(DailyHistoryMarketData, source).get_daily_history(
                     symbol, args.start_date, args.end_date
                 )
-                if bars:
-                    repository.save_daily_history(bars, args.start_date, args.end_date)
+                repository.save_daily_history(
+                    tuple(bars),
+                    args.start_date,
+                    args.end_date,
+                    symbol=symbol,
+                )
             records = (
                 calculate_indicators(bars)
                 if args.command == "daily-indicators"

@@ -411,10 +411,21 @@ class BacktestRepository:
         return tuple(_bar_from_json(row[0]) for row in rows)
 
     def save_daily_history(
-        self, bars: tuple[DailyBar, ...], start_date: date, end_date: date
+        self,
+        bars: tuple[DailyBar, ...],
+        start_date: date,
+        end_date: date,
+        *,
+        symbol: str | None = None,
     ) -> None:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
+        if bars:
+            symbol = bars[0].symbol if symbol is None else symbol
+            if any(bar.symbol != symbol for bar in bars):
+                raise ValueError("all bars must match the shared history symbol")
+        if symbol is None:
+            raise ValueError("symbol is required when saving empty daily history")
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
@@ -424,34 +435,57 @@ class BacktestRepository:
                     "DO UPDATE SET bar_json=excluded.bar_json",
                     (bar.symbol, bar.timestamp.isoformat(), _daily_bar_json(bar)),
                 )
-            if bars:
-                db.execute(
-                    "INSERT INTO shared_daily_history_ranges "
-                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                    (bars[0].symbol, start_date.isoformat(), end_date.isoformat()),
-                )
+            db.execute(
+                "INSERT INTO shared_daily_history_ranges "
+                "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (symbol, start_date.isoformat(), end_date.isoformat()),
+            )
 
     def get_shared_daily_history(
         self, symbol: str, start_date: date, end_date: date
     ) -> tuple[DailyBar, ...] | None:
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
-            covered = db.execute(
-                "SELECT 1 FROM shared_daily_history_ranges WHERE symbol=%s "
-                "AND start_date=%s AND end_date=%s",
-                (symbol, start_date.isoformat(), end_date.isoformat()),
-            ).fetchone()
-            if covered is None:
-                return None
-            rows = db.execute(
-                "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
-                "AND timestamp>=%s AND timestamp<%s ORDER BY timestamp",
-                (
-                    symbol,
-                    start_date.isoformat(),
-                    datetime.combine(end_date, datetime.max.time()).isoformat(),
-                ),
+            ranges = db.execute(
+                "SELECT start_date, end_date FROM shared_daily_history_ranges "
+                "WHERE symbol=%s AND start_date<=%s AND end_date>=%s "
+                "ORDER BY start_date, end_date",
+                (symbol, end_date.isoformat(), start_date.isoformat()),
             ).fetchall()
+            next_uncovered = start_date
+            complete = False
+            for raw_start, raw_end in ranges:
+                range_start = date.fromisoformat(raw_start)
+                range_end = date.fromisoformat(raw_end)
+                if range_start > next_uncovered:
+                    break
+                if range_end >= next_uncovered:
+                    if range_end >= end_date:
+                        complete = True
+                        break
+                    next_uncovered = range_end.fromordinal(
+                        range_end.toordinal() + 1
+                    )
+            if not complete:
+                return None
+            if end_date < date.max:
+                rows = db.execute(
+                    "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
+                    "AND timestamp>=%s AND timestamp<%s ORDER BY timestamp",
+                    (
+                        symbol,
+                        start_date.isoformat(),
+                        date.fromordinal(end_date.toordinal() + 1).isoformat(),
+                    ),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
+                    "AND timestamp>=%s ORDER BY timestamp",
+                    (symbol, start_date.isoformat()),
+                ).fetchall()
         return tuple(_daily_bar_from_json(row[0]) for row in rows)
 
     def cleanup_shared_history(self) -> int:
