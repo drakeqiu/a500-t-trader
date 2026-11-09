@@ -6,7 +6,11 @@ on:
     types: [labeled, unlabeled]
 
 permissions:
+  contents: write
   pull-requests: write
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number }}
 
 jobs:
   auto-merge:

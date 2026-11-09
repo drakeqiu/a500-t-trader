@@ -6,9 +6,18 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event.pull_request.number ||
+    github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
-    name: Lint, typecheck, and tests
+    name: Python, docs, and E2E checks
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -48,31 +57,20 @@ jobs:
 
           ls -lh wheels/
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: npm
 
       - name: Install locked Node dependencies
         run: npm ci
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install locked frontend dependencies
-        run: bun install --frozen-lockfile
-        working-directory: frontend
-
-      - name: Frontend lint
-        run: bun run lint
-        working-directory: frontend
-
-      - name: Frontend format check
-        run: bun run format:check
-        working-directory: frontend
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
 
       - name: Install locked Python dependencies
         run: uv sync --locked
@@ -100,6 +98,67 @@ jobs:
 
       - name: pytest
         run: uv run pytest
+
+  frontend:
+    name: Frontend checks and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Download supplier wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p wheels
+          gh release download deps-v1 \
+            --repo "${{ github.repository }}" \
+            --pattern "*.whl" \
+            --dir wheels
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked Python runtime dependencies
+        run: uv sync --locked --no-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
+
+      - name: Install locked frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Frontend lint
+        run: bun run lint
+        working-directory: frontend
+
+      - name: Frontend format check
+        run: bun run format:check
+        working-directory: frontend
+
+      - name: Frontend unit tests
+        run: bun run test
+        working-directory: frontend
 
       - name: Cache frontend Playwright browsers
         uses: actions/cache@v4

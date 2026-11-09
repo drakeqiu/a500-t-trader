@@ -73,8 +73,9 @@ git config --local commit.template .gitmessage
 
 ## 持续集成
 
-GitHub Actions 会在推送和拉取请求时运行代码检查、格式检查、严格模式的 mypy
-和 pytest。持续集成会使用 `uv sync --locked` 安装锁定的依赖环境。
+GitHub Actions 将 Python/文档检查与前端检查并行运行；前端 job 执行 lint、
+格式检查、Vitest 单元测试和 Playwright E2E 测试。推送新提交会取消同一分支或
+拉取请求中已过期的 CI 运行。CI 使用 `uv sync --locked` 和 Bun 锁文件安装依赖。
 
 ## 自动合并拉取请求
 
