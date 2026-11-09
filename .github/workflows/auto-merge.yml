@@ -92,7 +92,8 @@ jobs:
               ' <<<"$checks")
               case "$state" in
                 SUCCESS) ;;
-                PENDING|MISSING_OR_DUPLICATE)
+                PENDING|QUEUED|IN_PROGRESS|WAITING|EXPECTED|REQUESTED|\
+                  MISSING_OR_DUPLICATE)
                   all_succeeded=false
                   wait_for_checks=true
                   echo "Required check \"$name\" is $state."
