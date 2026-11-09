@@ -52,9 +52,6 @@ export type HistoryJobStatus = "queued" | "running" | "succeeded" | "failed" | "
 export type HistoryJob = {
   type: "daily_history";
   id: string;
-  symbol: string;
-  start_date: string;
-  end_date: string;
   status: HistoryJobStatus;
   stage: string;
   cancel_requested: boolean;
@@ -64,22 +61,6 @@ export type HistoryJob = {
   updated_at: string;
   finished_at: string | null;
   error: string | null;
-};
-export type HistoryBar = {
-  timestamp: string;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: number;
-  [key: string]: unknown;
-};
-export type HistoryResults = {
-  job_id: string;
-  total: number;
-  limit: number;
-  offset: number;
-  bars: HistoryBar[];
 };
 export type SignalEvent = { event: string; id?: string; data: unknown };
 export type SignalSnapshot = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
@@ -223,17 +204,6 @@ export function getHistoryJob(token: string, jobId: string, signal?: AbortSignal
 export function cancelHistoryJob(token: string, jobId: string, signal?: AbortSignal) {
   return api<HistoryJob>(`/v1/jobs/${encodeURIComponent(jobId)}/cancel`, token, {
     method: "POST",
-    signal,
-  });
-}
-export function getHistoryResults(
-  token: string,
-  jobId: string,
-  offset: number,
-  signal?: AbortSignal,
-) {
-  const query = new URLSearchParams({ limit: "50", offset: String(offset) });
-  return api<HistoryResults>(`/v1/jobs/${encodeURIComponent(jobId)}/results?${query}`, token, {
     signal,
   });
 }
