@@ -77,3 +77,7 @@ intraday analysis.
 - CI MUST NOT inherit or configure local package mirrors; GitHub Actions uses
   the default upstream registries unless a workflow explicitly requires
   otherwise.
+
+## Pull requests
+
+- When opening a pull request, add the `automerge` label.
