@@ -207,7 +207,6 @@ class JobRepository:
             ).fetchone()
         return _job(row)
 
-
     def backfill_queued_jobs(self) -> int:
         """Create dispatch records for queued jobs written by older API versions."""
         with self._connect() as db:
@@ -484,6 +483,7 @@ class JobRepository:
                 "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
                 (job_id,),
             )
+
     def cleanup(self, retention_days: int) -> None:
         with self._connect() as db:
             db.execute(

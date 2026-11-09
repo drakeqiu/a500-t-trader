@@ -132,21 +132,28 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
         status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
         assert status["status"] == "succeeded"
         assert not any("result" in key or "bar" in key for key in status)
-        assert client.get(
-            f"/v1/jobs/{job['id']}/results", headers=headers
-        ).status_code == 404
-        assert client.get(
-            f"/v1/jobs/{job['id']}", headers={"Authorization": "Bearer bob"}
-        ).status_code == 404
+        assert (
+            client.get(f"/v1/jobs/{job['id']}/results", headers=headers).status_code
+            == 404
+        )
+        assert (
+            client.get(
+                f"/v1/jobs/{job['id']}", headers={"Authorization": "Bearer bob"}
+            ).status_code
+            == 404
+        )
 
     repository = BacktestRepository(postgres_url)
     shared = repository.get_shared_daily_history(
         "563360", date(2023, 1, 1), date(2024, 12, 31)
     )
     assert shared is not None and [bar.timestamp.year for bar in shared] == [2023]
-    assert repository.get_shared_daily_history(
-        "563360", date(2024, 1, 1), date(2024, 12, 31)
-    ) == ()
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2024, 1, 1), date(2024, 12, 31)
+        )
+        == ()
+    )
     with psycopg.connect(postgres_url) as db:
         staged = db.execute(
             "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
@@ -164,9 +171,12 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
         "563360", date(2023, 1, 2), date(2023, 1, 2)
     ) == (refreshed,)
     JobRepository(postgres_url).cleanup(0)
-    assert repository.get_shared_daily_history(
-        "563360", date(2023, 1, 1), date(2024, 12, 31)
-    ) is not None
+    assert (
+        repository.get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2024, 12, 31)
+        )
+        is not None
+    )
 
 
 def test_failed_job_does_not_publish_partial_shared_history(

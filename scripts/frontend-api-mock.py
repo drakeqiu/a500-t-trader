@@ -540,7 +540,6 @@ def create_fixture(port: int) -> FastAPI:
         job["state"] = "cancelled"
         return job
 
-
     @app.post("/__fixture/signals/{status}")
     async def publish(status: str):
         if status not in {"WAIT", "BUY", "SELL", "UNAVAILABLE"}:
