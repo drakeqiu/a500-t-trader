@@ -493,7 +493,8 @@ class JobRepository:
                     """INSERT INTO shared_daily_bars
                     (symbol,timestamp,bar_json,trading_date)
                     VALUES (%s,%s,%s,%s) ON CONFLICT (symbol,trading_date)
-                    DO UPDATE SET timestamp=excluded.timestamp,bar_json=excluded.bar_json""",
+                    DO UPDATE SET timestamp=excluded.timestamp,
+                    bar_json=excluded.bar_json""",
                     (
                         row["symbol"],
                         bar["timestamp"],
