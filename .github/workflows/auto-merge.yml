@@ -53,7 +53,8 @@ jobs:
             exit 0
           fi
 
-          default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          default_branch=$(gh api \
+            "repos/$GITHUB_REPOSITORY" --jq .default_branch)
           pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json state,headRefOid,baseRefName,labels)
           if ! jq -e \
@@ -62,7 +63,7 @@ jobs:
             '.state == "OPEN" and .headRefOid == $sha and
              .baseRefName == $branch and
              any(.labels[]; .name == "automerge")' <<<"$pr" >/dev/null; then
-            echo "Pull request is closed, stale, not targeting the default branch, or not opted in."
+            echo "Pull request is closed or no longer eligible for auto-merge."
             exit 0
           fi
 
@@ -98,7 +99,8 @@ jobs:
                   ;;
                 *)
                   all_succeeded=false
-                  echo "Required check \"$name\" is $state; auto-merge remains disabled."
+                  printf 'Required check "%s" is %s; auto-merge disabled.\n' \
+                    "$name" "$state"
                   ;;
               esac
             done
@@ -111,7 +113,8 @@ jobs:
                 --arg branch "$default_branch" \
                 '.state == "OPEN" and .headRefOid == $sha and
                  .baseRefName == $branch and
-                 any(.labels[]; .name == "automerge")' <<<"$latest_pr" >/dev/null; then
+                 any(.labels[]; .name == "automerge")' \
+                <<<"$latest_pr" >/dev/null; then
                 echo "Pull request changed or opted out before auto-merge."
                 exit 0
               fi
@@ -121,13 +124,14 @@ jobs:
                 --squash
               exit 0
             fi
-            if [[ "$wait_for_checks" != true || "$EVENT_NAME" != pull_request ]]; then
+            if [[ "$wait_for_checks" != true ||
+                  "$EVENT_NAME" != pull_request ]]; then
               exit 0
             fi
             sleep 15
           done
 
-          echo "Timed out waiting for required checks; auto-merge remains disabled."
+          echo "Timed out waiting for checks; auto-merge remains disabled."
           exit 0
 
       - name: Cancel auto-merge
