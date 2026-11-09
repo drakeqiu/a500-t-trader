@@ -1,0 +1,5 @@
+# History jobs do not own result snapshots
+
+Status: Accepted
+
+Historical daily-history jobs track status and progress only: task status responses expose neither result links nor task-to-market-data associations, the per-job results endpoint is not part of the contract, and the history page does not display task-bound bars. While a job is running, it may stage newly fetched bars internally in PostgreSQL to resume completed chunks and avoid publishing partial results. On success, publish staged bars and queried-range coverage to the shared daily-history store, then delete job-specific staging; on failure or cancellation, delete staging without publishing partial bars. Consumers read shared history independently of a job, and this decision adds no shared-history HTTP API. It supersedes ADR-0019's decision to retain a fixed result snapshot per successful job; ADR-0019's shared-store and coverage decisions remain in force. This avoids duplicate, subject-scoped snapshots while preserving recovery and keeping incomplete fetches out of shared history.
