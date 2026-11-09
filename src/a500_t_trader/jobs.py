@@ -22,7 +22,7 @@ from .cli.runtime import (
     _error_category,
     create_provider_from_env,
 )
-from .database import database_url
+from .database import database_url, initialize_database
 from .market_data import SHANGHAI, DailyBar, normalize_symbol
 
 _LOG = logging.getLogger(__name__)
@@ -41,6 +41,10 @@ def _date(value: date | str) -> date:
     if isinstance(value, datetime):
         raise ValueError("expected a date, not a datetime")
     return value if isinstance(value, date) else date.fromisoformat(value)
+
+
+def _bar_date(timestamp: str) -> date:
+    return datetime.fromisoformat(timestamp).astimezone(SHANGHAI).date()
 
 
 def _json_value(value: Any) -> Any:
@@ -69,6 +73,7 @@ class JobRepository:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
+        initialize_database(dsn)
         with self._connect() as db:
             # Serialize concurrent startup migrations, including first deployment.
             db.execute("SELECT pg_advisory_xact_lock(500004)")
@@ -112,6 +117,13 @@ class JobRepository:
                 symbol TEXT NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL,
                 fetched_at TIMESTAMPTZ NOT NULL, bars JSONB NOT NULL,
                 PRIMARY KEY (symbol, start_date, end_date)
+            )""")
+
+            db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_fetched_bars (
+                job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
+                    ON DELETE CASCADE,
+                bar_date DATE NOT NULL, bar_json JSONB NOT NULL,
+                PRIMARY KEY (job_id, bar_date)
             )""")
 
     def _connect(self) -> psycopg.Connection[Any]:
@@ -422,10 +434,22 @@ class JobRepository:
                     (symbol, start, end, Jsonb(bars)),
                 )
             for bar in bars:
+                if fetched:
+                    db.execute(
+                        """INSERT INTO daily_history_job_fetched_bars
+                        (job_id,bar_date,bar_json) VALUES (%s,%s,%s)
+                        ON CONFLICT (job_id,bar_date) DO UPDATE
+                        SET bar_json=excluded.bar_json""",
+                        (
+                            job_id,
+                            _bar_date(bar["timestamp"]),
+                            Jsonb(bar),
+                        ),
+                    )
                 db.execute(
                     """INSERT INTO daily_history_job_bars (job_id,bar_date,bar_json)
                     VALUES (%s,%s,%s)""",
-                    (job_id, date.fromisoformat(bar["timestamp"][:10]), Jsonb(bar)),
+                    (job_id, _bar_date(bar["timestamp"]), Jsonb(bar)),
                 )
             db.execute(
                 """UPDATE daily_history_jobs SET completed_chunks=completed_chunks+1,
@@ -438,7 +462,7 @@ class JobRepository:
         self, job_id: uuid.UUID, token: uuid.UUID, error: str | None = None
     ) -> None:
         with self._connect() as db:
-            db.execute(
+            row = db.execute(
                 """UPDATE daily_history_jobs SET
                 status=CASE WHEN cancel_requested THEN 'cancelled'
                     WHEN %s::text IS NOT NULL THEN 'failed' ELSE 'succeeded' END,
@@ -448,8 +472,44 @@ class JobRepository:
                 WHERE id=%s AND status='running' AND lease_token=%s
                     AND lease_until > now()
                     AND (cancel_requested OR %s::text IS NOT NULL
-                        OR completed_chunks=total_chunks)""",
+                        OR completed_chunks=total_chunks)
+                RETURNING status, symbol, start_date, end_date""",
                 (error, error, job_id, token, error),
+            ).fetchone()
+            if row is None or row["status"] != "succeeded":
+                return
+            db.execute("SELECT pg_advisory_xact_lock(500001)")
+            bars = db.execute(
+                "SELECT bar_json FROM daily_history_job_fetched_bars "
+                "WHERE job_id=%s ORDER BY bar_date",
+                (job_id,),
+            ).fetchall()
+            for bar_row in bars:
+                bar = bar_row["bar_json"]
+                if isinstance(bar, str):
+                    bar = json.loads(bar)
+                trading_date = _bar_date(bar["timestamp"])
+                db.execute(
+                    """INSERT INTO shared_daily_bars
+                    (symbol,timestamp,bar_json,trading_date)
+                    VALUES (%s,%s,%s,%s) ON CONFLICT (symbol,trading_date)
+                    DO UPDATE SET timestamp=excluded.timestamp,
+                    bar_json=excluded.bar_json""",
+                    (
+                        row["symbol"],
+                        bar["timestamp"],
+                        json.dumps(bar, separators=(",", ":")),
+                        trading_date.isoformat(),
+                    ),
+                )
+            db.execute(
+                "INSERT INTO shared_daily_history_ranges "
+                "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (
+                    row["symbol"],
+                    row["start_date"].isoformat(),
+                    row["end_date"].isoformat(),
+                ),
             )
 
     def cleanup(self, retention_days: int) -> None:

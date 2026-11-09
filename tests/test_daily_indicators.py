@@ -80,3 +80,37 @@ def test_daily_indicators_cli_returns_calculated_values(
 
     assert main(args, market_data=UnexpectedData()) == 0
     assert json.loads(capsys.readouterr().out) == output
+
+
+def test_empty_daily_history_query_is_cached_as_complete(
+    capsys: Any, postgres_url: str
+) -> None:
+    class EmptyData:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            return ()
+
+    args = [
+        "daily-history",
+        "--symbol",
+        "510300",
+        "--start-date",
+        "2026-01-01",
+        "--end-date",
+        "2026-01-03",
+        "--database",
+        postgres_url,
+        "--confirm-history-persistence-permitted",
+    ]
+    assert main(args, market_data=EmptyData()) == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+    class UnexpectedData:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            raise AssertionError("complete empty coverage should be reused")
+
+    assert main(args, market_data=UnexpectedData()) == 0
+    assert json.loads(capsys.readouterr().out) == []

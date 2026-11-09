@@ -45,3 +45,30 @@ def migrate(db: psycopg.Connection) -> None:
             PRIMARY KEY (symbol, start_date, end_date)
         )
     """)
+
+
+def migrate_daily_trading_date(db: psycopg.Connection) -> None:
+    """Make the shared daily key match its symbol/trading-date identity."""
+    db.execute(
+        "ALTER TABLE shared_daily_bars ADD COLUMN IF NOT EXISTS trading_date TEXT"
+    )
+    db.execute(
+        "UPDATE shared_daily_bars SET trading_date=left(timestamp, 10) "
+        "WHERE trading_date IS NULL"
+    )
+    db.execute("""
+        DELETE FROM shared_daily_bars
+        WHERE ctid IN (
+            SELECT ctid FROM (
+                SELECT ctid, row_number() OVER (
+                    PARTITION BY symbol, trading_date ORDER BY timestamp DESC
+                ) AS position
+                FROM shared_daily_bars
+            ) ranked WHERE position > 1
+        )
+    """)
+    db.execute("ALTER TABLE shared_daily_bars ALTER COLUMN trading_date SET NOT NULL")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS shared_daily_bars_symbol_trading_date_idx "
+        "ON shared_daily_bars (symbol, trading_date)"
+    )
