@@ -460,7 +460,10 @@ class JobRepository:
                     "WHERE job_id=%s ORDER BY bar_date",
                     (job_id,),
                 ).fetchall()
-                for (bar,) in bars:
+                for bar_row in bars:
+                    bar = bar_row["bar_json"]
+                    if isinstance(bar, str):
+                        bar = json.loads(bar)
                     db.execute(
                         "INSERT INTO shared_daily_bars VALUES (%s, %s, %s) "
                         "ON CONFLICT(symbol, timestamp) "
