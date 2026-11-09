@@ -41,7 +41,6 @@ Starlette 测试客户端使用开发依赖 `httpx2`；`uv sync --locked` 会一
 uv run pytest -m live
 ```
 
-
 实时测试不会跳过缺失配置、连接失败、权限不足或必要行情数据缺失的情况；这些问题会使测试失败。
 
 运行 `npm run format` 可格式化 JSON、YAML 和 TOML 文件。
