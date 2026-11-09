@@ -154,17 +154,39 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
             self.calls.append(start_date.year)
             if start_date.year == 2024 and self.fail:
                 raise PermissionError("secret credentials")
-            return (
+            bars = [
                 DailyBar(
                     symbol=symbol,
-                    timestamp=datetime(start_date.year, 1, 2, tzinfo=SHANGHAI),
+                    timestamp=datetime(2023, 1, 2, tzinfo=SHANGHAI),
                     open=Decimal("1"),
                     high=Decimal("1"),
                     low=Decimal("1"),
                     close=Decimal("1"),
                     volume=100,
                 ),
-            )
+                DailyBar(
+                    symbol=symbol,
+                    timestamp=datetime(2023, 1, 3, tzinfo=SHANGHAI),
+                    open=Decimal("2"),
+                    high=Decimal("2"),
+                    low=Decimal("2"),
+                    close=Decimal("2"),
+                    volume=200,
+                ),
+            ]
+            if start_date.year == 2024:
+                return (
+                    DailyBar(
+                        symbol=symbol,
+                        timestamp=datetime(2024, 1, 2, tzinfo=SHANGHAI),
+                        open=Decimal("1"),
+                        high=Decimal("1"),
+                        low=Decimal("1"),
+                        close=Decimal("1"),
+                        volume=100,
+                    ),
+                )
+            return tuple(bars)
 
     provider = Provider()
     app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
@@ -214,9 +236,12 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         "563360", date(2023, 1, 1), date(2024, 12, 31)
     )
     assert history is not None
-    assert [(bar.timestamp.year, bar.close) for bar in history] == [
-        (2023, Decimal("9")),
-        (2024, Decimal("1")),
+    assert [
+        (bar.timestamp.date(), bar.close) for bar in history
+    ] == [
+        (date(2023, 1, 2), Decimal("9")),
+        (date(2023, 1, 3), Decimal("2")),
+        (date(2024, 1, 2), Decimal("1")),
     ]
     with psycopg.connect(postgres_url) as db:
         staged = db.execute(
