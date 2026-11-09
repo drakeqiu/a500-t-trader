@@ -245,11 +245,12 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         (date(2024, 1, 2), Decimal("1")),
     ]
     with psycopg.connect(postgres_url) as db:
-        staged = db.execute(
+        staged_row = db.execute(
             "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
             (first["id"],),
-        ).fetchone()[0]
-    assert staged == 0
+        ).fetchone()
+    assert staged_row is not None
+    assert staged_row[0] == 0
     assert provider.calls == [2023, 2024, 2024]
 
 
@@ -360,14 +361,18 @@ def test_failed_publication_rolls_back_status_coverage_and_staging(
             is None
         )
         with psycopg.connect(postgres_url) as db:
-            published = db.execute(
+            published_row = db.execute(
                 "SELECT count(*) FROM shared_daily_bars WHERE symbol=%s",
                 ("563360",),
-            ).fetchone()[0]
-            staged = db.execute(
+            ).fetchone()
+            staged_row = db.execute(
                 "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
                 (job["id"],),
-            ).fetchone()[0]
+            ).fetchone()
+            assert published_row is not None
+            assert staged_row is not None
+            published = published_row[0]
+            staged = staged_row[0]
             db.execute("DROP TRIGGER reject_history_publish ON shared_daily_bars")
             db.execute("DROP FUNCTION reject_history_publish()")
             db.execute(

@@ -155,15 +155,17 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
         == ()
     )
     with psycopg.connect(postgres_url) as db:
-        staged = db.execute(
+        staged_row = db.execute(
             "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
             (job["id"],),
-        ).fetchone()[0]
-        result_table = db.execute(
+        ).fetchone()
+        result_table_row = db.execute(
             "SELECT to_regclass('daily_history_job_bars')"
-        ).fetchone()[0]
-    assert staged == 0
-    assert result_table is None
+        ).fetchone()
+    assert staged_row is not None
+    assert result_table_row is not None
+    assert staged_row[0] == 0
+    assert result_table_row[0] is None
 
     refreshed = _bar("563360", 2, "9", year=2023)
     repository.save_daily_history((refreshed,), date(2023, 1, 1), date(2023, 12, 31))
@@ -249,8 +251,9 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
         is None
     )
     with psycopg.connect(postgres_url) as db:
-        staged = db.execute(
+        staged_row = db.execute(
             "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
             (job["id"],),
-        ).fetchone()[0]
-    assert staged == 0
+        ).fetchone()
+    assert staged_row is not None
+    assert staged_row[0] == 0
