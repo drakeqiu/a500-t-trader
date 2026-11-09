@@ -3,6 +3,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import psycopg
 from fastapi.testclient import TestClient
 
@@ -30,7 +32,7 @@ def test_jobs_are_private_and_completed_dates_required(postgres_url: str) -> Non
         job_id = created.json()["id"]
         assert client.get(f"/v1/jobs/{job_id}", headers=bob).status_code == 404
         assert (
-            client.get(f"/v1/jobs/{job_id}/results", headers=alice).status_code == 409
+            client.get(f"/v1/jobs/{job_id}/results", headers=alice).status_code == 404
         )
         assert (
             client.post(f"/v1/jobs/{job_id}/cancel", headers=alice).status_code == 200
@@ -89,7 +91,7 @@ def test_submission_persists_queued_job_with_pending_outbox(
     assert persisted == ("queued", None)
 
 
-def test_job_returns_paginated_snapshot_after_worker_execution(
+def test_job_publishes_shared_history_without_result_endpoint(
     postgres_url: str,
 ) -> None:
     class Provider:
@@ -125,19 +127,21 @@ def test_job_returns_paginated_snapshot_after_worker_execution(
         status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
         assert status["status"] == "succeeded"
         assert status["completed_chunks"] == status["total_chunks"] == 2
-        first = client.get(
-            f"/v1/jobs/{job['id']}/results?limit=1&offset=0", headers=headers
-        ).json()
-        second = client.get(
-            f"/v1/jobs/{job['id']}/results?limit=1&offset=1", headers=headers
-        ).json()
-        assert first["total"] == second["total"] == 2
-        assert first["bars"][0]["close"] == "1.25"
-        assert first["bars"][0]["timestamp"].startswith("2023-01-02")
-        assert second["bars"][0]["timestamp"].startswith("2024-01-02")
+        assert not {"symbol", "start_date", "end_date"} & status.keys()
+        assert not any("result" in key or "bar" in key for key in status)
+        assert client.get(
+            f"/v1/jobs/{job['id']}/results", headers=headers
+        ).status_code == 404
 
+    from a500_t_trader.backtest import BacktestRepository
 
-def test_failed_job_hides_partial_results_and_resubmission_reuses_cache(
+    history = BacktestRepository(postgres_url).get_shared_daily_history(
+        "563360", date(2023, 1, 1), date(2024, 12, 31)
+    )
+    assert history is not None
+    assert [bar.timestamp.year for bar in history] == [2023, 2024]
+
+def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
     postgres_url: str,
 ) -> None:
     class Provider:
@@ -150,7 +154,17 @@ def test_failed_job_hides_partial_results_and_resubmission_reuses_cache(
             self.calls.append(start_date.year)
             if start_date.year == 2024 and self.fail:
                 raise PermissionError("secret credentials")
-            return ()
+            return (
+                DailyBar(
+                    symbol=symbol,
+                    timestamp=datetime(start_date.year, 1, 2, tzinfo=SHANGHAI),
+                    open=Decimal("1"),
+                    high=Decimal("1"),
+                    low=Decimal("1"),
+                    close=Decimal("1"),
+                    volume=100,
+                ),
+            )
 
     provider = Provider()
     app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
@@ -168,17 +182,28 @@ def test_failed_job_hides_partial_results_and_resubmission_reuses_cache(
         assert failed["status"] == "failed"
         assert failed["completed_chunks"] == 1
         assert "secret" not in failed["error"]
-        assert (
-            client.get(f"/v1/jobs/{first['id']}/results", headers=headers).status_code
-            == 409
-        )
+        assert client.get(
+            f"/v1/jobs/{first['id']}/results", headers=headers
+        ).status_code == 404
         provider.fail = False
         second = client.post("/v1/jobs", headers=headers, json=body).json()
         assert process_one(JobRepository(postgres_url), lambda: provider)
-        result = client.get(f"/v1/jobs/{second['id']}/results", headers=headers)
-        assert result.status_code == 200
-        assert result.json()["bars"] == []
-        assert provider.calls == [2023, 2024, 2024]
+        assert client.get(
+            f"/v1/jobs/{second['id']}/results", headers=headers
+        ).status_code == 404
+    from a500_t_trader.backtest import BacktestRepository
+
+    assert BacktestRepository(postgres_url).get_shared_daily_history(
+        "563360", date(2023, 1, 1), date(2024, 12, 31)
+    ) is not None
+    with psycopg.connect(postgres_url) as db:
+        staged = db.execute(
+            "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+            (first["id"],),
+        ).fetchone()[0]
+    assert staged == 0
+    assert provider.calls == [2023, 2024, 2024]
+
 
 
 def test_running_job_reports_query_stage_and_cooperative_cancellation(
@@ -229,3 +254,80 @@ def test_running_job_reports_query_stage_and_cooperative_cancellation(
         status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
         assert status["status"] == "cancelled"
         assert calls == [2023]
+
+def test_failed_publication_rolls_back_status_coverage_and_staging(
+    postgres_url: str,
+) -> None:
+    from a500_t_trader.backtest import BacktestRepository
+
+    BacktestRepository(postgres_url)
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    headers = {"Authorization": "Bearer alice"}
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            return (
+                DailyBar(
+                    symbol=symbol,
+                    timestamp=datetime(2023, 1, 2, tzinfo=SHANGHAI),
+                    open=Decimal("1"),
+                    high=Decimal("1"),
+                    low=Decimal("1"),
+                    close=Decimal("1"),
+                    volume=1,
+                ),
+            )
+
+    with TestClient(app) as client:
+        job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+            },
+        ).json()
+        with psycopg.connect(postgres_url) as db:
+            db.execute(
+                """CREATE FUNCTION reject_history_publish() RETURNS trigger
+                LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'blocked'; END $$"""
+            )
+            db.execute(
+                """CREATE TRIGGER reject_history_publish BEFORE INSERT ON
+                shared_daily_bars FOR EACH ROW EXECUTE FUNCTION reject_history_publish()"""
+            )
+        with pytest.raises(psycopg.Error):
+            process_one(JobRepository(postgres_url), lambda: Provider())
+        status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+        assert status["status"] == "running"
+        assert BacktestRepository(postgres_url).get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2023, 12, 31)
+        ) is None
+        with psycopg.connect(postgres_url) as db:
+            published = db.execute(
+                "SELECT count(*) FROM shared_daily_bars WHERE symbol=%s",
+                ("563360",),
+            ).fetchone()[0]
+            staged = db.execute(
+                "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                (job["id"],),
+            ).fetchone()[0]
+            db.execute("DROP TRIGGER reject_history_publish ON shared_daily_bars")
+            db.execute("DROP FUNCTION reject_history_publish()")
+            db.execute(
+                "UPDATE daily_history_jobs SET lease_until=now()-interval '1 second' "
+                "WHERE id=%s",
+                (job["id"],),
+            )
+        assert published == 0
+        assert staged == 1
+        assert process_one(JobRepository(postgres_url), lambda: Provider())
+        status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+        assert status["status"] == "succeeded"
+        assert BacktestRepository(postgres_url).get_shared_daily_history(
+            "563360", date(2023, 1, 1), date(2023, 12, 31)
+        ) is not None

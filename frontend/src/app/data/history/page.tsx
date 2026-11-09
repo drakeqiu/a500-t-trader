@@ -490,12 +490,6 @@ function HistoryPage() {
                     return (
                       <article className="history-job" key={job.id}>
                         <div className="history-job-head">
-                          <div>
-                            <h3>{job.symbol}</h3>
-                            <p>
-                              {job.start_date} 至 {job.end_date}
-                            </p>
-                          </div>
                           <span className={`history-status is-${job.status}`}>
                             {statusLabels[job.status]}
                           </span>
@@ -577,23 +571,6 @@ function HistoryPage() {
                               onClick={() => cancel(job)}
                             >
                               {job.cancel_requested ? "正在取消…" : "请求取消"}
-                            </button>
-                          )}
-                          {job.status === "failed" && (
-                            <button
-                              className="trade-import-secondary"
-                              disabled={busy}
-                              onClick={() => {
-                                setSymbol(job.symbol);
-                                setStartDate(job.start_date);
-                                setEndDate(job.end_date);
-                                setNotice(
-                                  "已载入原任务参数；请确认后创建新的拉取任务。后端不支持原任务重试。",
-                                );
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                            >
-                              重新拉取
                             </button>
                           )}
                           {terminal.has(job.status) && (

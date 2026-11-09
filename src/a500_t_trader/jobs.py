@@ -63,8 +63,8 @@ def _job(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 _COLUMNS = (
-    "id, symbol, start_date, end_date, status, stage, cancel_requested, total_chunks, "
-    "completed_chunks, created_at, updated_at, finished_at, error"
+    "id, status, stage, cancel_requested, total_chunks, completed_chunks, "
+    "created_at, updated_at, finished_at, error"
 )
 
 
@@ -106,12 +106,7 @@ class JobRepository:
                 ON daily_history_job_outbox (available_at, created_at)
                 WHERE published_at IS NULL"""
             )
-            db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_bars (
-                job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
-                    ON DELETE CASCADE,
-                bar_date DATE NOT NULL, bar_json JSONB NOT NULL,
-                PRIMARY KEY (job_id, bar_date)
-            )""")
+            db.execute("DROP TABLE IF EXISTS daily_history_job_bars")
             # Separate from the CLI cache: its legacy ranges have no acquisition time.
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_cache (
                 symbol TEXT NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL,
@@ -207,42 +202,6 @@ class JobRepository:
             ).fetchone()
         return _job(row)
 
-    def results(
-        self, subject: str, job_id: str, limit: int, offset: int
-    ) -> dict[str, Any] | None:
-        if limit <= 0 or offset < 0:
-            raise ValueError("limit must be positive and offset non-negative")
-        try:
-            identifier = uuid.UUID(str(job_id))
-        except ValueError, TypeError, AttributeError:
-            return None
-        with self._connect() as db:
-            job = db.execute(
-                "SELECT status FROM daily_history_jobs "
-                "WHERE subject=%s AND id=%s FOR SHARE",
-                (subject, identifier),
-            ).fetchone()
-            if job is None:
-                return None
-            if job["status"] != "succeeded":
-                raise ValueError("job has not succeeded")
-            total_row = db.execute(
-                "SELECT count(*) AS total FROM daily_history_job_bars WHERE job_id=%s",
-                (identifier,),
-            ).fetchone()
-            rows = db.execute(
-                "SELECT bar_json FROM daily_history_job_bars WHERE job_id=%s "
-                "ORDER BY bar_date LIMIT %s OFFSET %s",
-                (identifier, limit, offset),
-            ).fetchall()
-        assert total_row is not None
-        return {
-            "job_id": str(identifier),
-            "total": total_row["total"],
-            "limit": limit,
-            "offset": offset,
-            "bars": [row["bar_json"] for row in rows],
-        }
 
     def backfill_queued_jobs(self) -> int:
         """Create dispatch records for queued jobs written by older API versions."""
@@ -314,16 +273,20 @@ class JobRepository:
                 job_id,
                 int((time.monotonic() - started) * 1000),
             )
-            # A cancelled task with a dead worker is finalized on recovery.
-            db.execute(
+            cancelled = db.execute(
                 """UPDATE daily_history_jobs SET status='cancelled',
                 stage='finished', finished_at=now(), updated_at=now(),
                 lease_token=NULL, lease_until=NULL
                 WHERE status='running' AND cancel_requested
                     AND (lease_until < now() OR lease_until IS NULL)
-                    AND (%s::uuid IS NULL OR id=%s)""",
+                    AND (%s::uuid IS NULL OR id=%s) RETURNING id""",
                 (job_id, job_id),
-            )
+            ).fetchall()
+            for cancelled_row in cancelled:
+                db.execute(
+                    "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                    (cancelled_row["id"],),
+                )
             _LOG.info("History claim candidate query starting job_id=%s", job_id)
             row = db.execute(
                 """WITH candidate AS (
@@ -446,11 +409,6 @@ class JobRepository:
                             Jsonb(bar),
                         ),
                     )
-                db.execute(
-                    """INSERT INTO daily_history_job_bars (job_id,bar_date,bar_json)
-                    VALUES (%s,%s,%s)""",
-                    (job_id, _bar_date(bar["timestamp"]), Jsonb(bar)),
-                )
             db.execute(
                 """UPDATE daily_history_jobs SET completed_chunks=completed_chunks+1,
                 updated_at=now() WHERE id=%s""",
@@ -476,42 +434,46 @@ class JobRepository:
                 RETURNING status, symbol, start_date, end_date""",
                 (error, error, job_id, token, error),
             ).fetchone()
-            if row is None or row["status"] != "succeeded":
+            if row is None:
                 return
-            db.execute("SELECT pg_advisory_xact_lock(500001)")
-            bars = db.execute(
-                "SELECT bar_json FROM daily_history_job_fetched_bars "
-                "WHERE job_id=%s ORDER BY bar_date",
-                (job_id,),
-            ).fetchall()
-            for bar_row in bars:
-                bar = bar_row["bar_json"]
-                if isinstance(bar, str):
-                    bar = json.loads(bar)
-                trading_date = _bar_date(bar["timestamp"])
+            if row["status"] == "succeeded":
+                db.execute("SELECT pg_advisory_xact_lock(500001)")
+                bars = db.execute(
+                    "SELECT bar_json FROM daily_history_job_fetched_bars "
+                    "WHERE job_id=%s ORDER BY bar_date",
+                    (job_id,),
+                ).fetchall()
+                for bar_row in bars:
+                    bar = bar_row["bar_json"]
+                    if isinstance(bar, str):
+                        bar = json.loads(bar)
+                    trading_date = _bar_date(bar["timestamp"])
+                    db.execute(
+                        """INSERT INTO shared_daily_bars
+                        (symbol,timestamp,bar_json,trading_date)
+                        VALUES (%s,%s,%s,%s) ON CONFLICT (symbol,trading_date)
+                        DO UPDATE SET timestamp=excluded.timestamp,
+                        bar_json=excluded.bar_json""",
+                        (
+                            row["symbol"],
+                            bar["timestamp"],
+                            json.dumps(bar, separators=(",", ":")),
+                            trading_date.isoformat(),
+                        ),
+                    )
                 db.execute(
-                    """INSERT INTO shared_daily_bars
-                    (symbol,timestamp,bar_json,trading_date)
-                    VALUES (%s,%s,%s,%s) ON CONFLICT (symbol,trading_date)
-                    DO UPDATE SET timestamp=excluded.timestamp,
-                    bar_json=excluded.bar_json""",
+                    "INSERT INTO shared_daily_history_ranges "
+                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                     (
                         row["symbol"],
-                        bar["timestamp"],
-                        json.dumps(bar, separators=(",", ":")),
-                        trading_date.isoformat(),
+                        row["start_date"].isoformat(),
+                        row["end_date"].isoformat(),
                     ),
                 )
             db.execute(
-                "INSERT INTO shared_daily_history_ranges "
-                "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                (
-                    row["symbol"],
-                    row["start_date"].isoformat(),
-                    row["end_date"].isoformat(),
-                ),
+                "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                (job_id,),
             )
-
     def cleanup(self, retention_days: int) -> None:
         with self._connect() as db:
             db.execute(

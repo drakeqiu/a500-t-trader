@@ -540,17 +540,6 @@ def create_fixture(port: int) -> FastAPI:
         job["state"] = "cancelled"
         return job
 
-    @app.get("/v1/jobs/{job_id}/results")
-    async def get_job_results(
-        job_id: str,
-        limit: int = Query(default=100),
-        offset: int = Query(default=0),
-        authorization: str | None = Header(default=None),
-    ):
-        require_subject(authorization)
-        if job_id not in jobs:
-            raise HTTPException(404, "Job not found")
-        return {"items": [], "total": 0, "limit": limit, "offset": offset}
 
     @app.post("/__fixture/signals/{status}")
     async def publish(status: str):

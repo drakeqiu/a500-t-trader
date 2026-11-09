@@ -9,7 +9,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -98,22 +98,6 @@ def create_app(
         if job is None:
             raise HTTPException(404, "Job not found")
         return respond(job)
-
-    @app.get("/v1/jobs/{job_id}/results")
-    def results(
-        job_id: UUID,
-        limit: int = Query(default=100, ge=1, le=1000),
-        offset: int = Query(default=0, ge=0),
-        authorization: str | None = Header(default=None),
-    ) -> JSONResponse:
-        subject = _authenticated_subject(auth, authorization)
-        try:
-            result = store.results(subject, str(job_id), limit, offset)
-        except ValueError as exc:
-            raise HTTPException(409, "Job has not succeeded") from exc
-        if result is None:
-            raise HTTPException(404, "Job not found")
-        return respond(result)
 
     return app
 

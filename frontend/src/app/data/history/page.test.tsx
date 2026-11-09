@@ -28,9 +28,6 @@ import HistoryPage from "@/app/data/history/page";
 const job: HistoryJob = {
   type: "daily_history",
   id: "job-1",
-  symbol: "SH.510500",
-  start_date: "2025-01-01",
-  end_date: "2025-01-02",
   status: "queued",
   stage: "queued",
   cancel_requested: false,
