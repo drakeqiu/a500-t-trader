@@ -1,0 +1,7 @@
+# Shared daily history is independent of download jobs
+
+Status: Accepted
+
+Daily-history jobs currently own their result bars, so consumers such as RSI/EMA calculations must retain a job ID and lose those bars when the job expires. Use the existing `shared_daily_bars` store as the canonical, cross-subject daily-history source, keyed by security and trading date; record successful queried date ranges separately, including ranges that return no bars. Reads by security and inclusive date range may combine overlapping or adjacent coverage ranges, and report complete only when the whole requested range is covered; return observed bars without synthesizing missing dates. A newly fetched bar replaces the stored value for the same security and date.
+
+Keep each successful job's result as its fixed, subject-scoped snapshot, separate from the shared current bars, preserving the existing job API contract. Persist validated fetched bars and their coverage to the shared store independently of job lifetime; job cleanup must not delete shared bars or coverage. Do not automatically expire shared history until a separate retention policy is decided. Backend consumers read shared history by security and date range and check coverage; this decision does not add an HTTP API. The separate shared store costs duplicate storage for task snapshots, but decouples reusable market history from task ownership and retention.
