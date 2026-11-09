@@ -3,9 +3,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-import pytest
-
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 from a500_t_trader.jobs import JobRepository, process_one
@@ -345,7 +344,8 @@ def test_failed_publication_rolls_back_status_coverage_and_staging(
             )
             db.execute(
                 """CREATE TRIGGER reject_history_publish BEFORE INSERT ON
-                shared_daily_bars FOR EACH ROW EXECUTE FUNCTION reject_history_publish()"""
+                shared_daily_bars FOR EACH ROW EXECUTE FUNCTION
+                reject_history_publish()"""
             )
         with pytest.raises(psycopg.Error):
             process_one(JobRepository(postgres_url), lambda: Provider())

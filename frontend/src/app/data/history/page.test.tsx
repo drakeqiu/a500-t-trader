@@ -1,5 +1,12 @@
 import type React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryJob } from "@/lib/a500-client";
 
@@ -19,9 +26,14 @@ vi.mock("@/lib/session", () => ({
   getAccessToken: () => "memory-token",
   subscribeSession: () => () => undefined,
 }));
-vi.mock("@/lib/oidc", () => ({ beginAuthorization: vi.fn(), configurationReady: true }));
+vi.mock("@/lib/oidc", () => ({
+  beginAuthorization: vi.fn(),
+  configurationReady: true,
+}));
 vi.mock("@/components/app-shell", () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  AppShell: ({ children }: { children: React.ReactNode }) => (
+    <main>{children}</main>
+  ),
 }));
 import HistoryPage from "@/app/data/history/page";
 
@@ -51,15 +63,23 @@ describe("history task page", () => {
   it("does not present an accepted job as completed and uses non-percent status feedback without progress data", async () => {
     client.createHistoryJob.mockResolvedValue(job);
     render(<HistoryPage />);
-    fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
+    fireEvent.change(await screen.findByLabelText("证券代码"), {
+      target: { value: "SH.510500" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
     expect(
-      await screen.findByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。"),
+      await screen.findByText(
+        "任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。",
+      ),
     ).toBeTruthy();
     expect(screen.getByText("等待执行")).toBeTruthy();
-    expect(screen.getByText("正在等待后端处理；当前没有可用的精确百分比。")).toBeTruthy();
+    expect(
+      screen.getByText("正在等待后端处理；当前没有可用的精确百分比。"),
+    ).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(window.localStorage.getItem("a500.history-job-ids")).toContain("job-1");
+    expect(window.localStorage.getItem("a500.history-job-ids")).toContain(
+      "job-1",
+    );
   });
 
   it("shows progress only when the backend reports valid chunk totals", async () => {
@@ -70,16 +90,28 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 1,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id]),
+    );
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
-    expect(await screen.findByRole("progressbar", { name: "任务进度 25%" })).toBeTruthy();
+    expect(
+      await screen.findByRole("progressbar", { name: "任务进度 25%" }),
+    ).toBeTruthy();
     expect(screen.getByText("25%")).toBeTruthy();
   });
 
   it("restores task state after refresh and shows backend failure details", async () => {
-    const failed = { ...job, status: "failed" as const, error: "供应商连接超时" };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    const failed = {
+      ...job,
+      status: "failed" as const,
+      error: "供应商连接超时",
+    };
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id]),
+    );
     client.getHistoryJob.mockResolvedValue(failed);
     render(<HistoryPage />);
     expect(await screen.findByText("失败")).toBeTruthy();
@@ -91,7 +123,6 @@ describe("history task page", () => {
     );
   });
 
-
   it("keeps succeeded jobs in the task list without fetching or showing task-bound bars", async () => {
     const succeeded = {
       ...job,
@@ -99,7 +130,10 @@ describe("history task page", () => {
       total_chunks: 1,
       completed_chunks: 1,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id]),
+    );
     client.getHistoryJob.mockResolvedValue(succeeded);
     render(<HistoryPage />);
     expect(await screen.findByText("已完成")).toBeTruthy();
@@ -109,21 +143,33 @@ describe("history task page", () => {
     expect(client.getHistoryJob).toHaveBeenCalled();
   });
   it("keeps failed status lookups visible and allows unresolved task IDs to be retried", async () => {
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id, "job-2"]));
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id, "job-2"]),
+    );
     client.getHistoryJob.mockImplementation((_token: string, id: string) =>
-      id === job.id ? Promise.resolve(job) : Promise.reject(new Error("网络不可用")),
+      id === job.id
+        ? Promise.resolve(job)
+        : Promise.reject(new Error("网络不可用")),
     );
     render(<HistoryPage />);
     expect(await screen.findByText("无法确认任务状态")).toBeTruthy();
     expect(screen.getByText(/网络不可用/)).toBeTruthy();
-    client.getHistoryJob.mockImplementation(() => Promise.resolve({ ...job, id: "job-2" }));
+    client.getHistoryJob.mockImplementation(() =>
+      Promise.resolve({ ...job, id: "job-2" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "重新查询" }));
-    await waitFor(() => expect(screen.queryByText("无法确认任务状态")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("无法确认任务状态")).toBeNull(),
+    );
     expect(screen.getByText("job-2")).toBeTruthy();
   });
 
   it("keeps the last confirmed task state explicit when a manual refresh fails", async () => {
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id]),
+    );
     client.getHistoryJob
       .mockResolvedValueOnce(job)
       .mockRejectedValueOnce(new Error("服务暂不可用"));
@@ -131,10 +177,11 @@ describe("history task page", () => {
     expect(await screen.findByText("等待执行")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
     expect(await screen.findByText("状态查询失败：服务暂不可用")).toBeTruthy();
-    expect(screen.getByText("以下为最近一次成功读取的后端状态，并非最新状态。")).toBeTruthy();
+    expect(
+      screen.getByText("以下为最近一次成功读取的后端状态，并非最新状态。"),
+    ).toBeTruthy();
     expect(screen.getByText("等待执行")).toBeTruthy();
   });
-
 
   it("does not send duplicate create requests from rapid repeated clicks", async () => {
     let finish: (value: HistoryJob) => void = () => undefined;
@@ -145,7 +192,9 @@ describe("history task page", () => {
         }),
     );
     render(<HistoryPage />);
-    fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
+    fireEvent.change(await screen.findByLabelText("证券代码"), {
+      target: { value: "SH.510500" },
+    });
     const submit = screen.getByRole("button", { name: "创建任务" });
     fireEvent.click(submit);
     fireEvent.click(submit);
@@ -154,13 +203,21 @@ describe("history task page", () => {
     expect(await screen.findByText("等待执行")).toBeTruthy();
   });
   it("warns that a timed-out create may already exist and blocks blind resubmission", async () => {
-    client.createHistoryJob.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    client.createHistoryJob.mockRejectedValue(
+      new DOMException("timed out", "TimeoutError"),
+    );
     render(<HistoryPage />);
-    fireEvent.change(await screen.findByLabelText("证券代码"), { target: { value: "SH.510500" } });
+    fireEvent.change(await screen.findByLabelText("证券代码"), {
+      target: { value: "SH.510500" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
-    expect(await screen.findByText(/后端可能已创建任务，但未返回任务编号/)).toBeTruthy();
     expect(
-      screen.queryByText("任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。"),
+      await screen.findByText(/后端可能已创建任务，但未返回任务编号/),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "任务已提交，正在等待后端执行。提交成功不代表行情已拉取完成。",
+      ),
     ).toBeNull();
     expect(client.createHistoryJob).toHaveBeenCalledTimes(1);
   });
@@ -174,17 +231,26 @@ describe("history task page", () => {
       total_chunks: 10,
       completed_chunks: 3,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    window.localStorage.setItem(
+      "a500.history-job-ids",
+      JSON.stringify([job.id]),
+    );
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
     await act(async () => {
       await Promise.resolve();
     });
     expect(screen.getByText("30%")).toBeTruthy();
-    expect(screen.queryByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeNull();
+    expect(
+      screen.queryByText(
+        "后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。",
+      ),
+    ).toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_001);
     });
-    expect(screen.getByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeTruthy();
+    expect(
+      screen.getByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。"),
+    ).toBeTruthy();
   });
 });

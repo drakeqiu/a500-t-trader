@@ -3,9 +3,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from fastapi.testclient import TestClient
-
 import psycopg
+from fastapi.testclient import TestClient
 
 from a500_t_trader.backtest import BacktestRepository
 from a500_t_trader.jobs import JobRepository, process_one
