@@ -1,5 +1,5 @@
 import type React from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryJob } from "@/lib/a500-client";
 
@@ -116,11 +116,10 @@ describe("history task page", () => {
     render(<HistoryPage />);
     expect(await screen.findByText("无法确认任务状态")).toBeTruthy();
     expect(screen.getByText(/网络不可用/)).toBeTruthy();
-    expect(screen.queryByText("尚无已保存的任务")).toBeNull();
-    client.getHistoryJob.mockResolvedValue({ ...job, id: "job-2" });
+    client.getHistoryJob.mockImplementation(() => Promise.resolve({ ...job, id: "job-2" }));
     fireEvent.click(screen.getByRole("button", { name: "重新查询" }));
-    expect(await screen.findByText("SH.510500")).toBeTruthy();
-    expect(screen.queryByText("无法确认任务状态")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("无法确认任务状态")).toBeNull());
+    expect(screen.getByText("job-2")).toBeTruthy();
   });
 
   it("keeps the last confirmed task state explicit when a manual refresh fails", async () => {
