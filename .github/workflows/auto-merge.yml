@@ -2,8 +2,15 @@
 name: Auto-merge
 
 on:
-  pull_request:
-    types: [labeled, unlabeled]
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+      - labeled
+      - unlabeled
   workflow_run:
     workflows: [CI, Compose E2E]
     types: [completed]
@@ -17,25 +24,27 @@ concurrency:
   group: >-
     automerge-${{ github.event.pull_request.number ||
     github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   auto-merge:
     name: Manage opt-in auto-merge
     if: >-
       github.event_name == 'workflow_run' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' ||
+      (github.event.action == 'unlabeled' &&
       github.event.label.name == 'automerge')
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    timeout-minutes: 5
     steps:
-      - name: Enable squash auto-merge after required checks pass
-        if: >-
-          github.event_name == 'workflow_run' ||
-          github.event.action == 'labeled'
+      - name: Label and manage auto-merge for the current commit
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha ||
                 github.event.workflow_run.head_sha }}
@@ -45,7 +54,17 @@ jobs:
               "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" |
               jq -r --arg sha "$HEAD_SHA" --arg repo "$GITHUB_REPOSITORY" \
                 '[.[] | select(.state == "open" and .head.sha == $sha and
-                  .head.repo.full_name == $repo)] | first | .number // empty')
+                  .head.repo.full_name == $repo and .base.ref == "main")] |
+                 first | .number // empty')
+          elif [[ "$EVENT_ACTION" == unlabeled ]]; then
+            if [[ "$EVENT_LABEL" == automerge ]]; then
+              gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                --disable-auto
+            fi
+            exit 0
+          elif [[ "$EVENT_ACTION" == labeled &&
+                  "$EVENT_LABEL" != automerge ]]; then
+            exit 0
           fi
 
           if [[ -z "$PR_NUMBER" ]]; then
@@ -53,17 +72,36 @@ jobs:
             exit 0
           fi
 
-          default_branch=$(gh api \
-            "repos/$GITHUB_REPOSITORY" --jq .default_branch)
           pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json state,headRefOid,baseRefName,labels)
-          if ! jq -e \
-            --arg sha "$HEAD_SHA" \
-            --arg branch "$default_branch" \
-            '.state == "OPEN" and .headRefOid == $sha and
-             .baseRefName == $branch and
-             any(.labels[]; .name == "automerge")' <<<"$pr" >/dev/null; then
-            echo "Pull request is closed or no longer eligible for auto-merge."
+            --json state,headRefOid,baseRefName,isDraft,labels)
+          if ! jq -e --arg sha "$HEAD_SHA" '
+            .state == "OPEN" and .headRefOid == $sha and .baseRefName == "main"
+          ' <<<"$pr" >/dev/null; then
+            echo "Pull request is no longer open on main at this commit."
+            exit 0
+          fi
+
+          # Token-created label events do not start another workflow run.
+          if [[ "$EVENT_NAME" == pull_request_target ]] &&
+            ! jq -e 'any(.labels[]; .name == "automerge")' \
+              <<<"$pr" >/dev/null; then
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --add-label automerge
+          fi
+          if [[ "$EVENT_NAME" == pull_request_target &&
+                "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]]; then
+            echo "Fork pull request labeled; automatic merging is disabled."
+            exit 0
+          fi
+
+          pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json state,headRefOid,baseRefName,isDraft,labels)
+          if ! jq -e --arg sha "$HEAD_SHA" '
+            .state == "OPEN" and .headRefOid == $sha and
+            .baseRefName == "main" and .isDraft == false and
+            any(.labels[]; .name == "automerge")
+          ' <<<"$pr" >/dev/null; then
+            echo "Pull request is draft, changed, or opted out."
             exit 0
           fi
 
@@ -72,78 +110,35 @@ jobs:
             "Frontend checks and tests"
             "Market data and Keycloak E2E"
           )
-          max_attempts=480
-          if [[ "$EVENT_NAME" == pull_request ]]; then
-            attempts=$max_attempts
-          else
-            attempts=1
-          fi
-
-          for ((attempt = 1; attempt <= attempts; attempt++)); do
-            checks=$(gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --json name,state || true)
-            checks=${checks:-'[]'}
-            all_succeeded=true
-            wait_for_checks=false
-            for name in "${required_checks[@]}"; do
-              state=$(jq -r --arg name "$name" '
-                [.[] | select(.name == $name)] |
-                if length == 1 then .[0].state else "MISSING_OR_DUPLICATE" end
-              ' <<<"$checks")
-              case "$state" in
-                SUCCESS) ;;
-                PENDING|QUEUED|IN_PROGRESS|WAITING|EXPECTED|REQUESTED|\
-                  MISSING_OR_DUPLICATE)
-                  all_succeeded=false
-                  wait_for_checks=true
-                  echo "Required check \"$name\" is $state."
-                  ;;
-                *)
-                  all_succeeded=false
-                  printf 'Required check "%s" is %s; auto-merge disabled.\n' \
-                    "$name" "$state"
-                  ;;
-              esac
-            done
-
-            if [[ "$all_succeeded" == true ]]; then
-              latest_pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-                --json state,headRefOid,baseRefName,labels)
-              if ! jq -e \
-                --arg sha "$HEAD_SHA" \
-                --arg branch "$default_branch" \
-                '.state == "OPEN" and .headRefOid == $sha and
-                 .baseRefName == $branch and
-                 any(.labels[]; .name == "automerge")' \
-                <<<"$latest_pr" >/dev/null; then
-                echo "Pull request changed or opted out before auto-merge."
-                exit 0
-              fi
-              gh pr merge "$PR_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --auto \
-                --squash
+          # gh exits 1 for failed checks and 8 for pending checks.
+          check_status=0
+          checks=$(gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json name,state) || check_status=$?
+          case "$check_status" in
+            0|1|8) ;;
+            *) exit "$check_status" ;;
+          esac
+          checks=${checks:-'[]'}
+          for name in "${required_checks[@]}"; do
+            state=$(jq -r --arg name "$name" '
+              [.[] | select(.name == $name)] |
+              if length == 1 then .[0].state else "MISSING_OR_DUPLICATE" end
+            ' <<<"$checks")
+            if [[ "$state" != SUCCESS ]]; then
+              echo "Required check \"$name\" is $state; awaiting completion."
               exit 0
             fi
-            if [[ "$wait_for_checks" != true ||
-                  "$EVENT_NAME" != pull_request ]]; then
-              exit 0
-            fi
-            sleep 15
           done
 
-          echo "Timed out waiting for checks; auto-merge remains disabled."
-          exit 0
-
-      - name: Cancel auto-merge
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.action == 'unlabeled' &&
-          github.event.label.name == 'automerge'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr merge "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --disable-auto
+          latest_pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json state,headRefOid,baseRefName,isDraft,labels)
+          if ! jq -e --arg sha "$HEAD_SHA" '
+            .state == "OPEN" and .headRefOid == $sha and
+            .baseRefName == "main" and .isDraft == false and
+            any(.labels[]; .name == "automerge")
+          ' <<<"$latest_pr" >/dev/null; then
+            echo "Pull request changed or opted out before auto-merge."
+            exit 0
+          fi
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --match-head-commit "$HEAD_SHA" --auto --squash
