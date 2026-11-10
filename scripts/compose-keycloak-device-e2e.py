@@ -404,6 +404,7 @@ def _make_test_certificate(directory: Path) -> tuple[Path, Path]:
         capture_output=True,
         timeout=30,
     )
+    key.chmod(0o644)
     return cert, key
 
 
@@ -502,21 +503,23 @@ def main(*, mock_market_data: bool = False) -> None:
             + ", ".join(missing)
         )
     project = f"a500-keycloak-e2e-{secrets.token_hex(6)}"
-    keycloak_port = _available_port()
     admin_name = f"e2e-admin-{secrets.token_hex(8)}"
     admin_password = secrets.token_urlsafe(32)
     user_name = f"e2e-user-{secrets.token_hex(8)}"
     user_password = secrets.token_urlsafe(32)
     other_name = f"e2e-user-{secrets.token_hex(8)}"
     other_password = secrets.token_urlsafe(32)
-    base_url = f"http://localhost:{keycloak_port}"
+    keycloak_http_port = _available_port()
+    keycloak_https_port = _available_port()
+    base_url = f"https://localhost:{keycloak_https_port}"
     environment = LOCAL["configure_local_build_environment"](
         {
             **os.environ,
             "KEYCLOAK_ADMIN_USERNAME": admin_name,
             "KEYCLOAK_ADMIN_PASSWORD": admin_password,
             "KEYCLOAK_HOSTNAME": base_url,
-            "KEYCLOAK_HOST_PORT": str(keycloak_port),
+            "KEYCLOAK_HOST_PORT": str(keycloak_http_port),
+            "KEYCLOAK_HTTPS_HOST_PORT": str(keycloak_https_port),
             "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
             "POSTGRES_PORT": str(_available_port()),
             "OIDC_ISSUER": f"{base_url}/realms/{REALM}",
@@ -524,8 +527,8 @@ def main(*, mock_market_data: bool = False) -> None:
             "OIDC_JWKS_URI": (
                 f"http://keycloak:8080/realms/{REALM}/protocol/openid-connect/certs"
             ),
-            "MARKET_DATA_MODE": "replay",
             # Only an explicit test-mode override may replace the live provider.
+            "MARKET_DATA_MODE": "replay",
         }
     )
     if mock_market_data:
@@ -557,6 +560,8 @@ def main(*, mock_market_data: bool = False) -> None:
         str(ROOT / "compose.yaml"),
         "-f",
         str(ROOT / "compose.keycloak.yaml"),
+        "-f",
+        str(ROOT / "compose.keycloak-https.yaml"),
         "-f",
         str(ROOT / "compose.web.yaml"),
     ]
