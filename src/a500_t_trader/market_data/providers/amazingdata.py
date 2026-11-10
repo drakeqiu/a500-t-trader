@@ -37,6 +37,7 @@ class AmazingDataProvider:
         clock: Callable[[], datetime] = datetime.now,
     ) -> None:
         self._clock = clock
+        vendor_login = login_fn is None
         if login_fn is None:
             from AmazingData.login.tgw_login import login  # type: ignore[import-untyped]
 
@@ -54,7 +55,9 @@ class AmazingDataProvider:
             raise CapabilityUnavailableError(
                 f"AmazingData login failed: {error}"
             ) from error
-        if not authenticated:
+        # AmazingData 1.1.17 returns the initial Login result even when its
+        # forced relogin succeeds; a returned False therefore means retry success.
+        if not authenticated and not vendor_login:
             _LOG.warning("AmazingData provider initialization stage=login_rejected")
             raise CapabilityUnavailableError("AmazingData login was rejected")
         _LOG.info("AmazingData provider initialization stage=login_succeeded")

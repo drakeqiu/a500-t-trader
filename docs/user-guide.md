@@ -48,6 +48,10 @@ provider = create_provider_from_env()
 
 先核对配置、账号权限、连接地址和 `$HOME/mdga_file` 写权限；网络错误恢复后可由调用方重新启动。不要通过输出环境变量或异常链来排查凭据问题。
 
+### AmazingData 登录重试返回值
+
+锁定的 `AmazingData 1.1.17` 在首次 `tgw.Login` 失败后可能执行 `force_logout=True` 重试；重试成功时会输出 `login success`，但 `login()` 仍返回首次调用的 `False`。provider 对 SDK 自带登录函数按该版本行为接受此返回值并继续初始化行情客户端；显式注入的登录函数仍将 `False` 视为拒绝。升级 SDK 时需重新核对该返回契约。诊断日志和登录响应不得输出 `Token` 等敏感字段。
+
 ## 3. 按需查询行情
 
 `MarketDataService` 提供请求/响应式查询。它不是推送流；不传证券代码时默认使用 `563360`。证券代码接受六位代码，也可带上海/深圳交易所前后缀。

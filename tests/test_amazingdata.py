@@ -243,3 +243,19 @@ def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
             login_fn=lambda *_args, **_kwargs: False,
             market_data=VendorAPI(),
         )
+
+
+def test_vendor_login_false_after_successful_forced_retry_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    import a500_t_trader.market_data.providers.amazingdata as provider_module
+
+    login_module = ModuleType("AmazingData.login.tgw_login")
+    login_module.login = lambda *_args, **_kwargs: False  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "AmazingData.login.tgw_login", login_module)
+    monkeypatch.setattr(provider_module, "_make_market_data", VendorAPI)
+
+    AmazingDataProvider("trader", "secret", "localhost", 9876)
