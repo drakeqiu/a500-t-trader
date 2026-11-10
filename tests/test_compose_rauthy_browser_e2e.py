@@ -6,7 +6,13 @@ import time
 
 import pytest
 
-from scripts.compose_rauthy_browser_e2e import internal_jwks_uri, verify_access_token
+from scripts.compose_rauthy_browser_e2e import (
+    _market_data_images,
+    _rauthy_settings,
+    _validate_discovery,
+    internal_jwks_uri,
+    verify_access_token,
+)
 
 
 def token(header: dict[str, object], claims: dict[str, object]) -> str:
@@ -40,3 +46,35 @@ def test_rejects_remote_or_http_jwks() -> None:
         internal_jwks_uri("https://idp.example.test/keys")
     with pytest.raises(ValueError):
         internal_jwks_uri("http://localhost:18443/keys")
+
+
+def test_rauthy_public_issuer_settings_match_discovery() -> None:
+    settings = _rauthy_settings("18443")
+    expected_issuer = "https://localhost:18443"
+
+    assert settings == {
+        "OIDC_ISSUER": expected_issuer,
+        "RAUTHY_HOST_PORT": "18443",
+        "RAUTHY_LISTEN_SCHEME": "https",
+        "RAUTHY_PUB_URL": "localhost:18443",
+    }
+    _validate_discovery(expected_issuer, {
+        "issuer": expected_issuer,
+        "jwks_uri": "https://localhost:18443/auth/v1/oidc/jwks",
+    })
+
+
+def test_rejects_discovery_with_mismatched_issuer() -> None:
+    with pytest.raises(RuntimeError, match="issuer/JWKS mismatch"):
+        _validate_discovery("https://localhost:18443", {
+            "issuer": "https://wrong:18443",
+            "jwks_uri": "https://localhost:18443/auth/v1/oidc/jwks",
+        })
+
+
+def test_market_data_image_tags_are_project_scoped() -> None:
+    images = _market_data_images("a500-rauthy-abc123")
+    assert images == {
+        "MARKET_DATA_CONSUMER_IMAGE": "a500-rauthy-abc123-market-data-consumer:local",
+        "MARKET_DATA_REPLAY_IMAGE": "a500-rauthy-abc123-market-data-replay:local",
+    }

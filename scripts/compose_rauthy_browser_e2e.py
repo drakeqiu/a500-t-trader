@@ -58,6 +58,27 @@ def internal_jwks_uri(uri: str) -> str:
     return urlunsplit(("http", "rauthy:8080", parsed.path, parsed.query, ""))
 
 
+def _rauthy_settings(port: str) -> dict[str, str]:
+    return {
+        "OIDC_ISSUER": f"https://localhost:{port}",
+        "RAUTHY_HOST_PORT": port,
+        "RAUTHY_LISTEN_SCHEME": "https",
+        "RAUTHY_PUB_URL": f"localhost:{port}",
+    }
+
+
+def _market_data_images(project: str) -> dict[str, str]:
+    return {
+        "MARKET_DATA_CONSUMER_IMAGE": f"{project}-market-data-consumer:local",
+        "MARKET_DATA_REPLAY_IMAGE": f"{project}-market-data-replay:local",
+    }
+
+
+def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
+    if discovery.get("issuer") != issuer or not isinstance(discovery.get("jwks_uri"), str):
+        raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
+
+
 def _port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -71,9 +92,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
         try:
             with urlopen(issuer + "/.well-known/openid-configuration", context=ctx, timeout=3) as response:
                 result = json.load(response)
-            if result.get("issuer") != issuer or not isinstance(result.get("jwks_uri"), str):
-                raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
-            return result
+            _validate_discovery(issuer, result)
         except (OSError, TimeoutError, json.JSONDecodeError):
             time.sleep(2)
     raise RuntimeError("Rauthy discovery did not become ready")
@@ -149,17 +168,17 @@ def main() -> None:
         raise RuntimeError("Podman Compose is required")
     project = "a500-rauthy-" + secrets.token_hex(6)
     ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit")}
-    issuer, gateway = f"https://localhost:{ports['rauthy']}", f"http://localhost:{ports['gateway']}"
+    issuer = f"https://localhost:{ports['rauthy']}"
+    gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     for name in ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD", "AD_USERNAME", "AD_PASSWORD", "KEYCLOAK_HOSTNAME", "KEYCLOAK_HOST_PORT", "TLS_CERT", "TLS_KEY"):
         env.pop(name, None)
     env.update({"POSTGRES_PASSWORD": secrets.token_urlsafe(32), "POSTGRES_PORT": ports["postgres"],
                 "RABBITMQ_BIND_HOST": "127.0.0.1", "RABBITMQ_HOST_PORT": ports["rabbit"],
-                "OIDC_ISSUER": issuer, "OIDC_AUDIENCE": AUDIENCE,
-                "OIDC_JWKS_URI": "http://rauthy:8080/auth/v1/oidc/jwks", "OIDC_CLIENT_ID": CLIENT_ID,
-                "RAUTHY_HOST_PORT": ports["rauthy"], "GATEWAY_HOST": "127.0.0.1",
+                "OIDC_AUDIENCE": AUDIENCE, "OIDC_JWKS_URI": "http://rauthy:8080/auth/v1/oidc/jwks",
+                "OIDC_CLIENT_ID": CLIENT_ID, "GATEWAY_HOST": "127.0.0.1",
                 "GATEWAY_HOST_PORT": ports["gateway"], "MARKET_DATA_MODE": "replay",
-                "MARKET_DATA_CONSUMER_IMAGE": f"{project}_market-data-consumer:local"})
+                **_rauthy_settings(ports["rauthy"]), **_market_data_images(project)})
     files = ["compose.yaml", "compose.web.yaml", "compose.web-http.yaml", "compose.rauthy.yaml"]
     prefix = [*command, "--env-file", os.devnull, "--project-name", project]
     for file in files:
