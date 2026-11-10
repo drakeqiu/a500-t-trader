@@ -763,7 +763,14 @@ def main(*, mock_market_data: bool = False) -> None:
         finally:
             try:
                 subprocess.run(
-                    [*compose, "down", "--volumes", "--remove-orphans"],
+                    [
+                        *compose,
+                        "down",
+                        "--volumes",
+                        "--remove-orphans",
+                        "--rmi",
+                        "local",
+                    ],
                     cwd=ROOT,
                     env=environment,
                     check=True,
