@@ -12,6 +12,8 @@ uv run playwright install chromium
 uv run python scripts/compose_rauthy_browser_e2e.py
 ```
 
+Rauthy's discovery issuer is `https://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation.
+
 The runner creates a random Compose project and free localhost ports, uses replay mode, starts the existing gateway and APIs, and prints the local Rauthy Admin UI URL. In a browser, accept the self-signed local certificate warning and use Rauthy's official v0.37.2 local-test admin instructions. Create a public client with these exact values:
 
 | Setting | Value |

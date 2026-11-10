@@ -60,7 +60,7 @@ def internal_jwks_uri(uri: str) -> str:
 
 def _rauthy_settings(port: str) -> dict[str, str]:
     return {
-        "OIDC_ISSUER": f"https://localhost:{port}",
+        "OIDC_ISSUER": f"https://localhost:{port}/auth/v1/",
         "RAUTHY_HOST_PORT": port,
         "RAUTHY_LISTEN_SCHEME": "https",
         "RAUTHY_PUB_URL": f"localhost:{port}",
@@ -90,7 +90,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         try:
-            with urlopen(issuer + "/.well-known/openid-configuration", context=ctx, timeout=3) as response:
+            with urlopen(issuer.rstrip("/") + "/.well-known/openid-configuration", context=ctx, timeout=3) as response:
                 result = json.load(response)
             _validate_discovery(issuer, result)
         except (OSError, TimeoutError, json.JSONDecodeError):
@@ -168,7 +168,7 @@ def main() -> None:
         raise RuntimeError("Podman Compose is required")
     project = "a500-rauthy-" + secrets.token_hex(6)
     ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit")}
-    issuer = f"https://localhost:{ports['rauthy']}"
+    issuer = f"https://localhost:{ports['rauthy']}/auth/v1/"
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     for name in ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD", "AD_USERNAME", "AD_PASSWORD", "KEYCLOAK_HOSTNAME", "KEYCLOAK_HOST_PORT", "TLS_CERT", "TLS_KEY"):
@@ -198,7 +198,7 @@ def main() -> None:
                 time.sleep(2)
         else:
             raise RuntimeError("Public gateway did not become ready")
-        print(f"Rauthy: {issuer}; public gateway: {gateway}; Admin UI: {issuer}/auth/v1/admin/")
+        print(f"Rauthy: {issuer}; public gateway: {gateway}; Admin UI: {issuer}admin/")
         print("Configure documented public client and disposable user in docs/rauthy-local-e2e.md.")
         input("Press Enter after Admin UI setup: ")
         _browser_flow(gateway, issuer)

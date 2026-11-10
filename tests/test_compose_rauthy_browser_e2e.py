@@ -23,22 +23,23 @@ def token(header: dict[str, object], claims: dict[str, object]) -> str:
 
 def test_accepts_required_access_token_contract() -> None:
     now = int(time.time())
-    verify_access_token(token({"alg": "RS256"}, {"iss": "https://localhost:18443", "aud": ["a500-api"], "iat": now, "exp": now + 300}), "https://localhost:18443", now=now)
+    issuer = "https://localhost:18443/auth/v1/"
+    verify_access_token(token({"alg": "RS256"}, {"iss": issuer, "aud": ["a500-api"], "iat": now, "exp": now + 300}), issuer, now=now)
 
 
 @pytest.mark.parametrize("header,claims", [
-    ({"alg": "EdDSA"}, {"iss": "https://localhost:18443", "aud": "a500-api", "iat": 100, "exp": 400}),
+    ({"alg": "EdDSA"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 400}),
     ({"alg": "RS256"}, {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443", "aud": "other", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443", "aud": "a500-api", "iat": 100, "exp": 401}),
+    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "other", "iat": 100, "exp": 400}),
+    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 401}),
 ])
 def test_rejects_wrong_token_contract(header: dict[str, object], claims: dict[str, object]) -> None:
     with pytest.raises(AssertionError):
-        verify_access_token(token(header, claims), "https://localhost:18443", now=200)
+        verify_access_token(token(header, claims), "https://localhost:18443/auth/v1/", now=200)
 
 
 def test_internal_jwks_keeps_compose_route_and_query() -> None:
-    assert internal_jwks_uri("https://localhost:18443/auth/v1/oidc/jwks?k=v") == "http://rauthy:8080/auth/v1/oidc/jwks?k=v"
+    assert internal_jwks_uri("https://localhost:18443/auth/v1/oidc/certs?k=v") == "http://rauthy:8080/auth/v1/oidc/certs?k=v"
 
 
 def test_rejects_remote_or_http_jwks() -> None:
@@ -50,7 +51,7 @@ def test_rejects_remote_or_http_jwks() -> None:
 
 def test_rauthy_public_issuer_settings_match_discovery() -> None:
     settings = _rauthy_settings("18443")
-    expected_issuer = "https://localhost:18443"
+    expected_issuer = "https://localhost:18443/auth/v1/"
 
     assert settings == {
         "OIDC_ISSUER": expected_issuer,
@@ -60,16 +61,17 @@ def test_rauthy_public_issuer_settings_match_discovery() -> None:
     }
     _validate_discovery(expected_issuer, {
         "issuer": expected_issuer,
-        "jwks_uri": "https://localhost:18443/auth/v1/oidc/jwks",
+        "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
     })
 
 
 def test_rejects_discovery_with_mismatched_issuer() -> None:
     with pytest.raises(RuntimeError, match="issuer/JWKS mismatch"):
-        _validate_discovery("https://localhost:18443", {
-            "issuer": "https://wrong:18443",
-            "jwks_uri": "https://localhost:18443/auth/v1/oidc/jwks",
+        _validate_discovery("https://localhost:18443/auth/v1/", {
+            "issuer": "https://wrong:18443/auth/v1/",
+            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
         })
+
 
 
 def test_market_data_image_tags_are_project_scoped() -> None:
