@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 FROM python:3.14-slim
+COPY --from=uv /uv /uvx /bin/
 
 ARG APT_MIRROR
 RUN if [ -n "$APT_MIRROR" ]; then \
@@ -15,11 +17,8 @@ COPY wheels/ ./wheels/
 COPY dist/*.whl ./dist/
 ARG UV_INDEX_URL
 ARG UV_HTTP_TIMEOUT
-RUN if [ -n "$UV_INDEX_URL" ]; then \
-        python -m pip install --no-cache-dir --timeout "${UV_HTTP_TIMEOUT:-180}" --index-url "$UV_INDEX_URL" --find-links=/app/wheels /app/dist/*.whl; \
-    else \
-        python -m pip install --no-cache-dir --find-links=/app/wheels /app/dist/*.whl; \
-    fi
+ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT:-180}
+RUN uv pip install --system --no-cache --find-links=/app/wheels /app/dist/*.whl
 
 ENV PYTHONUNBUFFERED=1
 ENTRYPOINT []
