@@ -152,13 +152,11 @@ def _allow_browser_origin(base_url: str, admin_token: str, origin: str) -> None:
         raise RuntimeError(f"无法配置浏览器客户端回调地址: HTTP {status}")
 
 
-def _check_browser_login(
-    gateway_url: str, username: str, password: str, *, https: bool = False
-) -> None:
+def _check_browser_login(gateway_url: str, username: str, password: str) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
-            page = browser.new_page(ignore_https_errors=https)
+            page = browser.new_page(ignore_https_errors=True)
             page.goto(
                 f"{gateway_url.rstrip('/')}/signals",
                 wait_until="domcontentloaded",
@@ -649,9 +647,7 @@ def main(*, mock_market_data: bool = False) -> None:
                 if scheme == "https":
                     _check_no_plaintext(port)
                 _allow_browser_origin(base_url, admin_token, url)
-                _check_browser_login(
-                    url, user_name, user_password, https=scheme == "https"
-                )
+                _check_browser_login(url, user_name, user_password)
                 _check_api(
                     url,
                     token,
