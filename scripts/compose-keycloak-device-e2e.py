@@ -127,7 +127,7 @@ def _create_temporary_user(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
             status = response.status
     except HTTPError as error:
         status = error.code
