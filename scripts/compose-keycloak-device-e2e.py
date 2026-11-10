@@ -613,6 +613,8 @@ def main(*, mock_market_data: bool = False) -> None:
             ),
             # Only an explicit test-mode override may replace the live provider.
             "MARKET_DATA_MODE": "replay",
+            "MARKET_DATA_CONSUMER_IMAGE": f"{project}-market-data-consumer:local",
+            "MARKET_DATA_REPLAY_IMAGE": f"{project}-market-data-replay:local",
         }
     )
     if mock_market_data:
