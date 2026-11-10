@@ -243,6 +243,8 @@ def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
             login_fn=lambda *_args, **_kwargs: False,
             market_data=VendorAPI(),
         )
+
+
 def test_vendor_login_false_after_successful_forced_retry_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
