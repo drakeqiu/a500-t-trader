@@ -593,6 +593,8 @@ def main(*, mock_market_data: bool = False) -> None:
     other_password = secrets.token_urlsafe(32)
     keycloak_http_port = _available_port()
     keycloak_https_port = _available_port()
+    gateway_http_port = _available_port()
+    gateway_https_port = _available_port()
     base_url = f"https://localhost:{keycloak_https_port}"
     environment = LOCAL["configure_local_build_environment"](
         {
@@ -620,12 +622,9 @@ def main(*, mock_market_data: bool = False) -> None:
         environment["E2E_MOCK_MARKET_SCRIPT"] = str(
             ROOT / "scripts/fixtures/account-api-mock-market.py"
         )
-    for name in (
-        "GATEWAY_HOST",
-        "GATEWAY_HOST_PORT",
-        "TLS_CERT",
-        "TLS_KEY",
-    ):
+    environment.pop("GATEWAY_HOST", None)
+    environment["GATEWAY_HOST_PORT"] = str(gateway_http_port)
+    for name in ("TLS_CERT", "TLS_KEY"):
         environment.pop(name, None)
     compose_command = shlex.split(
         os.environ.get("COMPOSE_COMMAND")
@@ -697,9 +696,9 @@ def main(*, mock_market_data: bool = False) -> None:
             other_token = _device_authorize(base_url, other_name, other_password)
 
             scenarios = [
-                ("http", "127.0.0.1", 8080),
+                ("http", "127.0.0.1", gateway_http_port),
                 ("http", "0.0.0.0", _available_port()),
-                ("https", "127.0.0.1", 8443),
+                ("https", "127.0.0.1", gateway_https_port),
                 ("https", "0.0.0.0", _available_port()),
             ]
             for index, (scheme, host, port) in enumerate(scenarios):
@@ -707,7 +706,7 @@ def main(*, mock_market_data: bool = False) -> None:
                     compose = [*common, "-f", str(ROOT / f"compose.web-{scheme}.yaml")]
                     if host == "127.0.0.1":
                         environment.pop("GATEWAY_HOST", None)
-                        environment.pop("GATEWAY_HOST_PORT", None)
+                        environment["GATEWAY_HOST_PORT"] = str(port)
                     else:
                         environment.update(
                             GATEWAY_HOST=host, GATEWAY_HOST_PORT=str(port)
