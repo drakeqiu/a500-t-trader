@@ -1,0 +1,16 @@
+services:
+  rauthy:
+    image: ghcr.io/sebadob/rauthy:0.37.2
+    environment:
+      LOCAL_TEST: "true"
+      PUB_URL: ${OIDC_ISSUER:?OIDC_ISSUER is required}
+      HQL_DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8443"
+    volumes:
+      - rauthy-data:/app/data
+    expose:
+      - "8080"
+
+volumes:
+  rauthy-data:
