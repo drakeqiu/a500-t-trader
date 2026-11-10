@@ -192,7 +192,7 @@ def _device_authorize(base_url: str, username: str, password: str) -> str:
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        page = browser.new_page()
+        page = browser.new_page(ignore_https_errors=True)
         try:
             page.goto(page_url, wait_until="domcontentloaded", timeout=30000)
             code_field = page.locator("input[name='user_code']")
