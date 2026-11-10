@@ -22,10 +22,9 @@ gh release download deps-v1 \
 uv build --wheel
 ```
 
-生成的 `dist/a500_t_trader-*.whl` 会由 `Dockerfile` 安装。镜像内使用
-`pip install` 安装项目 wheel 和其声明的运行依赖；这些依赖不会被自动打包进
-项目 wheel。供应商 wheel 从 `wheels/` 查找，其他依赖仍从 PyPI（或配置的镜像源）
-下载。镜像构建前必须先生成项目 wheel。
+生成的 `dist/a500_t_trader-*.whl` 会由 `Dockerfile` 安装。镜像内使用 `uv pip install`
+安装项目 wheel 和其声明的运行依赖；这些依赖不会被自动打包进项目 wheel。供应商
+wheel 从 `wheels/` 查找，其他依赖仍从 PyPI（或配置的镜像源）下载。镜像构建前必须先生成项目 wheel。
 
 直接执行 `docker compose build` 或 `podman-compose build` 时，必须先运行
 `uv build --wheel`；`scripts/start-local.py` 和 `scripts/start-lan-replay.py`

@@ -159,7 +159,7 @@ def check_configuration(environment: dict[str, str]) -> None:
                 "use raw Compose for a custom origin/IdP"
             )
     for wheel in (
-        "AmazingData-1.1.9-cp314-none-any.whl",
+        "AmazingData-1.1.17-cp314-none-any.whl",
         "tgw-1.0.9.2-py3-none-any.whl",
     ):
         if not (ROOT / "wheels" / wheel).is_file():

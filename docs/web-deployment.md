@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Linux 主机、可工作的 Docker Engine 和 Compose 插件，能拉取基础镜像并访问构建依赖；下面命令使用 `docker compose`。rootless Podman 可使用 `podman-compose`，但网络和卷权限需按其环境处理。
-- 本地完整启动脚本在构建服务镜像前运行 `uv build --wheel`；直接运行 Compose 构建时，先在仓库根目录执行 `uv build --wheel`。镜像内 pip 安装项目 wheel 和依赖；PyPI/镜像源仍需可访问，供应商依赖 wheel 则从 `wheels/` 提供。不再使用 uv 镜像缓存。
+- 本地完整启动脚本在构建服务镜像前运行 `uv build --wheel`；直接运行 Compose 构建时，先在仓库根目录执行 `uv build --wheel`。镜像内使用 `uv pip install` 安装项目 wheel 和依赖；PyPI/镜像源仍需可访问，供应商依赖 wheel 则从 `wheels/` 提供。不再使用 uv 镜像缓存。
 - 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 和历史任务 worker 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
 - 凭据通过受保护的环境变量或未提交、限制访问的 `.env` 提供，不写入镜像或仓库。下例以交互式 shell 输入敏感值，避免直接写入命令历史；不要在共享终端输出环境变量或令牌。
 
