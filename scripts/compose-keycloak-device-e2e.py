@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import sync_playwright
@@ -79,7 +79,7 @@ def _wait_for_keycloak(base_url: str) -> None:
             status, _ = _request(url)
             if status == 200:
                 return
-        except TimeoutError, URLError, OSError:
+        except (TimeoutError, URLError, OSError):
             pass
         time.sleep(1)
     raise RuntimeError("临时 Keycloak 未在 180 秒内就绪")
@@ -152,11 +152,34 @@ def _allow_browser_origin(base_url: str, admin_token: str, origin: str) -> None:
         raise RuntimeError(f"无法配置浏览器客户端回调地址: HTTP {status}")
 
 
-def _check_browser_login(gateway_url: str, username: str, password: str) -> None:
+def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
+    """Complete a real code+PKCE flow; return its token only after protocol checks."""
+    access_tokens: list[str] = []
+    authorization_requests: list[dict[str, list[str]]] = []
+    token_forms: list[dict[str, list[str]]] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
             page = browser.new_page(ignore_https_errors=True)
+
+            def capture_request(request: Any) -> None:
+                parsed = urlsplit(request.url)
+                if parsed.path.endswith("/protocol/openid-connect/auth"):
+                    authorization_requests.append(parse_qs(parsed.query))
+                elif parsed.path.endswith("/protocol/openid-connect/token") and request.method == "POST":
+                    token_forms.append(parse_qs(request.post_data or ""))
+
+            def capture_token(response: Any) -> None:
+                if response.request.method != "POST" or not response.url.endswith(
+                    "/protocol/openid-connect/token"
+                ):
+                    return
+                body = response.json()
+                if isinstance(body, dict) and isinstance(body.get("access_token"), str):
+                    access_tokens.append(body["access_token"])
+
+            page.on("request", capture_request)
+            page.on("response", capture_token)
             page.goto(
                 f"{gateway_url.rstrip('/')}/signals",
                 wait_until="domcontentloaded",
@@ -171,8 +194,69 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> None
             page.get_by_role("heading", name="策略信号", exact=True).wait_for(
                 state="visible", timeout=90000
             )
+            code_requests = [
+                request for request in authorization_requests
+                if request.get("response_type") == ["code"]
+                and request.get("client_id") == ["a500-browser-client"]
+                and request.get("code_challenge_method") == ["S256"]
+                and bool(request.get("code_challenge", [""])[0])
+            ]
+            pkce_token_forms = [
+                form for form in token_forms
+                if form.get("grant_type") == ["authorization_code"]
+                and bool(form.get("code_verifier", [""])[0])
+            ]
+            if len(code_requests) != 1 or len(pkce_token_forms) != 1:
+                raise AssertionError("浏览器登录未证明 authorization code + PKCE S256")
+            if len(access_tokens) != 1:
+                raise AssertionError("浏览器授权码流程应恰好取得一个 access token")
+            return access_tokens[0]
         finally:
             browser.close()
+
+
+def _check_browser_snapshot_api(gateway_url: str, token: str) -> None:
+    """Prove the browser-issued access token can read and write a snapshot via gateway."""
+    url = f"{gateway_url.rstrip('/')}/api/v1/account-snapshot"
+    request = Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
+        if response.status != 200:
+            raise AssertionError("浏览器令牌无法读取公开网关账户快照")
+        snapshot = json.loads(response.read())
+        etag = response.headers.get("ETag")
+    if not isinstance(snapshot, dict) or not etag:
+        raise AssertionError("浏览器令牌读取的账户快照缺少内容或 ETag")
+    snapshot = {
+        key: snapshot[key]
+        for key in (
+            "as_of",
+            "holdings",
+            "protected_floor",
+            "sellable",
+            "cost_basis",
+            "available_cash",
+        )
+    }
+    snapshot["available_cash"] = "126.50"
+    request = Request(
+        url,
+        data=json.dumps(snapshot).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "If-Match": etag,
+        },
+        method="PUT",
+    )
+    with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
+        if response.status != 200:
+            raise AssertionError("浏览器令牌无法经公开网关写入账户快照")
+    request = Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
+        updated = json.loads(response.read())
+    if updated.get("available_cash") != "126.50":
+        raise AssertionError("浏览器令牌写入后的账户快照未能读取")
+
 
 
 def _device_authorize(base_url: str, username: str, password: str) -> str:
@@ -480,7 +564,7 @@ def _check_binding(
 def _check_no_plaintext(port: int) -> None:
     try:
         status, _ = _request(f"http://localhost:{port}/api/v1/signals")
-    except OSError, URLError:
+    except (OSError, URLError):
         return
     if status in (200, 401):
         raise AssertionError("HTTPS 入口接受了明文 API 请求")
@@ -647,7 +731,7 @@ def main(*, mock_market_data: bool = False) -> None:
                 if scheme == "https":
                     _check_no_plaintext(port)
                 _allow_browser_origin(base_url, admin_token, url)
-                _check_browser_login(url, user_name, user_password)
+                browser_token = _check_browser_login(url, user_name, user_password)
                 _check_api(
                     url,
                     token,
@@ -656,7 +740,7 @@ def main(*, mock_market_data: bool = False) -> None:
                     compose=compose,
                     environment=environment,
                 )
-
+                _check_browser_snapshot_api(url, browser_token)
             subprocess.run(
                 [*compose, "restart", "keycloak"],
                 cwd=ROOT,

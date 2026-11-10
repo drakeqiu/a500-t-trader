@@ -89,6 +89,27 @@ export AD_USERNAME AD_PASSWORD AD_HOST AD_PORT
 
 `OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
 
+### Keycloak 实际部署资源基线
+
+资源基线只针对**实际部署模式**的 Keycloak 和其专属依赖；不得叠加本地开发用的 `compose.keycloak.yaml`，也不得把 `start-dev` 结果当成验收证据。仓库不提供生产 Keycloak Compose 配置，需由部署方提供与真实部署一致的 Compose 文件、按 sha256 digest 固定的镜像、可用 readiness URL，以及 Podman 和 `podman-compose`。不要将凭据写入命令行或证据文件；安全地通过环境变量注入 Compose 所需变量。工具关闭自动 `.env` 读取，避免意外加载工作目录凭据。
+
+先按相同主机、Compose 拓扑、Keycloak 版本、Realm/client/user、哈希参数及依赖配置准备对比运行；SMTP 等外部服务成本须列入排除项。每轮以独立随机 Compose 项目启动，不构建镜像；工具仅采样指定服务及其专属依赖，结束时只清理本轮项目的容器、网络和命名卷，不会清理镜像或执行全局 prune。需显式指定身份服务和所有要计量的服务：
+
+```bash
+python3 scripts/keycloak-resource-baseline.py \
+  --compose-file /secure/deploy/compose.yaml \
+  --compose-file /secure/deploy/compose.identity.yaml \
+  --identity-service keycloak \
+  --sample-service keycloak \
+  --sample-service identity-db \
+  --readiness-url https://identity.example.internal/realms/a500/.well-known/openid-configuration \
+  --output evidence/keycloak-baseline.json
+```
+
+工具拒绝 `start-dev` 和未按 sha256 digest 固定的镜像。每轮启动至 readiness 成功的耗时作为启动时间；操作员先完成浏览器及独立设备授权预热，随后采集 10 分钟闲置样本，再在采样期间执行两种授权（并发最多两个）。操作员输入各次登录秒数以计算 login p95。每秒 `podman stats` 原始样本包含聚合内存和 CPU；输出列出每轮 idle memory p95、授权窗口**采样峰值**内存、CPU、启动时间、login p95 和脱敏样本。采样峰值不是 cgroup 历史峰值计数器，短于采样间隔的瞬时峰值可能漏掉；比较报告必须保留此方法限制。仅将拓扑、版本、哈希参数和外部成本等非秘密信息写入证据；切勿输入密码、token、个人信息或主机秘密。
+
+**当前证据状态：未测量。** 此工作区没有实际部署级 Keycloak Compose 入口或目标主机，也没有已提供的部署凭据/配置；本地 `start-dev` Keycloak 只能用于开发验收，不能代表实际部署基线。故当前没有三轮数值或实际部署比较结果。获取部署方配置和获准目标环境后，按上述步骤生成原始证据；不得将本地开发运行结果替代。
+
 ### 选择 HTTP 或 HTTPS
 
 每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
