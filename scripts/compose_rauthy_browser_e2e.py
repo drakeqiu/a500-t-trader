@@ -1,12 +1,11 @@
 """Run isolated Rauthy browser login and protected-API acceptance flow."""
 from __future__ import annotations
 
-import argparse
 import base64
 import getpass
 import json
 import os
-import secrets
+import re
 import shlex
 import shutil
 import socket
@@ -14,12 +13,150 @@ import ssl
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
-from urllib.request import urlopen
-
+from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.request import HTTPSHandler, HTTPError, ProxyHandler, Request, build_opener, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 AUDIENCE = "a500-api"
 CLIENT_ID = "a500-browser-client"
+DEVICE_CLIENT_ID = "a500-device-client"
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+
+
+
+
+
+
+def protocol_error(payload: dict[str, object]) -> str | None:
+    error = payload.get("error")
+    return error if isinstance(error, str) else None
+
+
+def _oauth_post(opener, endpoint: str, form: dict[str, str]) -> tuple[int, dict[str, object]]:
+    request = Request(endpoint, data=urlencode(form).encode(),
+                      headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with opener.open(request, timeout=15) as response:
+            return response.status, json.load(response)
+    except HTTPError as response:
+        try:
+            return response.code, json.load(response)
+        finally:
+            response.close()
+
+
+def _device_grant(gateway: str, issuer: str, username: str, password: str) -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context()))
+    endpoint = issuer + "oidc/"
+
+    def start() -> dict[str, object]:
+        status, response = _oauth_post(opener, endpoint + "device", {
+            "client_id": DEVICE_CLIENT_ID, "scope": "openid",
+        })
+        if status != 200:
+            raise AssertionError(f"Device authorization returned HTTP {status}")
+        return response
+
+    def poll(code: str) -> tuple[int, dict[str, object]]:
+        return _oauth_post(opener, endpoint + "token", {
+            "grant_type": DEVICE_GRANT, "device_code": code, "client_id": DEVICE_CLIENT_ID,
+        })
+
+    def decision(payload: dict[str, object], accept: bool) -> None:
+        complete_uri = payload.get("verification_uri_complete")
+        if not isinstance(complete_uri, str):
+            raise AssertionError("Device authorization omitted verification URI")
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page(ignore_https_errors=True)
+            page.goto(complete_uri, wait_until="domcontentloaded")
+            if page.locator('input[type="email"]').count():
+                page.locator('input[type="email"]').fill(username)
+                page.locator('input[type="password"]').fill(password)
+                page.locator('button[type="submit"]').click()
+                page.wait_for_load_state("domcontentloaded")
+            names = r"accept|approve|allow|confirm|authorize|批准|允许" if accept else r"decline|deny|拒绝"
+            try:
+                page.get_by_role("button", name=re.compile(names, re.I)).click(timeout=30_000)
+            except PlaywrightTimeoutError as exc:
+                raise AssertionError("Rauthy verification decision was not available") from exc
+            page.wait_for_timeout(300)
+            browser.close()
+
+    approved = start()
+    code, lifetime, interval = (approved.get("device_code"), approved.get("expires_in"), approved.get("interval"))
+    if not isinstance(code, str) or not isinstance(lifetime, int) or not isinstance(interval, int):
+        raise AssertionError("Malformed device authorization response")
+    time.sleep(interval + 1)
+    status, response = poll(code)
+    if status != 400 or protocol_error(response) != "authorization_pending":
+        raise AssertionError("Expected authorization_pending before browser approval")
+    print("Device protocol: authorization_pending.")
+    status, response = poll(code)
+    if status != 400 or protocol_error(response) != "slow_down":
+        raise AssertionError("Expected slow_down after an early poll")
+    print("Device protocol: slow_down; respecting updated poll interval.")
+    time.sleep(interval + 5)
+    decision(approved, True)
+    status, response = poll(code)
+    if status != 200 or not isinstance(response.get("access_token"), str):
+        raise AssertionError(f"Device approval failed: {protocol_error(response)}")
+    token = str(response["access_token"])
+    verify_access_token(token, issuer)
+    _device_public_api(gateway, token)
+    print("Device protocol: approved; RS256, default audience and five-minute token verified.")
+
+    denied = start()
+    denied_code = denied.get("device_code")
+    if not isinstance(denied_code, str):
+        raise AssertionError("Malformed denial device authorization response")
+    decision(denied, False)
+    status, response = poll(denied_code)
+    if status != 400 or protocol_error(response) != "expired_token":
+        raise AssertionError("Denied device authorization did not terminate")
+    print("Device protocol: user denial terminated without a token.")
+
+    expired = start()
+    expired_code, expired_lifetime = expired.get("device_code"), expired.get("expires_in")
+    if not isinstance(expired_code, str) or not isinstance(expired_lifetime, int):
+        raise AssertionError("Malformed expiry device authorization response")
+    print(f"Device protocol: waiting for natural expiry ({expired_lifetime}s).")
+    time.sleep(expired_lifetime + 1)
+    status, response = poll(expired_code)
+    if status != 400 or protocol_error(response) != "expired_token":
+        raise AssertionError("Expired device authorization did not terminate")
+    print("Device protocol: expiry terminated without a token.")
+
+
+def _device_public_api(gateway: str, token: str) -> None:
+    opener = build_opener(ProxyHandler({}))
+    headers = {"Authorization": f"Bearer {token}"}
+    with opener.open(Request(gateway + "/api/v1/signals", headers=headers), timeout=20) as response:
+        if response.status != 200:
+            raise AssertionError(f"Public signal API returned HTTP {response.status}")
+    snapshot = {
+        "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "holdings": {"510300": 100}, "protected_floor": {"510300": 20},
+        "sellable": {"510300": 80}, "cost_basis": {"510300": "3.8500"},
+        "available_cash": "125.50",
+    }
+    request = Request(gateway + "/api/v1/account-snapshot", data=json.dumps(snapshot).encode(),
+                      headers={**headers, "Content-Type": "application/json", "If-None-Match": "*"},
+                      method="PUT")
+    with opener.open(request, timeout=20) as response:
+        if response.status not in (200, 201):
+            raise AssertionError(f"Public snapshot write returned HTTP {response.status}")
+    with opener.open(Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20) as response:
+        saved = json.load(response)
+    if saved.get("holdings") != {"510300": 100} or saved.get("available_cash") != "125.50":
+        raise AssertionError("Public snapshot readback mismatch")
+    request = Request(gateway + "/api/v1/signals/stream?symbols=510300", headers=headers)
+    with opener.open(request, timeout=20) as response:
+        if response.status != 200 or response.headers.get_content_type() != "text/event-stream":
+            raise AssertionError("Public authenticated SSE stream failed")
+        if not response.readline():
+            raise AssertionError("Public SSE stream returned no initial event")
 
 
 def _decode(part: str) -> dict[str, object]:
@@ -98,13 +235,8 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
     raise RuntimeError("Rauthy discovery did not become ready")
 
 
-def _browser_flow(gateway: str, issuer: str) -> None:
+def _browser_flow(gateway: str, issuer: str, username: str, password: str) -> None:
     from playwright.sync_api import sync_playwright
-
-    username = input("Disposable Rauthy user email: ").strip()
-    password = getpass.getpass("Disposable Rauthy user password: ")
-    if not username or not password:
-        raise RuntimeError("Disposable user credentials are required")
     observed: dict[str, str] = {}
     signals: list[int] = []
     with sync_playwright() as pw:
@@ -199,9 +331,14 @@ def main() -> None:
         else:
             raise RuntimeError("Public gateway did not become ready")
         print(f"Rauthy: {issuer}; public gateway: {gateway}; Admin UI: {issuer}admin/")
-        print("Configure documented public client and disposable user in docs/rauthy-local-e2e.md.")
-        input("Press Enter after Admin UI setup: ")
-        _browser_flow(gateway, issuer)
+        print("在临时实例中按 docs/rauthy-local-e2e.md 配置一次性用户及两个独立公开客户端；")
+        print("为两个客户端配置 default_aud=a500-api，并核实设备客户端启用 device_code grant。")
+        username = input("Disposable Rauthy user email: ").strip()
+        password = getpass.getpass("Disposable Rauthy user password: ")
+        if not username or not password:
+            raise RuntimeError("Disposable user credentials are required")
+        _browser_flow(gateway, issuer, username, password)
+        _device_grant(gateway, issuer, username, password)
     finally:
         subprocess.run([*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"], cwd=ROOT, env=env, check=False, timeout=180)
 
