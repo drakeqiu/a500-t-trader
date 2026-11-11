@@ -15,6 +15,7 @@ import ssl
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import (
@@ -64,13 +65,17 @@ def _submit_password_step(page, password: str) -> None:
     page.locator('button[type="submit"]').click()
 
 
+def _run_device_browser_step(step: Callable[[], None]) -> None:
+    try:
+        step()
+    except Exception:
+        raise AssertionError(
+            "Rauthy device authorization browser interaction failed"
+        ) from None
+
+
 def _device_grant(gateway: str, issuer: str, username: str, password: str) -> None:
-    from playwright.sync_api import (
-        TimeoutError as PlaywrightTimeoutError,
-    )
-    from playwright.sync_api import (
-        sync_playwright,
-    )
+    from playwright.sync_api import sync_playwright
 
     opener = build_opener(
         ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context())
@@ -108,48 +113,45 @@ def _device_grant(gateway: str, issuer: str, username: str, password: str) -> No
             raise AssertionError(
                 "Device authorization omitted verification URI or user code"
             )
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            page = browser.new_page(ignore_https_errors=True)
-            page.goto(complete_uri, wait_until="domcontentloaded")
-            username_input = page.locator(
-                'input[type="email"], input[autocomplete="username"], '
-                'input[name="email"], input[type="text"]'
-            ).first
-            username_input.wait_for(state="visible", timeout=10_000)
-            username_input.fill(username)
-            _submit_password_step(page, password)
-            user_code_input = page.get_by_label("User Code", exact=True)
-            user_code_input.wait_for(state="visible", timeout=10_000)
-            user_code_input.fill(user_code)
-            page.get_by_role("button", name="Submit", exact=True).click()
 
-            names = (
-                r"accept|approve|allow|confirm|authorize|批准|允许"
-                if accept
-                else r"decline|deny|拒绝"
-            )
-            try:
-                page.get_by_role("button", name=re.compile(names, re.I)).click(
-                    timeout=30_000
-                )
-                if accept:
-                    page.get_by_text(
-                        re.compile(r"The request has been accepted", re.I)
-                    ).wait_for(state="visible", timeout=10_000)
-                else:
-                    page.get_by_text(
-                        re.compile(r"The request has been declined", re.I)
-                    ).wait_for(state="visible", timeout=10_000)
-            except PlaywrightTimeoutError as exc:
-                body_text = page.locator("body").inner_text(timeout=2_000)[:300]
-                body_text = body_text.replace(username, "[test account]")
-                raise AssertionError(
-                    "Rauthy verification decision was not available "
-                    f"(path={urlsplit(page.url).path!r}, title={page.title()!r}, "
-                    f"visible text={body_text!r})"
-                ) from exc
-            browser.close()
+        def run_browser_flow() -> None:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                try:
+                    page = browser.new_page(ignore_https_errors=True)
+                    page.goto(complete_uri, wait_until="domcontentloaded")
+                    username_input = page.locator(
+                        'input[type="email"], input[autocomplete="username"], '
+                        'input[name="email"], input[type="text"]'
+                    ).first
+                    username_input.wait_for(state="visible", timeout=10_000)
+                    username_input.fill(username)
+                    _submit_password_step(page, password)
+                    user_code_input = page.get_by_label("User Code", exact=True)
+                    user_code_input.wait_for(state="visible", timeout=10_000)
+                    user_code_input.fill(user_code)
+                    page.get_by_role("button", name="Submit", exact=True).click()
+
+                    names = (
+                        r"accept|approve|allow|confirm|authorize|批准|允许"
+                        if accept
+                        else r"decline|deny|拒绝"
+                    )
+                    page.get_by_role("button", name=re.compile(names, re.I)).click(
+                        timeout=30_000
+                    )
+                    message = (
+                        r"The request has been accepted"
+                        if accept
+                        else r"The request has been declined"
+                    )
+                    page.get_by_text(re.compile(message, re.I)).wait_for(
+                        state="visible", timeout=10_000
+                    )
+                finally:
+                    browser.close()
+
+        _run_device_browser_step(run_browser_flow)
 
     approved = start()
     code, lifetime, interval = (
@@ -450,6 +452,7 @@ def _compose_bootstrap_override(
     raft_secret: str,
     api_secret: str,
     rp_origin: str,
+    admin_password: str,
 ) -> Path:
     override = directory / "compose.bootstrap.json"
     encryption_key_id = secrets.token_hex(4)
@@ -462,6 +465,7 @@ def _compose_bootstrap_override(
                         "environment": {
                             "LOCAL_TEST": "false",
                             "BOOTSTRAP_DIR": "/app/bootstrap",
+                            "BOOTSTRAP_ADMIN_PASSWORD_PLAIN": admin_password,
                             "HQL_SECRET_RAFT": raft_secret,
                             "HQL_SECRET_API": api_secret,
                             "HQL_NODE_ID": "1",
@@ -851,6 +855,7 @@ def main() -> None:
             secrets.token_urlsafe(48),
             secrets.token_urlsafe(48),
             f"https://localhost:{ports['rauthy']}",
+            secrets.token_urlsafe(32),
         )
         try:
             username, password, api_secret = _build_bootstrap_and_start_rauthy(

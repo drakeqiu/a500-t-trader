@@ -10,6 +10,7 @@ import pytest
 from scripts.compose_rauthy_browser_e2e import (
     _market_data_images,
     _rauthy_settings,
+    _run_device_browser_step,
     _validate_discovery,
     _write_bootstrap,
     internal_jwks_uri,
@@ -178,9 +179,22 @@ def test_bootstrap_key_is_created_after_wheel_and_image_builds(
 
     events: list[str] = []
     bootstrap = tmp_path / "bootstrap"
+    admin_password = "private-bootstrap-admin-password"
     override = runner._compose_bootstrap_override(
-        tmp_path, "raft-secret", "internal-api-secret", "https://localhost:18443"
+        tmp_path,
+        "raft-secret",
+        "internal-api-secret",
+        "https://localhost:18443",
+        admin_password,
     )
+    override_config = json.loads(override.read_text())
+    assert (
+        override_config["services"]["rauthy"]["environment"][
+            "BOOTSTRAP_ADMIN_PASSWORD_PLAIN"
+        ]
+        == admin_password
+    )
+    assert override.stat().st_mode & 0o777 == 0o600
 
     def run(command, **_kwargs):
         if command[0] == "uv":
@@ -234,3 +248,20 @@ def test_bootstrap_and_start_failure_still_cleans_compose_project(
     assert "--volumes" in cleanup
     assert "--remove-orphans" in cleanup
     assert "--rmi" in cleanup
+
+
+def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -> None:
+    verification_uri = "https://idp.example.test/device?user_code=secret-code"
+    password = "secret-password"
+
+    def fail_with_sensitive_details() -> None:
+        raise RuntimeError(f"navigation failed at {verification_uri}; {password}")
+
+    with pytest.raises(AssertionError) as error:
+        _run_device_browser_step(fail_with_sensitive_details)
+
+    assert str(error.value) == "Rauthy device authorization browser interaction failed"
+    assert verification_uri not in str(error.value)
+    assert password not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__

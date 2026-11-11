@@ -1,6 +1,6 @@
 # Isolated Rauthy browser/device/API acceptance
 
-This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, and generated self-signed HTTPS; only HTTPS is published, bound to `127.0.0.1`. A separate `rauthy-data` volume persists Rauthy data only for the run. The default Keycloak configuration and API token validation are unchanged.
+This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, a per-run generated initial administrator password, and generated self-signed HTTPS; only HTTPS is published, bound to `127.0.0.1`. The bootstrap override is private to the run, and the explicit initial password prevents Rauthy from generating and logging a default administrator password. A separate `rauthy-data` volume persists Rauthy data only for the run. The default Keycloak configuration and API token validation are unchanged.
 
 ## Prerequisites and run
 
@@ -17,6 +17,7 @@ The runner rebuilds the current backend wheel before building the Compose servic
 Rauthy's discovery issuer is `https://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation.
 
 The runner creates a disposable enabled, email-verified account and separate public clients for browser authorization and the independent device-code grant in a private temporary bootstrap directory. Rauthy v0.37.2's bootstrap client schema does not contain `default_aud`; the runner bootstraps a temporary API key restricted to client updates, then sets and reads back `default_aud: ["a500-api"]` through Rauthy's supported client API. The device client enables only `urn:ietf:params:oauth:grant-type:device_code`, signs access and ID tokens with RS256, and issues five-minute access tokens.
+Browser automation failures are reported with a fixed message; Playwright diagnostics, verification URLs, test credentials, and page content are not included in the raised error.
 
 | Setting               | Value                                      |
 | --------------------- | ------------------------------------------ |
