@@ -18,17 +18,17 @@ Rauthy's discovery issuer is `https://localhost:<rauthy-port>/auth/v1/`; the run
 
 The runner creates a disposable enabled, email-verified account and separate public clients for browser authorization and the independent device-code grant in a private temporary bootstrap directory. Rauthy v0.37.2's bootstrap client schema does not contain `default_aud`; the runner bootstraps a temporary API key restricted to client updates, then sets and reads back `default_aud: ["a500-api"]` through Rauthy's supported client API. The device client enables only `urn:ietf:params:oauth:grant-type:device_code`, signs access and ID tokens with RS256, and issues five-minute access tokens.
 
-| Setting | Value |
-| --- | --- |
-| Client ID | `a500-browser-client` |
-| Client type | Public, no secret |
-| Redirect URI | `http://localhost:<printed-gateway-port>/` |
-| Allowed origin | `http://localhost:<printed-gateway-port>` |
-| Grant | Authorization Code |
-| PKCE | Required, S256 |
-| Signing algorithm | RS256 (not the EdDSA default) |
-| Default audience | `a500-api` |
-| Access-token lifetime | 300 seconds |
+| Setting               | Value                                      |
+| --------------------- | ------------------------------------------ |
+| Client ID             | `a500-browser-client`                      |
+| Client type           | Public, no secret                          |
+| Redirect URI          | `http://localhost:<printed-gateway-port>/` |
+| Allowed origin        | `http://localhost:<printed-gateway-port>`  |
+| Grant                 | Authorization Code                         |
+| PKCE                  | Required, S256                             |
+| Signing algorithm     | RS256 (not the EdDSA default)              |
+| Default audience      | `a500-api`                                 |
+| Access-token lifetime | 300 seconds                                |
 
 The runner performs the PKCE browser-login acceptance, then exercises a separate device authorization context without reusing the A500 browser session. The device flow checks pending, early-poll `slow_down`, approval, denial, and natural expiry. It verifies issuer, audience, RS256, and five-minute token lifetime, then accesses signals, writes and reads an account snapshot, and verifies SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
 
