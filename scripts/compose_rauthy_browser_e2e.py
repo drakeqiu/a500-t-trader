@@ -227,14 +227,25 @@ def _port() -> int:
 def _wait_discovery(issuer: str) -> dict[str, object]:
     ctx = ssl._create_unverified_context()
     deadline = time.monotonic() + 180
+    failures: dict[str, int] = {}
+    last_status: int | None = None
     while time.monotonic() < deadline:
         try:
             with urlopen(issuer.rstrip("/") + "/.well-known/openid-configuration", context=ctx, timeout=3) as response:
                 result = json.load(response)
             _validate_discovery(issuer, result)
-        except (OSError, TimeoutError, json.JSONDecodeError):
-            time.sleep(2)
-    raise RuntimeError("Rauthy discovery did not become ready")
+            return result
+        except HTTPError as error:
+            last_status = error.code
+            failures["http_error"] = failures.get("http_error", 0) + 1
+            error.close()
+        except (OSError, TimeoutError, json.JSONDecodeError) as error:
+            category = type(error).__name__
+            failures[category] = failures.get(category, 0) + 1
+        time.sleep(2)
+    counts = ", ".join(f"{kind}={count}" for kind, count in sorted(failures.items())) or "none"
+    status = f", last_http_status={last_status}" if last_status is not None else ""
+    raise RuntimeError(f"Rauthy discovery did not become ready ({counts}{status})")
 
 
 def _browser_flow(gateway: str, issuer: str, username: str, password: str) -> None:
