@@ -11,9 +11,9 @@ from scripts.compose_rauthy_browser_e2e import (
     _market_data_images,
     _rauthy_settings,
     _validate_discovery,
+    _write_bootstrap,
     internal_jwks_uri,
     verify_access_token,
-    _write_bootstrap,
 )
 
 
@@ -85,14 +85,23 @@ def test_market_data_image_tags_are_project_scoped() -> None:
 def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
     bootstrap = tmp_path / "bootstrap"
     secret = "x" * 64
-    _write_bootstrap(bootstrap, "https://gateway.example.test", "user@example.test", "test-password", secret)
+    _write_bootstrap(
+        bootstrap,
+        "https://gateway.example.test",
+        "user@example.test",
+        "test-password",
+        secret,
+    )
     clients = json.loads((bootstrap / "clients.json").read_text())
     api_keys = json.loads((bootstrap / "api_keys.json").read_text())
     users = json.loads((bootstrap / "users.json").read_text())
     assert users[0]["given_name"] == "Acceptance"
     assert users[0]["family_name"] == "Tester"
     assert users[0]["email_verified"] is True
-    assert [client["id"] for client in clients] == ["a500-browser-client", "a500-device-client"]
+    assert [client["id"] for client in clients] == [
+        "a500-browser-client",
+        "a500-device-client",
+    ]
     assert [client["flows_enabled"] for client in clients] == [
         ["authorization_code", "refresh_token"],
         ["urn:ietf:params:oauth:grant-type:device_code"],
@@ -109,7 +118,9 @@ def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
         assert client["access_token_lifetime"] == 300
 
 
-def test_bootstrap_key_is_created_after_wheel_and_image_builds(tmp_path, monkeypatch) -> None:
+def test_bootstrap_key_is_created_after_wheel_and_image_builds(
+    tmp_path, monkeypatch
+) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
     events: list[str] = []
@@ -131,7 +142,10 @@ def test_bootstrap_key_is_created_after_wheel_and_image_builds(tmp_path, monkeyp
     )
     assert credentials[0].startswith("acceptance-")
     assert events == ["wheel", "images", "start"]
-def test_bootstrap_and_start_failure_still_cleans_compose_project(monkeypatch) -> None:
+
+def test_bootstrap_and_start_failure_still_cleans_compose_project(
+    monkeypatch,
+) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
     events: list[list[str]] = []
@@ -143,12 +157,20 @@ def test_bootstrap_and_start_failure_still_cleans_compose_project(monkeypatch) -
 
     monkeypatch.setattr(runner.subprocess, "run", run)
     monkeypatch.setattr(runner.shutil, "which", lambda _command: "/usr/bin/podman")
-    monkeypatch.setattr(runner.argparse.ArgumentParser, "parse_args", lambda _parser: None)
+    monkeypatch.setattr(
+        runner.argparse.ArgumentParser,
+        "parse_args",
+        lambda _parser: None,
+    )
 
     with pytest.raises(subprocess.CalledProcessError):
         runner.main()
 
-    cleanup = next(command for command in events if command[0:2] == ["podman", "compose"] and "down" in command)
+    cleanup = next(
+        command
+        for command in events
+        if command[0:2] == ["podman", "compose"] and "down" in command
+    )
     assert "down" in cleanup
     assert "--volumes" in cleanup
     assert "--remove-orphans" in cleanup
