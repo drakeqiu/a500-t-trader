@@ -29,6 +29,7 @@ The runner creates a disposable enabled, email-verified account and separate pub
 | Signing algorithm | RS256 (not the EdDSA default) |
 | Default audience | `a500-api` |
 | Access-token lifetime | 300 seconds |
+
 The runner performs the PKCE browser-login acceptance, then exercises a separate device authorization context without reusing the A500 browser session. The device flow checks pending, early-poll `slow_down`, approval, denial, and natural expiry. It verifies issuer, audience, RS256, and five-minute token lifetime, then accesses signals, writes and reads an account snapshot, and verifies SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
 
 ## Cleanup and safety
