@@ -283,7 +283,7 @@ export default function SignalsPage() {
         {!token && (
           <section className="state-panel" aria-label="需要身份认证">
             <h2>连接后查看策略信号</h2>
-            <p>通过 Keycloak 安全授权后，页面将读取真实信号数据。令牌仅保留在当前标签页内存中。</p>
+            <p>通过身份服务安全授权后，页面将读取真实信号数据。令牌仅保留在当前标签页内存中。</p>
             <button
               className="refresh-button primary"
               onClick={() => void connect()}

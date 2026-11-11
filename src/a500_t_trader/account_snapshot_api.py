@@ -52,7 +52,7 @@ class OIDCAuthenticator:
             raise ValueError(
                 f"OIDC audience must be the shared audience {SHARED_OIDC_AUDIENCE!r}"
             )
-        self.issuer = issuer.rstrip("/")
+        self.issuer = issuer
         self.audience = audience
         self.jwks = PyJWKClient(jwks_uri)
 

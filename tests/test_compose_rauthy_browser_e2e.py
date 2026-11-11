@@ -12,6 +12,7 @@ from scripts.compose_rauthy_browser_e2e import (
     _validate_discovery,
     internal_jwks_uri,
     verify_access_token,
+    _write_bootstrap,
 )
 
 
@@ -56,7 +57,7 @@ def test_rauthy_public_issuer_settings_match_discovery() -> None:
     assert settings == {
         "OIDC_ISSUER": expected_issuer,
         "RAUTHY_HOST_PORT": "18443",
-        "RAUTHY_LISTEN_SCHEME": "https",
+        "RAUTHY_LISTEN_SCHEME": "http_https",
         "RAUTHY_PUB_URL": "localhost:18443",
     }
     _validate_discovery(expected_issuer, {
@@ -80,3 +81,30 @@ def test_market_data_image_tags_are_project_scoped() -> None:
         "MARKET_DATA_CONSUMER_IMAGE": "a500-rauthy-abc123-market-data-consumer:local",
         "MARKET_DATA_REPLAY_IMAGE": "a500-rauthy-abc123-market-data-replay:local",
     }
+
+
+def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
+    bootstrap = tmp_path / "bootstrap"
+    secret = "x" * 64
+    _write_bootstrap(bootstrap, "https://gateway.example.test", "user@example.test", "test-password", secret)
+    clients = json.loads((bootstrap / "clients.json").read_text())
+    api_keys = json.loads((bootstrap / "api_keys.json").read_text())
+    users = json.loads((bootstrap / "users.json").read_text())
+    assert users[0]["given_name"] == "Acceptance"
+    assert users[0]["family_name"] == "Tester"
+    assert users[0]["email_verified"] is True
+    assert [client["id"] for client in clients] == ["a500-browser-client", "a500-device-client"]
+    assert [client["flows_enabled"] for client in clients] == [
+        ["authorization_code", "refresh_token"],
+        ["urn:ietf:params:oauth:grant-type:device_code"],
+    ]
+    assert all("default_aud" not in client for client in clients)
+    assert api_keys[0]["name"] == "acceptance-client-update"
+    assert api_keys[0]["exp"] >= int(time.time())
+    assert api_keys[0]["secret"] == {"Plain": secret}
+    assert len(api_keys[0]["secret"]["Plain"]) >= 64
+    assert api_keys[0]["access"] == [{"group": "Clients", "access_rights": ["update"]}]
+    for client in clients:
+        assert client["access_token_alg"] == "RS256"
+        assert client["id_token_alg"] == "RS256"
+        assert client["access_token_lifetime"] == 300
