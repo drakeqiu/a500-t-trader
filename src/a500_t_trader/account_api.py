@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import uvicorn
 
 from .account_snapshot_api import create_app

@@ -1,6 +1,6 @@
 from __future__ import annotations
-import importlib
 
+import importlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -68,7 +68,6 @@ def _client(
     return TestClient(create_app(postgres_url, authenticator))
 
 
-
 def test_oidc_authenticator_preserves_trailing_slash_in_issuer(
     monkeypatch: pytest.MonkeyPatch,
     signing_keys: tuple[Any, Any],
@@ -83,6 +82,7 @@ def test_oidc_authenticator_preserves_trailing_slash_in_issuer(
     authenticator = OIDCAuthenticator(issuer, SHARED_AUDIENCE, "https://jwks.test")
 
     assert authenticator(_token(private_key, issuer=issuer)) == "alice"
+
 
 def test_account_api_accepts_signed_shared_audience_token(
     postgres_url: str,
