@@ -640,20 +640,17 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="a500-rauthy-bootstrap-") as temporary:
         temp_root = Path(temporary)
         bootstrap_dir = temp_root / "bootstrap"
-        username, password, api_secret = _build_bootstrap_and_start_rauthy(
-            prefix, env, bootstrap_dir, gateway
-        )
-        override = _compose_bootstrap_override(
-            temp_root,
-            secrets.token_urlsafe(48),
-            secrets.token_urlsafe(48),
-            f"https://localhost:{ports['rauthy']}",
-        )
-        prefix.extend(("-f", str(override)))
         try:
-            _build_bootstrap_and_start_rauthy(
-                prefix, env, bootstrap_dir, gateway, username, password, api_secret
+            username, password, api_secret = _build_bootstrap_and_start_rauthy(
+                prefix, env, bootstrap_dir, gateway
             )
+            override = _compose_bootstrap_override(
+                temp_root,
+                secrets.token_urlsafe(48),
+                secrets.token_urlsafe(48),
+                f"https://localhost:{ports['rauthy']}",
+            )
+            prefix.extend(("-f", str(override)))
             try:
                 discovery = _wait_discovery(issuer)
             except Exception:
@@ -680,7 +677,8 @@ def main() -> None:
             _device_grant(gateway, issuer, username, password)
         finally:
             subprocess.run([*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"], cwd=ROOT, env=env, check=False, timeout=180)
-            subprocess.run(["podman", "unshare", "chown", "-R", "0:0", str(bootstrap_dir)], check=False)
+            if bootstrap_dir.exists():
+                subprocess.run(["podman", "unshare", "chown", "-R", "0:0", str(bootstrap_dir)], check=False)
 
 
 if __name__ == "__main__":

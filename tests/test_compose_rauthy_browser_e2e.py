@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
 import time
 
 import pytest
@@ -130,3 +131,25 @@ def test_bootstrap_key_is_created_after_wheel_and_image_builds(tmp_path, monkeyp
     )
     assert credentials[0].startswith("acceptance-")
     assert events == ["wheel", "images", "start"]
+def test_bootstrap_and_start_failure_still_cleans_compose_project(monkeypatch) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    events: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        events.append(command)
+        if "build" in command:
+            raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner.shutil, "which", lambda _command: "/usr/bin/podman")
+    monkeypatch.setattr(runner.argparse.ArgumentParser, "parse_args", lambda _parser: None)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        runner.main()
+
+    cleanup = next(command for command in events if command[0:2] == ["podman", "compose"] and "down" in command)
+    assert "down" in cleanup
+    assert "--volumes" in cleanup
+    assert "--remove-orphans" in cleanup
+    assert "--rmi" in cleanup
