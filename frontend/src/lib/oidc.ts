@@ -1,4 +1,4 @@
-const configuredIssuer = process.env.NEXT_PUBLIC_OIDC_ISSUER?.replace(/\/$/, "");
+const configuredIssuer = process.env.NEXT_PUBLIC_OIDC_ISSUER;
 const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "a500-browser-client";
 const transactionKey = "a500.oidc.transaction";
 const transactionLifetime = 10 * 60 * 1000;
@@ -79,8 +79,9 @@ export function pkceChallenge(verifier: string): string {
 
 async function discover(signal?: AbortSignal) {
   if (!configuredIssuer) throw new Error("缺少 NEXT_PUBLIC_OIDC_ISSUER 配置。");
-  const issuer = new URL(configuredIssuer, window.location.origin).toString().replace(/\/$/, "");
-  const response = await fetch(`${issuer}/.well-known/openid-configuration`, {
+  const issuer = new URL(configuredIssuer, window.location.origin).toString();
+  const discoveryUrl = `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
+  const response = await fetch(discoveryUrl, {
     cache: "no-store",
     signal,
   });

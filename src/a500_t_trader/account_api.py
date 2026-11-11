@@ -5,10 +5,19 @@ from __future__ import annotations
 import uvicorn
 
 from .account_snapshot_api import create_app
-from .cli.runtime import create_provider_from_env
+from .cli.runtime import MissingConfigurationError, create_provider_from_env
 from .market_data import MarketDataService
 
-app = create_app(market_data=MarketDataService(create_provider_from_env()))
+
+def create_market_data_service() -> MarketDataService | None:
+    """Use configured market data, while keeping it optional for API startup."""
+    try:
+        return MarketDataService(create_provider_from_env())
+    except MissingConfigurationError:
+        return None
+
+
+app = create_app(market_data=create_market_data_service())
 
 
 def main() -> None:

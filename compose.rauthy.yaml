@@ -3,7 +3,7 @@ services:
     image: ghcr.io/sebadob/rauthy:0.37.2
     environment:
       LOCAL_TEST: "true"
-      LISTEN_SCHEME: https
+      LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-https}
       PUB_URL: localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
       HQL_DATA_DIR: /app/data
     ports:
