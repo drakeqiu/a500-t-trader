@@ -107,6 +107,19 @@ def test_account_snapshot_ownership_uses_verified_subject(
         assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
         alice_snapshot = client.get("/v1/account-snapshot", headers=alice).json()
         assert alice_snapshot["holdings"] == {"510300": 100}
+        bob_snapshot = {**snapshot, "holdings": {"510300": 900}, "available_cash": "999.00"}
+        bob_created = client.put(
+            "/v1/account-snapshot",
+            json=bob_snapshot,
+            headers={**bob, "If-None-Match": "*"},
+        )
+        assert bob_created.status_code == 201
+        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
+            "510300": 100
+        }
+        assert client.get("/v1/account-snapshot", headers=bob).json()["holdings"] == {
+            "510300": 900
+        }
 
 
 @pytest.mark.parametrize(
