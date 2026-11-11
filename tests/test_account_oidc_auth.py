@@ -31,21 +31,65 @@ def _token(
     issuer: str = ISSUER,
     audience: str = SHARED_AUDIENCE,
     expires_at: datetime | None = None,
+    roles: list[str] | None = None,
 ) -> str:
     now = datetime.now(UTC)
+    claims: dict[str, Any] = {
+        "sub": subject,
+        "iss": issuer,
+        "aud": audience,
+        "iat": now,
+        "exp": expires_at or now + timedelta(minutes=5),
+    }
+    if roles is not None:
+        claims["roles"] = roles
     return jwt.encode(
-        {
-            "sub": subject,
-            "iss": issuer,
-            "aud": audience,
-            "iat": now,
-            "exp": expires_at or now + timedelta(minutes=5),
-        },
+        claims,
         private_key,
         algorithm="RS256",
         headers={"kid": "test-key"},
     )
 
+
+def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
+    postgres_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    alice = {"Authorization": f"Bearer {_token(private_key, subject='alice')}"}
+    admin = {
+        "Authorization": f"Bearer {_token(private_key, subject='idp-admin', roles=['admin'])}"
+    }
+    snapshot = {
+        "as_of": "2026-11-04T09:30:00+08:00",
+        "holdings": {"510300": 100},
+        "protected_floor": {"510300": 20},
+        "sellable": {"510300": 80},
+        "cost_basis": {"510300": "3.8500"},
+        "available_cash": "125.50",
+    }
+    with _client(postgres_url, monkeypatch, public_key) as client:
+        created = client.put(
+            "/v1/account-snapshot",
+            json=snapshot,
+            headers={**alice, "If-None-Match": "*"},
+        )
+        assert created.status_code == 201
+
+        # The IdP admin subject is distinct and cannot use Alice's ETag to
+        # update her snapshot; identity-management roles do not change ownership.
+        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
+        admin_write = client.put(
+            "/v1/account-snapshot",
+            json={**snapshot, "holdings": {"510300": 999}},
+            headers={**admin, "If-Match": created.headers["ETag"]},
+        )
+        assert admin_write.status_code == 412
+        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
+        assert client.get("/v1/account-snapshot", headers=alice).json()[
+            "holdings"
+        ] == {"510300": 100}
 
 @pytest.fixture
 def signing_keys() -> tuple[Any, Any]:
