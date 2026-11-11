@@ -125,8 +125,8 @@ def test_bootstrap_key_is_created_after_wheel_and_image_builds(tmp_path, monkeyp
             assert key["exp"] > int(time.time())
 
     monkeypatch.setattr(runner.subprocess, "run", run)
-    runner._build_bootstrap_and_start_rauthy(
-        ["podman", "compose"], {}, bootstrap, "http://localhost:8765",
-        "acceptance@example.test", "test-password", "x" * 64,
+    credentials = runner._build_bootstrap_and_start_rauthy(
+        ["podman", "compose"], {}, bootstrap, "http://localhost:8765"
     )
+    assert credentials[0].startswith("acceptance-")
     assert events == ["wheel", "images", "start"]

@@ -563,10 +563,7 @@ def _build_bootstrap_and_start_rauthy(
     env: dict[str, str],
     bootstrap_dir: Path,
     gateway: str,
-    username: str,
-    password: str,
-    api_secret: str,
-) -> None:
+) -> tuple[str, str, str]:
     subprocess.run(
         [
             "uv", "build", "--wheel", "--clear", "--out-dir", str(ROOT / "dist"),
@@ -584,6 +581,9 @@ def _build_bootstrap_and_start_rauthy(
         check=True,
         timeout=900,
     )
+    username = f"acceptance-{secrets.token_hex(6)}@example.test"
+    password = secrets.token_urlsafe(24)
+    api_secret = secrets.token_urlsafe(48)
     _write_bootstrap(bootstrap_dir, gateway, username, password, api_secret)
     subprocess.run(
         [*prefix, "up", "-d", "rauthy"],
@@ -592,6 +592,7 @@ def _build_bootstrap_and_start_rauthy(
         check=True,
         timeout=180,
     )
+    return username, password, api_secret
 
 
 def main() -> None:
@@ -639,9 +640,9 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="a500-rauthy-bootstrap-") as temporary:
         temp_root = Path(temporary)
         bootstrap_dir = temp_root / "bootstrap"
-        username = f"acceptance-{secrets.token_hex(6)}@example.test"
-        password = secrets.token_urlsafe(24)
-        api_secret = secrets.token_urlsafe(48)
+        username, password, api_secret = _build_bootstrap_and_start_rauthy(
+            prefix, env, bootstrap_dir, gateway
+        )
         override = _compose_bootstrap_override(
             temp_root,
             secrets.token_urlsafe(48),
