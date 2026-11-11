@@ -1,10 +1,12 @@
 """Run isolated Rauthy browser login and protected-API acceptance flow."""
 from __future__ import annotations
 
+import argparse
 import base64
 import getpass
 import json
 import os
+import secrets
 import re
 import shlex
 import shutil
