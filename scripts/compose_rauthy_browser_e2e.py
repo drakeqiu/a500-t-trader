@@ -558,6 +558,42 @@ def _rauthy_diagnostics(prefix: list[str], env: dict[str, str], project: str, us
     )
 
 
+def _build_bootstrap_and_start_rauthy(
+    prefix: list[str],
+    env: dict[str, str],
+    bootstrap_dir: Path,
+    gateway: str,
+    username: str,
+    password: str,
+    api_secret: str,
+) -> None:
+    subprocess.run(
+        [
+            "uv", "build", "--wheel", "--clear", "--out-dir", str(ROOT / "dist"),
+            "--default-index", "https://mirrors.aliyun.com/pypi/simple/",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        timeout=180,
+    )
+    subprocess.run(
+        [*prefix, "build", "signal-api", "account-api", "jobs-api", "frontend", "gateway"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        timeout=900,
+    )
+    _write_bootstrap(bootstrap_dir, gateway, username, password, api_secret)
+    subprocess.run(
+        [*prefix, "up", "-d", "rauthy"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        timeout=180,
+    )
+
+
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     command = shlex.split(os.environ.get("PODMAN_COMPOSE", "podman compose"))
@@ -606,7 +642,6 @@ def main() -> None:
         username = f"acceptance-{secrets.token_hex(6)}@example.test"
         password = secrets.token_urlsafe(24)
         api_secret = secrets.token_urlsafe(48)
-        _write_bootstrap(bootstrap_dir, gateway, username, password, api_secret)
         override = _compose_bootstrap_override(
             temp_root,
             secrets.token_urlsafe(48),
@@ -615,24 +650,9 @@ def main() -> None:
         )
         prefix.extend(("-f", str(override)))
         try:
-            subprocess.run(
-                [
-                    "uv",
-                    "build",
-                    "--wheel",
-                    "--clear",
-                    "--out-dir",
-                    str(ROOT / "dist"),
-                    "--default-index",
-                    "https://mirrors.aliyun.com/pypi/simple/",
-                ],
-                cwd=ROOT,
-                env=env,
-                check=True,
-                timeout=180,
+            _build_bootstrap_and_start_rauthy(
+                prefix, env, bootstrap_dir, gateway, username, password, api_secret
             )
-            subprocess.run([*prefix, "build", "signal-api", "account-api", "jobs-api", "frontend", "gateway"], cwd=ROOT, env=env, check=True, timeout=900)
-            subprocess.run([*prefix, "up", "-d", "rauthy"], cwd=ROOT, env=env, check=True, timeout=180)
             try:
                 discovery = _wait_discovery(issuer)
             except Exception:

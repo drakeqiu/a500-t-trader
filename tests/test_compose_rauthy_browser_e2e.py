@@ -53,7 +53,6 @@ def test_rejects_remote_or_http_jwks() -> None:
 def test_rauthy_public_issuer_settings_match_discovery() -> None:
     settings = _rauthy_settings("18443")
     expected_issuer = "https://localhost:18443/auth/v1/"
-
     assert settings == {
         "OIDC_ISSUER": expected_issuer,
         "RAUTHY_HOST_PORT": "18443",
@@ -72,7 +71,6 @@ def test_rejects_discovery_with_mismatched_issuer() -> None:
             "issuer": "https://wrong:18443/auth/v1/",
             "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
         })
-
 
 
 def test_market_data_image_tags_are_project_scoped() -> None:
@@ -108,3 +106,27 @@ def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
         assert client["access_token_alg"] == "RS256"
         assert client["id_token_alg"] == "RS256"
         assert client["access_token_lifetime"] == 300
+
+
+def test_bootstrap_key_is_created_after_wheel_and_image_builds(tmp_path, monkeypatch) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    events: list[str] = []
+    bootstrap = tmp_path / "bootstrap"
+
+    def run(command, **_kwargs):
+        if command[0] == "uv":
+            events.append("wheel")
+        elif "build" in command:
+            events.append("images")
+        else:
+            events.append("start")
+            key = json.loads((bootstrap / "api_keys.json").read_text())[0]
+            assert key["exp"] > int(time.time())
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    runner._build_bootstrap_and_start_rauthy(
+        ["podman", "compose"], {}, bootstrap, "http://localhost:8765",
+        "acceptance@example.test", "test-password", "x" * 64,
+    )
+    assert events == ["wheel", "images", "start"]
