@@ -33,6 +33,22 @@ Browser automation failures are reported with a fixed message; Playwright diagno
 
 The runner performs the PKCE browser-login acceptance, then exercises a separate device authorization context without reusing the A500 browser session. The device flow checks pending, early-poll `slow_down`, approval, denial, and natural expiry. It verifies issuer, audience, RS256, and five-minute token lifetime, then accesses signals, writes and reads an account snapshot, and verifies SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
 
+## Redacted acceptance evidence
+
+A real Podman Compose run against Rauthy v0.37.2 completed in 505.87 seconds, including the build and natural device-code expiry. Sanitized runner output:
+
+```text
+Verified PKCE browser login, token claims, protected signal read, snapshot write/read.
+Device protocol: authorization_pending.
+Device protocol: slow_down; respecting updated poll interval.
+Device protocol: approved; RS256, default audience and five-minute token verified.
+Device protocol: user denial terminated without a token.
+Device protocol: waiting for natural expiry (300s).
+Device protocol: expiry terminated without a token.
+```
+
+The approved device token accessed the protected signal API, wrote and read an account snapshot, and passed the authenticated SSE acceptance through the public gateway. The client API read back `a500-api` as the default audience. The denial and expiry paths returned no usable token. The run used a per-run generated administrator password; the runner emitted no credentials, tokens, verification code, or password. Compose teardown emitted a rootless-network permission warning; a scoped post-run Podman audit found no matching containers, images, volumes, or networks.
+
 ## Cleanup and safety
 
 The `finally` cleanup executes Compose `down --volumes --remove-orphans --rmi local` against only the random project. This removes its containers, network, database volumes (including Rauthy Hiqlite), and locally built project images. The downloaded pinned Rauthy image is retained. Ctrl-C follows the same cleanup. The local-test mode/demo admin are unsafe outside this disposable localhost setup. Re-run starts with fresh data and requires recreating the client and user.
