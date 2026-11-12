@@ -66,6 +66,26 @@ describe("authorization code with PKCE", () => {
     expect(authorization.origin).toBe(location.origin);
   });
 
+  it("preserves the issuer's trailing slash while joining the discovery URL", async () => {
+    const trailingSlashIssuer = "https://identity.example/auth/v1/";
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        issuer: trailingSlashIssuer,
+        authorization_endpoint: `${trailingSlashIssuer}authorize`,
+        token_endpoint: `${trailingSlashIssuer}token`,
+      }),
+    );
+    vi.stubEnv("NEXT_PUBLIC_OIDC_ISSUER", trailingSlashIssuer);
+    vi.stubGlobal("fetch", fetchMock);
+    const { beginAuthorization } = await import("./oidc");
+
+    await beginAuthorization();
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://identity.example/auth/v1/.well-known/openid-configuration",
+    );
+  });
+
   it("uses random state and S256, consumes the callback before exchanging and never stores the token", async () => {
     const fetchMock = vi
       .fn()

@@ -38,6 +38,10 @@ class ConfigurationError(ProviderStartupError):
     """Provider settings are missing or malformed."""
 
 
+
+class MissingConfigurationError(ConfigurationError):
+    """Required provider settings are absent."""
+
 class AuthenticationError(ProviderStartupError):
     """Provider credentials were rejected."""
 
@@ -65,7 +69,7 @@ def create_provider_from_env[ProviderT](
     settings.update(process_env)
 
     if any(not settings.get(key) for key in _REQUIRED_SETTINGS):
-        raise ConfigurationError("Missing required AD provider configuration")
+        raise MissingConfigurationError("Missing required AD provider configuration")
     username = settings["AD_USERNAME"]
     password = settings["AD_PASSWORD"]
     host = settings["AD_HOST"]

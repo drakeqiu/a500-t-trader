@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -112,6 +113,22 @@ def _client(
     )
     authenticator = OIDCAuthenticator(ISSUER, SHARED_AUDIENCE, "https://jwks.test")
     return TestClient(create_app(postgres_url, authenticator))
+
+
+def test_oidc_authenticator_preserves_trailing_slash_in_issuer(
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    monkeypatch.setattr(
+        account_api,
+        "PyJWKClient",
+        lambda jwks_uri: StaticJwks(jwks_uri, public_key),
+    )
+    issuer = f"{ISSUER}/auth/v1/"
+    authenticator = OIDCAuthenticator(issuer, SHARED_AUDIENCE, "https://jwks.test")
+
+    assert authenticator(_token(private_key, issuer=issuer)) == "alice"
 
 
 def test_account_api_accepts_signed_shared_audience_token(
@@ -296,3 +313,60 @@ def test_account_api_documentation_requires_valid_bearer_credentials(
         assert authenticated.status_code == 200
         if path == "/openapi.json":
             assert authenticated.json()["info"]["title"] == "A500 account snapshot API"
+
+
+def test_account_api_starts_without_optional_market_data_credentials(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", SHARED_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
+    for name in ("AD_USERNAME", "AD_PASSWORD", "AD_HOST", "AD_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        account_api,
+        "create_app",
+        lambda *, market_data: type(
+            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+        )(),
+    )
+    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    assert module.app.state.market_data is None
+
+
+def test_account_api_preserves_dotenv_market_data_provider(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".env").write_text(
+        "AD_USERNAME=dotenv-user\nAD_PASSWORD=dotenv-secret\n"
+        "AD_HOST=market.example\nAD_PORT=9876\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", SHARED_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
+    for name in ("AD_USERNAME", "AD_PASSWORD", "AD_HOST", "AD_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    import a500_t_trader.cli.runtime as runtime
+
+    calls: list[tuple[str, str, str, int]] = []
+
+    class Provider:
+        def __init__(self, username, password, host, port):
+            calls.append((username, password, host, port))
+
+    monkeypatch.setattr(runtime, "AmazingDataProvider", Provider)
+    monkeypatch.setattr(
+        account_api,
+        "create_app",
+        lambda *, market_data: type(
+            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+        )(),
+    )
+    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    assert module.app.state.market_data is not None
+    assert calls == [("dotenv-user", "dotenv-secret", "market.example", 9876)]
+    assert "dotenv-secret" not in repr(module.app.state.market_data)
