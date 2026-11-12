@@ -1,5 +1,14 @@
 services:
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      - "127.0.0.1:${MAILPIT_HOST_PORT:?MAILPIT_HOST_PORT is required}:8025"
+    expose:
+      - "1025"
+
   rauthy:
+    depends_on:
+      - mailpit
     image: ghcr.io/sebadob/rauthy:0.37.2
     environment:
       LOCAL_TEST: ${RAUTHY_LOCAL_TEST:-true}
@@ -8,6 +17,13 @@ services:
       HQL_DATA_DIR: /app/data
       RP_ID: localhost
       RP_ORIGIN: https://localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
+      SMTP_URL: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS_MODE: danger-insecure
+      SMTP_FROM: noreply@localhost
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      OPEN_USER_REG: "false"
       HQL_NODE_ID: ${RAUTHY_NODE_ID:-}
       HQL_NODES: ${RAUTHY_NODES:-}
       HQL_SECRET_RAFT: ${RAUTHY_SECRET_RAFT:-}

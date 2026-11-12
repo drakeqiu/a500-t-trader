@@ -28,9 +28,21 @@ The runner then calls the public API with the access token issued before disable
 
 This is a disposable local acceptance fixture, not evidence from a production identity deployment. A real deployment's administrator and authorized browser/device credentials, network, and gateway must be used to repeat the same sequence before claiming production behavior.
 
+## 用户准入、邮箱变更与邮件捕获
+
+隔离 Rauthy 使用 `OPEN_USER_REG=false`，测试账号由一次性 bootstrap 创建并已启用、已验证邮箱，不会发送账户激活邮件。该 bootstrap 用于自动化验收，不等同于人工管理员在 Rauthy 管理界面创建用户；真实环境必须由管理员创建并审批账号，禁止开放自助注册。
+
+启动 runner 后，终端会显示本次随机端口的 Mailpit 地址。Mailpit 只在本地回收邮件，不会向真实邮箱投递；Compose 项目随机命名，退出时会删除本项目容器、网络、卷和本地构建镜像，并删除本次才拉取的 Mailpit 镜像（预先已有的 Mailpit 镜像会保留）。邮箱变更验收会修改一次性浏览器用户邮箱，再使用新邮箱登录；runner 比对变更前后的 `sub`，并以新 token 读取先前创建的账户快照。另一用户读取该快照仍须返回 `404`。系统按稳定的身份主体 ID 归属业务数据，不按邮箱转移数据。
+
+此版本仅布置本地 Mailpit SMTP 接收端；密码恢复请求、恢复邮件中的一次性链接及重设后重新登录尚未纳入 runner 的端到端验证。因此不得把 Mailpit 已启动或邮件已捕获称为恢复验收通过。普通密码登录不要求 Passkey。localhost HTTP Passkey 注册和登录仍须真人在真实设备／认证器上执行；未执行前属于未通过，不可推断局域网明文可用。
+
+## 当前验收边界
+
+runner 自动验证的是隔离 Compose 中的 Rauthy，而不是部署环境。用户邮箱变更会实际操作 Rauthy 管理 API，并通过浏览器重新认证及业务 API 验证主体连续性。用户自助注册关闭、真实管理员创建／审批、邮箱恢复全流程，以及 localhost Passkey 都需要分别完成相应的真实验收后，才能勾选 issue #226 对应标准。
+
 ## Cleanup and safety
 
-The `finally` cleanup executes Compose `down --volumes --remove-orphans --rmi local` against only the random project. This removes its containers, network, database volumes (including Rauthy Hiqlite), and locally built project images. The downloaded pinned Rauthy image is retained. Every run starts with fresh data and recreates all clients and users; no prior test data is migrated.
+`finally` 清理只针对本次随机 Compose 项目：删除容器、网络、数据库卷（包括 Rauthy Hiqlite）和本地构建镜像。若 Mailpit 镜像由本次测试拉取，测试结束后删除；原本已存在的 Mailpit 镜像和固定版本 Rauthy 镜像保留。每次运行都使用新数据重新创建客户端和用户，不迁移旧测试数据。
 
 ## Source note
 

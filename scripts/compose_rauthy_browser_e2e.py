@@ -18,6 +18,49 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
 
+
+def _email_update_payload(user: dict[str, object], new_email: str) -> dict[str, object]:
+    updated = dict(user)
+    updated["email"] = new_email
+    return updated
+
+
+def _change_user_email(
+    issuer: str, key_name: str, key_secret: str, old_email: str, new_email: str
+) -> str:
+    opener = build_opener(
+        ProxyHandler({}),
+        HTTPSHandler(context=ssl._create_unverified_context()),
+    )
+    headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
+    endpoint = issuer.rstrip("/") + f"/users/{old_email}"
+    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        user = json.load(response)
+    if not isinstance(user, dict) or user.get("email") != old_email:
+        raise AssertionError("Rauthy did not return the expected disposable user")
+    user_id = user.get("id")
+    if not isinstance(user_id, str) or not user_id:
+        raise AssertionError("Rauthy user response did not contain a stable subject id")
+    request = Request(
+        endpoint,
+        data=json.dumps(_email_update_payload(user, new_email)).encode(),
+        headers={**headers, "Content-Type": "application/json"},
+        method="PUT",
+    )
+    with opener.open(request, timeout=10) as response:
+        if response.status not in (200, 204):
+            raise RuntimeError(f"Rauthy user email update returned HTTP {response.status}")
+    with opener.open(
+        Request(issuer.rstrip("/") + f"/users/{new_email}", headers=headers),
+        timeout=10,
+    ) as response:
+        updated_user = json.load(response)
+    if updated_user.get("email") != new_email or updated_user.get("id") != user_id:
+        raise AssertionError("Rauthy email update changed or lost the user's subject")
+    return user_id
+
+
+
 def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
     opener = build_opener(
         ProxyHandler({}),
@@ -540,9 +583,13 @@ def main() -> None:
     command = shlex.split(os.environ.get("PODMAN_COMPOSE", "podman compose"))
     if not command or shutil.which(command[0]) is None or "podman" not in Path(command[0]).name:
         raise RuntimeError("Podman Compose is required")
-    project = "a500-rauthy-" + secrets.token_hex(6)
-    ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit")}
+    mailpit_image = "docker.io/axllent/mailpit:v1.27.8"
+    mailpit_image_preexisting = subprocess.run(
+        ["podman", "image", "exists", mailpit_image], check=False, timeout=10
+    ).returncode == 0
+    ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")}
     issuer = f"https://localhost:{ports['rauthy']}/auth/v1/"
+    mailpit = f"http://127.0.0.1:{ports['mailpit']}"
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     env.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
@@ -573,6 +620,9 @@ def main() -> None:
         "RAUTHY_NODES": "1 localhost:8100 localhost:8200",
         "RAUTHY_SECRET_RAFT": secrets.token_urlsafe(32),
         "RAUTHY_SECRET_API": secrets.token_urlsafe(32),
+        "MAILPIT_HOST_PORT": ports["mailpit"],
+        "SMTP_USERNAME": "",
+        "SMTP_PASSWORD": "",
         "RAUTHY_ENC_KEYS": "test/" + encryption_key,
         "RAUTHY_ENC_KEY_ACTIVE": "test",
         **_rauthy_settings(ports["rauthy"]),
@@ -618,6 +668,7 @@ def main() -> None:
                 time.sleep(2)
         else:
             raise RuntimeError("Public gateway did not become ready")
+        print(f"Disposable Mailpit inbox: {mailpit}")
         browser_token, browser_refresh_token = _browser_flow(
             gateway,
             issuer,
@@ -646,6 +697,31 @@ def main() -> None:
             raise AssertionError("Rauthy identity admin could read the browser user's account snapshot")
         if _public_api_request(gateway, "/api/v1/account-snapshot", browser_token)[0] != 200:
             raise AssertionError("Browser user's account snapshot was not available to its owner")
+        original_subject = _decode(browser_token.split(".")[1]).get("sub")
+        changed_email = "browser-renamed@example.test"
+        if _change_user_email(
+            issuer,
+            api_key_name,
+            api_key_secret,
+            "browser@example.test",
+            changed_email,
+        ) != original_subject:
+            raise AssertionError("Rauthy changed the user's subject during email update")
+        renamed_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            changed_email,
+            user_password,
+            create_snapshot=False,
+        )
+        if _decode(renamed_token.split(".")[1]).get("sub") != original_subject:
+            raise AssertionError("Email login changed the authenticated subject")
+        if _public_api_request(
+            gateway, "/api/v1/account-snapshot", renamed_token
+        )[0] != 200:
+            raise AssertionError("Original business data was lost after email update")
+        browser_token = renamed_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
             gateway,
@@ -674,7 +750,7 @@ def main() -> None:
             gateway,
             issuer,
             str(discovery["token_endpoint"]),
-            "browser@example.test",
+            changed_email,
             user_password,
             create_snapshot=False,
         )
@@ -683,13 +759,13 @@ def main() -> None:
         token_exp = _decode(browser_token.split(".")[1]).get("exp")
         if not isinstance(token_exp, int):
             raise AssertionError("Browser access token has no expiry")
-        _disable_user(issuer, api_key_name, api_key_secret, "browser@example.test")
+        _disable_user(issuer, api_key_name, api_key_secret, changed_email)
         if _public_api_request(gateway, "/api/v1/signals", browser_token)[0] != 200:
             raise AssertionError("Previously issued token did not remain valid after user disable")
         if _refresh_token(str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token) not in (400, 401):
             raise AssertionError("Rauthy accepted refresh after the user was disabled")
         if not _new_login_rejected(
-            gateway, issuer, "browser@example.test", user_password,
+            gateway, issuer, changed_email, user_password,
         ):
             raise AssertionError("Rauthy accepted a new browser login after the user was disabled")
         wait_seconds = max(0, token_exp - int(time.time())) + 1
@@ -718,7 +794,19 @@ def main() -> None:
         )
         raise
     finally:
-        subprocess.run([*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"], cwd=ROOT, env=env, check=False, timeout=180)
+        subprocess.run(
+            [*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"],
+            cwd=ROOT,
+            env=env,
+            check=False,
+            timeout=180,
+        )
+        if not mailpit_image_preexisting:
+            subprocess.run(
+                ["podman", "image", "rm", mailpit_image],
+                check=False,
+                timeout=30,
+            )
         temp.cleanup()
 
 

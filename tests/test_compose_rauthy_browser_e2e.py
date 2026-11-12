@@ -7,6 +7,7 @@ import time
 import pytest
 
 from scripts.compose_rauthy_browser_e2e import (
+    _email_update_payload,
     _rauthy_settings,
     _validate_discovery,
     internal_jwks_uri,
@@ -199,3 +200,22 @@ def test_wait_discovery_returns_validated_configuration(
     monkeypatch.setattr(runner.time, "sleep", lambda _: None)
 
     assert runner._wait_discovery(issuer) == discovery
+
+
+def test_email_update_preserves_the_user_record_and_changes_only_email() -> None:
+    current_user = {
+        "id": "stable-subject",
+        "email": "before@example.test",
+        "enabled": True,
+        "roles": ["customer"],
+    }
+
+    updated_user = _email_update_payload(current_user, "after@example.test")
+
+    assert updated_user == {
+        "id": "stable-subject",
+        "email": "after@example.test",
+        "enabled": True,
+        "roles": ["customer"],
+    }
+    assert current_user["email"] == "before@example.test"
