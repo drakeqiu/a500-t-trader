@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import json
 import os
 import time
@@ -24,6 +25,7 @@ from .strategy.intraday_v1_config import (
     load_live_signal_config,
 )
 
+_LOG = logging.getLogger(__name__)
 RETENTION = timedelta(hours=24)
 STREAM_KEY = "a500:signals:events"
 UPDATES_CHANNEL = "a500:signals:updates"
@@ -170,6 +172,9 @@ def create_app(
         try:
             auth(credentials.credentials)
         except Exception as error:
+            _LOG.warning(
+                "OIDC bearer authentication failed: %s", type(error).__name__
+            )
             raise HTTPException(
                 status_code=401,
                 detail="Invalid bearer credentials",

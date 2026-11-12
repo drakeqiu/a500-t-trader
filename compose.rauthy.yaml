@@ -2,13 +2,23 @@ services:
   rauthy:
     image: ghcr.io/sebadob/rauthy:0.37.2
     environment:
-      LOCAL_TEST: "true"
-      LISTEN_SCHEME: https
-      PUB_URL: localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
+      LOCAL_TEST: ${RAUTHY_LOCAL_TEST:-true}
+      LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-https}
+      PUB_URL: ${RAUTHY_PUB_URL:?RAUTHY_PUB_URL is required}
       HQL_DATA_DIR: /app/data
+      RP_ID: localhost
+      RP_ORIGIN: https://localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
+      HQL_NODE_ID: ${RAUTHY_NODE_ID:-}
+      HQL_NODES: ${RAUTHY_NODES:-}
+      HQL_SECRET_RAFT: ${RAUTHY_SECRET_RAFT:-}
+      HQL_SECRET_API: ${RAUTHY_SECRET_API:-}
+      ENC_KEYS: ${RAUTHY_ENC_KEYS:-}
+      ENC_KEY_ACTIVE: ${RAUTHY_ENC_KEY_ACTIVE:-}
+      BOOTSTRAP_DIR: /app/bootstrap
     ports:
       - "127.0.0.1:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8443"
     volumes:
+      - ${RAUTHY_BOOTSTRAP_HOST_DIR:?RAUTHY_BOOTSTRAP_HOST_DIR is required}:/app/bootstrap:ro
       - rauthy-data:/app/data
     expose:
       - "8080"

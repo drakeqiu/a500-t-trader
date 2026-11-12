@@ -7,7 +7,6 @@ import time
 import pytest
 
 from scripts.compose_rauthy_browser_e2e import (
-    _market_data_images,
     _rauthy_settings,
     _validate_discovery,
     internal_jwks_uri,
@@ -15,31 +14,120 @@ from scripts.compose_rauthy_browser_e2e import (
 )
 
 
+def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(tmp_path) -> None:
+    from scripts.compose_rauthy_browser_e2e import _write_bootstrap
+
+    key_name, secret, password = _write_bootstrap(tmp_path, "http://localhost:18080")
+    users = json.loads((tmp_path / "users.json").read_text())
+    clients = json.loads((tmp_path / "clients.json").read_text())
+    api_keys = json.loads((tmp_path / "api_keys.json").read_text())
+
+    assert {user["email"] for user in users} == {
+        "browser@example.test",
+        "device@example.test",
+        "identity-admin@example.test",
+    }
+    assert {user["given_name"] for user in users} == {
+        "browser",
+        "device",
+        "identity-admin",
+    }
+    assert all(user["family_name"] == "Acceptance" for user in users)
+    assert tmp_path.stat().st_mode & 0o001
+    assert all(path.stat().st_mode & 0o004 for path in tmp_path.iterdir())
+    assert all(user["password"] == {"Plain": password} for user in users)
+    assert any("admin" in user["roles"] for user in users)
+    browser_client = next(
+        client for client in clients if client["id"] == "a500-browser-client"
+    )
+    device_client = next(
+        client for client in clients if client["id"] == "a500-device-client"
+    )
+    assert browser_client["allowed_origins"] == ["http://localhost:18080"]
+    assert device_client["allowed_origins"] == []
+    assert all(client["secret"] is None for client in clients)
+    assert all(client["access_token_alg"] == "RS256" for client in clients)
+    assert all(client["id_token_alg"] == "RS256" for client in clients)
+    assert all(
+        10 <= client["auth_code_lifetime"] <= 300
+        for client in clients
+        if "authorization_code" in client["flows_enabled"]
+    )
+    assert key_name == "a500-acceptance"
+    assert api_keys[0]["secret"] == {"Plain": secret}
+    assert len(secret) == 64 and secret.isalnum()
+    assert 500 <= api_keys[0]["exp"] - int(time.time()) <= 600
+    assert all(user["password"] == {"Plain": password} for user in users)
+
+
 def token(header: dict[str, object], claims: dict[str, object]) -> str:
     def encode(value: dict[str, object]) -> str:
-        return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+        return (
+            base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+        )
+
     return f"{encode(header)}.{encode(claims)}.signature"
 
 
 def test_accepts_required_access_token_contract() -> None:
     now = int(time.time())
     issuer = "https://localhost:18443/auth/v1/"
-    verify_access_token(token({"alg": "RS256"}, {"iss": issuer, "aud": ["a500-api"], "iat": now, "exp": now + 300}), issuer, now=now)
+    claims = {
+        "iss": issuer,
+        "aud": ["a500-api"],
+        "iat": now,
+        "exp": now + 300,
+    }
+    verify_access_token(token({"alg": "RS256"}, claims), issuer, now=now)
 
 
-@pytest.mark.parametrize("header,claims", [
-    ({"alg": "EdDSA"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "other", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 401}),
-])
-def test_rejects_wrong_token_contract(header: dict[str, object], claims: dict[str, object]) -> None:
+@pytest.mark.parametrize(
+    "header,claims",
+    [
+        (
+            {"alg": "EdDSA"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "a500-api",
+                "iat": 100,
+                "exp": 400,
+            },
+        ),
+        (
+            {"alg": "RS256"},
+            {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400},
+        ),
+        (
+            {"alg": "RS256"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "other",
+                "iat": 100,
+                "exp": 400,
+            },
+        ),
+        (
+            {"alg": "RS256"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "a500-api",
+                "iat": 100,
+                "exp": 401,
+            },
+        ),
+    ],
+)
+def test_rejects_wrong_token_contract(
+    header: dict[str, object], claims: dict[str, object]
+) -> None:
+    issuer = "https://localhost:18443/auth/v1/"
     with pytest.raises(AssertionError):
-        verify_access_token(token(header, claims), "https://localhost:18443/auth/v1/", now=200)
+        verify_access_token(token(header, claims), issuer, now=200)
 
 
 def test_internal_jwks_keeps_compose_route_and_query() -> None:
-    assert internal_jwks_uri("https://localhost:18443/auth/v1/oidc/certs?k=v") == "http://rauthy:8080/auth/v1/oidc/certs?k=v"
+    jwks = "https://localhost:18443/auth/v1/oidc/certs?k=v"
+    assert internal_jwks_uri(jwks) == ("http://rauthy:8080/auth/v1/oidc/certs?k=v")
 
 
 def test_rejects_remote_or_http_jwks() -> None:
@@ -56,27 +144,54 @@ def test_rauthy_public_issuer_settings_match_discovery() -> None:
     assert settings == {
         "OIDC_ISSUER": expected_issuer,
         "RAUTHY_HOST_PORT": "18443",
-        "RAUTHY_LISTEN_SCHEME": "https",
+        "RAUTHY_LISTEN_SCHEME": "http_https",
         "RAUTHY_PUB_URL": "localhost:18443",
     }
-    _validate_discovery(expected_issuer, {
-        "issuer": expected_issuer,
-        "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
-    })
+    _validate_discovery(
+        expected_issuer,
+        {
+            "issuer": expected_issuer,
+            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+        },
+    )
 
 
 def test_rejects_discovery_with_mismatched_issuer() -> None:
     with pytest.raises(RuntimeError, match="issuer/JWKS mismatch"):
-        _validate_discovery("https://localhost:18443/auth/v1/", {
-            "issuer": "https://wrong:18443/auth/v1/",
-            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
-        })
+        _validate_discovery(
+            "https://localhost:18443/auth/v1/",
+            {
+                "issuer": "https://wrong:18443/auth/v1/",
+                "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+            },
+        )
 
 
+def test_wait_discovery_returns_validated_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
 
-def test_market_data_image_tags_are_project_scoped() -> None:
-    images = _market_data_images("a500-rauthy-abc123")
-    assert images == {
-        "MARKET_DATA_CONSUMER_IMAGE": "a500-rauthy-abc123-market-data-consumer:local",
-        "MARKET_DATA_REPLAY_IMAGE": "a500-rauthy-abc123-market-data-replay:local",
+    issuer = "https://localhost:18443/auth/v1/"
+    discovery = {
+        "issuer": issuer,
+        "jwks_uri": issuer + "oidc/certs",
+        "token_endpoint": issuer + "oidc/token",
     }
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+        def read(self) -> bytes:
+            return json.dumps(discovery).encode()
+
+    monkeypatch.setattr(runner, "urlopen", lambda *args, **kwargs: Response())
+    ticks = iter((0, 0, 181))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+
+    assert runner._wait_discovery(issuer) == discovery

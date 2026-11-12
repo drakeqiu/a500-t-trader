@@ -59,7 +59,9 @@ def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
     private_key, public_key = signing_keys
     alice = {"Authorization": f"Bearer {_token(private_key, subject='alice')}"}
     admin = {
-        "Authorization": f"Bearer {_token(private_key, subject='idp-admin', roles=['admin'])}"
+        "Authorization": (
+            f"Bearer {_token(private_key, subject='idp-admin', roles=['admin'])}"
+        )
     }
     snapshot = {
         "as_of": "2026-11-04T09:30:00+08:00",
@@ -90,6 +92,7 @@ def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
         assert client.get("/v1/account-snapshot", headers=alice).json()[
             "holdings"
         ] == {"510300": 100}
+
 
 @pytest.fixture
 def signing_keys() -> tuple[Any, Any]:
@@ -125,6 +128,25 @@ def test_account_api_accepts_signed_shared_audience_token(
     assert response.status_code == 404
 
 
+def test_oidc_issuer_preserves_trailing_slash(
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    monkeypatch.setattr(
+        account_api,
+        "PyJWKClient",
+        lambda jwks_uri: StaticJwks(jwks_uri, public_key),
+    )
+    issuer = f"{ISSUER}/auth/v1/"
+    authenticator = OIDCAuthenticator(issuer, SHARED_AUDIENCE, "https://jwks.test")
+
+    assert authenticator(_token(private_key, issuer=issuer)) == "alice"
+    with pytest.raises(jwt.InvalidTokenError):
+        authenticator(_token(private_key, issuer=issuer.rstrip("/")))
+
+
+
 def test_account_snapshot_ownership_uses_verified_subject(
     postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -151,7 +173,11 @@ def test_account_snapshot_ownership_uses_verified_subject(
         assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
         alice_snapshot = client.get("/v1/account-snapshot", headers=alice).json()
         assert alice_snapshot["holdings"] == {"510300": 100}
-        bob_snapshot = {**snapshot, "holdings": {"510300": 900}, "available_cash": "999.00"}
+        bob_snapshot = {
+            **snapshot,
+            "holdings": {"510300": 900},
+            "available_cash": "999.00",
+        }
         bob_created = client.put(
             "/v1/account-snapshot",
             json=bob_snapshot,
