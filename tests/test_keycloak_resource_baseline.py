@@ -31,3 +31,45 @@ def test_development_mode_or_unpinned_image_is_rejected(monkeypatch) -> None:
         assert "development-mode" in str(error)
     else:
         raise AssertionError("development Keycloak must not qualify as a baseline")
+def test_resource_sampling_uses_the_selected_compose_definition(monkeypatch) -> None:
+    import argparse
+    import subprocess
+    from threading import Event
+
+    baseline = BASELINE
+
+    definition = ["podman", "compose", "--env-file", "/dev/null", "--project-name", "test"]
+    files = ["compose.yaml", "compose.production.yaml"]
+    observed = []
+    inputs = iter(["", "", "", "1,2"])
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
+    monkeypatch.setattr(baseline, "_run", lambda command, **kwargs: observed.append(command))
+    monkeypatch.setattr(baseline, "_ready", lambda *_args: None)
+    monkeypatch.setattr(
+        baseline, "_collect",
+        lambda compose, services, seconds: (
+            observed.append(compose) or [{"memory_bytes": 10, "cpu_percent_sum": 1}]
+        ),
+    )
+
+    def collect_until_stopped(compose, services, stop, output):
+        observed.append(compose)
+        output.append({"memory_bytes": 20, "cpu_percent_sum": 2})
+        stop.set()
+
+    monkeypatch.setattr(baseline, "_collect_until_stopped", collect_until_stopped)
+    monkeypatch.setattr(
+        baseline.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    args = argparse.Namespace(
+        sample_service=["keycloak", "postgres"],
+        readiness_url="http://localhost/health",
+    )
+
+    baseline._run_round(definition, files, args, 1)
+
+    expected = [*definition, "-f", files[0], "-f", files[1]]
+    assert observed[1] == expected
+    assert observed[2] == expected

@@ -7,7 +7,7 @@ This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Raut
 Install Podman Compose, Python 3.14/uv, repo development dependencies, and Chromium:
 
 ```sh
-uv sync --group dev
+uv sync --group dev --default-index https://mirrors.aliyun.com/pypi/simple/
 uv run playwright install chromium
 uv run python scripts/compose_rauthy_browser_e2e.py
 ```
@@ -76,7 +76,7 @@ The approved device token accessed the protected signal API, wrote and read an a
 
 ## Cleanup and safety
 
-`finally` 清理只针对本次随机 Compose 项目：删除容器、网络、数据库卷（包括 Rauthy Hiqlite）和本地构建镜像。若 Mailpit 镜像由本次测试拉取，测试结束后删除；原本已存在的 Mailpit 镜像和固定版本 Rauthy 镜像保留。每次运行都使用新数据重新创建客户端和用户，不迁移旧测试数据。
+`finally` 清理只针对本次随机 Compose 项目：删除容器、网络、数据库卷（包括 Rauthy Hiqlite）和本地构建镜像。若 Mailpit 或固定版本 Rauthy 镜像由本次测试拉取，测试结束后删除；仅保留运行前已存在的镜像。清理后检查容器、卷和镜像；残留或清理失败会使测试失败。
 
 ## Source note
 

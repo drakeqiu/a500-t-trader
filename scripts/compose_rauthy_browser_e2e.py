@@ -99,11 +99,6 @@ def _perform_password_recovery(
         finally:
             browser.close()
 
-def _password_recovery(
-    issuer: str, mailpit: str, email: str, new_password: str
-) -> None:
-    _perform_password_recovery(issuer, mailpit, email, new_password)
-
 
 def _change_user_email(
     issuer: str, key_name: str, key_secret: str, old_email: str, new_email: str
@@ -394,12 +389,6 @@ def _device_public_api(gateway: str, token: str) -> None:
     ) as response:
         if response.status != 200:
             raise AssertionError(f"Public signal API returned HTTP {response.status}")
-    with opener.open(
-        Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
-    ) as response:
-        etag = response.headers.get("ETag")
-        if not etag:
-            raise AssertionError("Public snapshot read returned no ETag")
     snapshot = {
         "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "holdings": {"510300": 100},
@@ -408,26 +397,55 @@ def _device_public_api(gateway: str, token: str) -> None:
         "cost_basis": {"510300": "3.8500"},
         "available_cash": "125.50",
     }
-    request = Request(
+    create = Request(
         gateway + "/api/v1/account-snapshot",
         data=json.dumps(snapshot).encode(),
-        headers={**headers, "Content-Type": "application/json", "If-Match": etag},
+        headers={
+            **headers,
+            "Content-Type": "application/json",
+            "If-None-Match": "*",
+        },
         method="PUT",
     )
-    with opener.open(request, timeout=20) as response:
+    with opener.open(create, timeout=20) as response:
         if response.status not in (200, 201):
             raise AssertionError(
-                f"Public snapshot write returned HTTP {response.status}"
+                f"Public snapshot creation returned HTTP {response.status}"
             )
     with opener.open(
         Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
     ) as response:
+        if response.status != 200:
+            raise AssertionError(f"Public snapshot read returned HTTP {response.status}")
+        etag = response.headers.get("ETag")
         saved = json.load(response)
+    if not etag:
+        raise AssertionError("Public snapshot read returned no ETag")
     if (
         saved.get("holdings") != {"510300": 100}
         or saved.get("available_cash") != "125.50"
     ):
         raise AssertionError("Public snapshot readback mismatch")
+    snapshot["available_cash"] = "126.50"
+    update = Request(
+        gateway + "/api/v1/account-snapshot",
+        data=json.dumps(snapshot).encode(),
+        headers={
+            **headers,
+            "Content-Type": "application/json",
+            "If-Match": etag,
+        },
+        method="PUT",
+    )
+    with opener.open(update, timeout=20) as response:
+        if response.status not in (200, 201):
+            raise AssertionError(f"Public snapshot write returned HTTP {response.status}")
+    with opener.open(
+        Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
+    ) as response:
+        saved = json.load(response)
+    if saved.get("available_cash") != "126.50":
+        raise AssertionError("Public snapshot write was not visible to its owner")
     request = Request(
         gateway + "/api/v1/signals/stream?symbols=563360", headers=headers
     )
@@ -485,70 +503,6 @@ def internal_jwks_uri(uri: str) -> str:
 
 
 
-
-def _set_default_audience(issuer: str, api_secret: str, gateway: str) -> None:
-    opener = build_opener(
-        ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context())
-    )
-    for client_id, name, redirect_uris, allowed_origins, flows, challenges in (
-        (
-            CLIENT_ID,
-            "A500 browser acceptance",
-            [gateway + "/"],
-            [gateway],
-            ["authorization_code", "refresh_token"],
-            ["S256"],
-        ),
-        (
-            DEVICE_CLIENT_ID,
-            "A500 independent device acceptance",
-            ["http://localhost/"],
-            None,
-            [DEVICE_GRANT],
-            None,
-        ),
-    ):
-        payload = {
-            "name": name,
-            "confidential": False,
-            "redirect_uris": redirect_uris,
-            "post_logout_redirect_uris": [],
-            "allowed_origins": allowed_origins,
-            "enabled": True,
-            "flows_enabled": flows,
-            "access_token_alg": "RS256",
-            "id_token_alg": "RS256",
-            "auth_code_lifetime": 60,
-            "access_token_lifetime": 300,
-            "scopes": ["openid"],
-            "default_scopes": ["openid"],
-            "challenges": challenges,
-            "force_mfa": False,
-            "default_aud": [AUDIENCE],
-        }
-        request = Request(
-            urljoin(issuer, f"clients/{client_id}"),
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"API-Key acceptance-client-update${api_secret}",
-                "Content-Type": "application/json",
-            },
-            method="PUT",
-        )
-        try:
-            with opener.open(request, timeout=10) as response:
-                if response.status != 200:
-                    raise RuntimeError(
-                        f"Rauthy client audience update failed ({response.status})"
-                    )
-                updated = json.load(response)
-        except HTTPError as error:
-            error.close()
-            raise RuntimeError(
-                f"Rauthy client audience update failed ({error.code})"
-            ) from None
-        if updated.get("default_aud") != [AUDIENCE]:
-            raise RuntimeError("Rauthy did not persist the configured client audience")
 
 
 def _compose_bootstrap_override(
@@ -793,148 +747,6 @@ def _assert_token_rejected(gateway: str, id_token: str) -> None:
 
 
 
-        def request_seen(request) -> None:
-            if request.url.startswith(gateway + "/api/"):
-                auth = request.headers.get("authorization", "")
-                if auth.startswith("Bearer "):
-                    observed["token"] = auth[7:]
-
-        def response_seen(response) -> None:
-            if (
-                urlsplit(response.url).path == "/api/v1/signals"
-                and response.request.method == "GET"
-            ):
-                signals.append(response.status)
-
-        page.on("request", request_seen)
-        page.on("response", response_seen)
-        page.goto(gateway + "/signals", wait_until="domcontentloaded")
-        page.get_by_role("button", name="安全连接", exact=True).first.click()
-        username_input = page.locator(
-            'input[type="email"], input[autocomplete="username"], '
-            'input[name="email"], input[type="text"]'
-        ).first
-        try:
-            username_input.wait_for(state="visible", timeout=10_000)
-        except PlaywrightTimeoutError as error:
-            body_text = page.locator("body").inner_text(timeout=2_000)[:300]
-            body_text = body_text.replace(username, "[test account]")
-            path = urlsplit(page.url).path
-            raise RuntimeError(
-                f"Rauthy login form did not load (path={path!r}, "
-                f"title={page.title()!r}, visible text={body_text!r})"
-            ) from error
-        username_input.fill(username)
-        _submit_password_step(page, password)
-        page.wait_for_url(gateway + "/signals**", timeout=120_000)
-        page.wait_for_function(
-            "() => document.body.innerText.includes('策略信号')", timeout=60_000
-        )
-        page.wait_for_timeout(500)
-        if "token" not in observed:
-            raise AssertionError(
-                "Browser did not send authenticated gateway API request"
-            )
-        verify_access_token(observed["token"], issuer)
-        if not signals or signals[-1] != 200:
-            raise AssertionError(
-                f"Protected signal read failed with HTTP statuses {signals}"
-            )
-        page.get_by_role("link", name="资产管理", exact=True).click()
-        page.get_by_role("button", name="创建快照").click()
-        page.get_by_label("快照时间").fill(
-            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        )
-        page.get_by_label("可用现金", exact=True).fill("125.50")
-        page.get_by_role("button", name="添加证券").click()
-        page.get_by_label("第 1 行证券代码").fill("510300")
-        page.get_by_label("第 1 行持有总份额").fill("100")
-        page.get_by_label("第 1 行保护底仓").fill("20")
-        page.get_by_label("第 1 行当前可卖").fill("80")
-        page.get_by_label("第 1 行成本基础").fill("3.8500")
-        with page.expect_response(
-            lambda r: (
-                r.url == gateway + "/api/v1/account-snapshot"
-                and r.request.method == "PUT"
-            )
-        ) as saved:
-            page.get_by_role("button", name="创建账户快照", exact=True).click()
-        if saved.value.status not in (200, 201):
-            raise AssertionError(f"Snapshot write returned HTTP {saved.value.status}")
-        page.wait_for_function(
-            "() => document.body.innerText.includes('账户快照已保存')"
-        )
-        readback = page.evaluate(
-            """async token => {
-                const response = await fetch('/api/v1/account-snapshot', {
-                    headers: {Authorization: `Bearer ${token}`}
-                });
-                return {status: response.status, body: await response.json()};
-            }""",
-            observed["token"],
-        )
-        if (
-            readback["status"] != 200
-            or readback["body"]["holdings"] != {"510300": 100}
-            or readback["body"]["available_cash"] != "125.50"
-        ):
-            raise AssertionError(
-                "Snapshot readback did not match browser-written business data"
-            )
-        print(
-            "Verified PKCE browser login, token claims, protected signal read, "
-            "snapshot write/read."
-        )
-        context.close()
-        browser.close()
-    interval = authorization.get("interval", 5)
-    expires_in = authorization.get("expires_in", 300)
-    if not isinstance(interval, int) or not isinstance(expires_in, int):
-        raise RuntimeError("Rauthy returned invalid device grant timing")
-    deadline = time.monotonic() + expires_in
-    while time.monotonic() < deadline:
-        time.sleep(interval)
-        try:
-            response = urlopen(
-                Request(
-                    token_endpoint,
-                    data=urlencode(
-                        {
-                            "client_id": DEVICE_CLIENT_ID,
-                            "device_code": device_code,
-                            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                        }
-                    ).encode(),
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    method="POST",
-                ),
-                context=ssl._create_unverified_context(),
-                timeout=15,
-            )
-        except HTTPError as error:
-            try:
-                result = json.loads(error.read())
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                raise RuntimeError("Rauthy rejected the device grant") from None
-            if result.get("error") == "authorization_pending":
-                continue
-            if result.get("error") == "slow_down":
-                interval += 5
-                continue
-            raise RuntimeError("Rauthy device authorization did not succeed") from None
-        with response:
-            result = json.load(response)
-        access_token, id_token = result.get("access_token"), result.get("id_token")
-        if not isinstance(access_token, str) or not isinstance(id_token, str):
-            raise AssertionError("Rauthy device grant returned incomplete tokens")
-        verify_access_token(access_token, issuer)
-        status, _, _ = _public_api_request(gateway, "/api/v1/signals", access_token)
-        if status != 200:
-            raise AssertionError(f"Device access token returned HTTP {status} from the public API")
-        _assert_token_rejected(gateway, id_token)
-        return access_token, id_token
-    raise RuntimeError("Rauthy device authorization expired before approval")
-
 
 def _browser_flow(
     gateway: str,
@@ -1097,141 +909,87 @@ def _new_login_rejected(
             browser.close()
 
 
-def _rauthy_diagnostics(
-    prefix: list[str], env: dict[str, str], project: str, username: str
-) -> None:
-    container = f"{project}_rauthy_1"
-    state = subprocess.run(
-        [
-            "podman",
-            "inspect",
-            "--format",
-            "{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}",
-            container,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(
-        "Rauthy container state:",
-        state.stdout.strip() or state.stderr.strip() or "unavailable",
-    )
-    mounts = subprocess.run(
-        [
-            "podman",
-            "inspect",
-            "--format",
-            "{{range .Mounts}}{{println .Destination .Source}}{{end}}",
-            container,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(
-        "Rauthy bootstrap mount:",
-        mounts.stdout.strip() or mounts.stderr.strip() or "unavailable",
-    )
-    logs = subprocess.run(
-        [*prefix, "logs", "--tail=100", "rauthy"],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    for line in (logs.stdout + logs.stderr).splitlines():
-        normalized = line.lower()
-        if ("warn" in normalized or "error" in normalized) and not any(
-            word in normalized for word in ("password", "secret", "token", "api key")
-        ):
-            print(line.replace(username, "[test account]")[:500])
-    jwks_probe = subprocess.run(
-        [
-            *prefix,
-            "exec",
-            "-T",
-            "signal-api",
-            "python",
-            "-c",
-            "import json,os,urllib.request,urllib.error\n"
-            "print('OIDC issuer configured:', "
-            "os.environ.get('OIDC_ISSUER', '<missing>'))\n"
-            "try:\n"
-            " r=urllib.request.urlopen(os.environ['OIDC_JWKS_URI'], timeout=8)\n"
-            " d=json.load(r)\n"
-            " print('Internal JWKS response:', r.status, "
-            "'keys=', len(d.get('keys', [])))\n"
-            "except urllib.error.HTTPError as e:\n"
-            " print('Internal JWKS HTTP error:', e.code)\n"
-            "except Exception as e:\n"
-            " print('Internal JWKS error:', type(e).__name__)",
-        ],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=15,
-    )
-    print(
-        "Internal JWKS probe:",
-        jwks_probe.stdout.strip() or jwks_probe.stderr.strip() or "unavailable",
-    )
 
 
-def _build_bootstrap_and_start_rauthy(
+def _image_exists(image: str) -> bool:
+    result = subprocess.run(
+        ["podman", "image", "exists", image], check=False, timeout=10
+    )
+    return result.returncode == 0
+
+
+def _cleanup_run(
     prefix: list[str],
     env: dict[str, str],
-    bootstrap_dir: Path,
-    gateway: str,
-    bootstrap_override: Path,
-) -> tuple[str, str, str]:
-    subprocess.run(
-        [
-            "uv",
-            "build",
-            "--wheel",
-            "--clear",
-            "--out-dir",
-            str(ROOT / "dist"),
-            "--default-index",
-            "https://mirrors.aliyun.com/pypi/simple/",
-        ],
+    project: str,
+    disposable_images: list[str],
+) -> None:
+    teardown = subprocess.run(
+        [*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"],
         cwd=ROOT,
         env=env,
-        check=True,
+        check=False,
+        capture_output=True,
+        text=True,
         timeout=180,
     )
-    subprocess.run(
-        [
-            *prefix,
-            "build",
-            "signal-api",
-            "account-api",
-            "jobs-api",
-            "frontend",
-            "gateway",
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-        timeout=900,
+    resources = (
+        (
+            "containers",
+            ["podman", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"],
+            ["podman", "rm", "-f"],
+        ),
+        (
+            "volumes",
+            ["podman", "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={project}"],
+            ["podman", "volume", "rm", "-f"],
+        ),
     )
-    username = f"acceptance-{secrets.token_hex(6)}@example.test"
-    password = secrets.token_urlsafe(24)
-    api_secret = secrets.token_urlsafe(48)
-    _write_bootstrap(bootstrap_dir, gateway, username, password, api_secret)
-    prefix.extend(("-f", str(bootstrap_override)))
-    subprocess.run(
-        [*prefix, "up", "-d", "rauthy"],
-        cwd=ROOT,
-        env=env,
+    for resource, command, remove in resources:
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=30
+        )
+        remaining = result.stdout.split()
+        if remaining:
+            subprocess.run([*remove, *remaining], check=True, timeout=60)
+            result = subprocess.run(
+                command, check=True, capture_output=True, text=True, timeout=30
+            )
+        if result.stdout.strip():
+            raise RuntimeError(f"Test-created {resource} survived Compose teardown")
+    result = subprocess.run(
+        ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],
         check=True,
-        timeout=180,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    return username, password, api_secret
+    project_images = [
+        image
+        for image in result.stdout.splitlines()
+        if image.startswith(f"localhost/{project}_")
+    ]
+    for image in project_images:
+        subprocess.run(["podman", "image", "rm", image], check=True, timeout=30)
+    for image in disposable_images:
+        if _image_exists(image):
+            subprocess.run(["podman", "image", "rm", image], check=True, timeout=30)
+    result = subprocess.run(
+        ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if any(
+        image.startswith(f"localhost/{project}_") for image in result.stdout.splitlines()
+    ):
+        raise RuntimeError("Test-created project images survived cleanup")
+    remaining = [image for image in disposable_images if _image_exists(image)]
+    if remaining:
+        raise RuntimeError("Test-created pinned images survived cleanup")
+    if teardown.returncode:
+        raise RuntimeError("Compose teardown failed")
 
 
 def main() -> None:
@@ -1245,9 +1003,10 @@ def main() -> None:
         raise RuntimeError("Podman Compose is required")
     project = "a500-rauthy-" + secrets.token_hex(6)
     mailpit_image = "docker.io/axllent/mailpit:v1.27.8"
-    mailpit_image_preexisting = subprocess.run(
-        ["podman", "image", "exists", mailpit_image], check=False, timeout=10
-    ).returncode == 0
+    rauthy_image = "ghcr.io/sebadob/rauthy:0.37.2"
+    preexisting_images = {
+        image for image in (mailpit_image, rauthy_image) if _image_exists(image)
+    }
     ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")}
     issuer = f"https://localhost:{ports['rauthy']}/auth/v1/"
     mailpit = f"http://127.0.0.1:{ports['mailpit']}"
@@ -1313,6 +1072,7 @@ def main() -> None:
                 env=env,
                 check=True,
                 timeout=30,
+            )
         (
             api_key_name,
             api_key_secret,
@@ -1359,6 +1119,14 @@ def main() -> None:
         device_token, device_id_token = _device_grant(
             gateway, issuer, "device@example.test", user_password
         )
+        device_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            "device@example.test",
+            user_password,
+            create_snapshot=False,
+        )
         admin_token, _ = _browser_flow(
             gateway,
             issuer,
@@ -1371,9 +1139,9 @@ def main() -> None:
         for token in (None, "not.a.jwt"):
             if _public_api_request(gateway, "/api/v1/signals", token)[0] != 401:
                 raise AssertionError("Public API accepted an absent or malformed bearer token")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", device_token)[0] != 404:
+        if _public_api_request(gateway, "/api/v1/account-snapshot", device_token)[0] == 200:
             raise AssertionError("Second Rauthy user could read the browser user's account snapshot")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", admin_token)[0] != 404:
+        if _public_api_request(gateway, "/api/v1/account-snapshot", admin_token)[0] == 200:
             raise AssertionError("Rauthy identity admin could read the browser user's account snapshot")
         if _public_api_request(gateway, "/api/v1/account-snapshot", browser_token)[0] != 200:
             raise AssertionError("Browser user's account snapshot was not available to its owner")
@@ -1401,8 +1169,7 @@ def main() -> None:
             gateway, "/api/v1/account-snapshot", renamed_token
         )[0] != 200:
             raise AssertionError("Original business data was lost after email update")
-        recovered_password = secrets.token_urlsafe(24)
-        _password_recovery(issuer, mailpit, changed_email, recovered_password)
+        _perform_password_recovery(issuer, mailpit, changed_email, recovered_password)
         recovered_token, recovered_refresh_token = _browser_flow(
             gateway,
             issuer,
@@ -1453,7 +1220,7 @@ def main() -> None:
         if _refresh_token(str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token) not in (400, 401):
             raise AssertionError("Rauthy accepted refresh after the user was disabled")
         if not _new_login_rejected(
-            gateway, issuer, changed_email, user_password,
+            gateway, issuer, changed_email, recovered_password,
         ):
             raise AssertionError("Rauthy accepted a new browser login after the user was disabled")
         wait_seconds = max(0, token_exp - int(time.time())) + 1
@@ -1472,23 +1239,20 @@ def main() -> None:
             "was accepted during its residual window and rejected after expiry."
         )
         print("Verified real browser and device access tokens, ID-token rejection, and public API snapshot/trade-import subject isolation.")
-    except BaseException:
-        raise
     finally:
-        subprocess.run(
-            [*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"],
-            cwd=ROOT,
-            env=env,
-            check=False,
-            timeout=180,
-        )
-        if not mailpit_image_preexisting:
-            subprocess.run(
-                ["podman", "image", "rm", mailpit_image],
-                check=False,
-                timeout=30,
+        try:
+            _cleanup_run(
+                prefix,
+                env,
+                project,
+                [
+                    image
+                    for image in (mailpit_image, rauthy_image)
+                    if image not in preexisting_images
+                ],
             )
-        temp.cleanup()
+        finally:
+            temp.cleanup()
 
 if __name__ == "__main__":
     main()

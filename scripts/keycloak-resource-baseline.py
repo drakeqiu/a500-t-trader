@@ -141,7 +141,7 @@ def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, n
         print(f"Round {number}: ready in {startup:.2f}s. Complete browser and device-flow warmup; press Enter when settled.", flush=True)
         input()
         print(f"Round {number}: collecting 600 seconds of idle samples.", flush=True)
-        idle = _collect(compose, args.sample_service, 600)
+        idle = _collect(definition, args.sample_service, 600)
         print("Press Enter to start the authorization-load sampler; immediately run browser and independent-device logins, with at most two concurrent.", flush=True)
         input()
         from threading import Event, Thread
@@ -151,7 +151,7 @@ def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, n
 
         def sample_load() -> None:
             try:
-                _collect_until_stopped(compose, args.sample_service, stop, load)
+                _collect_until_stopped(definition, args.sample_service, stop, load)
             except BaseException as error:
                 sampler_errors.append(error)
                 stop.set()
