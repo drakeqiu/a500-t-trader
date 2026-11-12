@@ -197,6 +197,7 @@ def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
         if configured.get("default_aud") != [AUDIENCE]:
             raise AssertionError("Rauthy did not persist the client's default_aud")
 
+
 ROOT = Path(__file__).resolve().parents[1]
 
 AUDIENCE = "a500-api"

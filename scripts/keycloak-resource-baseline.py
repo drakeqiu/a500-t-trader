@@ -309,8 +309,7 @@ def main() -> int:
             "excluded_external_costs": external_costs,
             "rounds": rounds,
             "measurement_status": (
-                "observed; review raw sanitized per-round samples before "
-                "comparison"
+                "observed; review raw sanitized per-round samples before comparison"
             ),
         }
         with args.output.open("x", encoding="utf-8") as evidence:
