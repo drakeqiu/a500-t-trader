@@ -82,7 +82,7 @@ curl -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   https://api.example.internal/api/v1/signals
 ```
 
-`access_token` 过期或无效时，API 返回 `401`，调用方必须停止使用该 token。调用方负责安全存储 IdP 返回的 token，并依据 IdP 支持的策略续期；若未提供/不可用 refresh token，或续期失败、授权撤销，则重新执行设备授权。不得把 token 写入不受保护的日志、源码、命令历史或共享位置。A500 只验证 IdP 签发令牌，不接收或验证用户密码、不签发令牌、不保管 refresh token，也不代表客户端续期或重新授权。
+`access_token` 过期或无效时，API 返回 `401`，调用方必须停止使用该 token。调用方负责安全存储 IdP 返回的 token，并依据 IdP 支持的策略续期；若未提供/不可用 refresh token，或续期失败、授权撤销，则重新执行设备授权。不得把 token 写入不受保护的日志、源码、命令历史或共享位置。A500 只验证 IdP 签发令牌，不接收或验证用户密码、不签发令牌、不保管 refresh token，也不代表客户端续期或重新授权。管理员停用用户会阻止后续身份认证或续期，但 A500 对已签发 JWT 只做本地校验，不逐请求查询 IdP 撤权状态；访问令牌在自身 `exp` 到期前仍可能有效。不得将停用描述为即时撤权。当前本地 Rauthy acceptance 客户端访问令牌有效期为五分钟，具体部署应以 IdP 实际策略及令牌 `exp` 为准。
 
 生产部署可连接组织管理的外部 Keycloak/兼容 OIDC IdP，无须部署 Compose 中的 `keycloak` 服务。由 IdP 管理员创建支持 Authorization Code 和 PKCE S256 的 public client，关闭自助注册，不创建默认用户，并配置 access token 含 `a500-api` audience；提供获准用户，精确允许浏览器 UI 来源与根路径回调 URI。部署环境设置规范 issuer、可由 API 访问的 JWKS URI、共享 audience 和浏览器 client ID，例如：
 
