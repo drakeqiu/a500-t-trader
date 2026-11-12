@@ -34,11 +34,11 @@ This is a disposable local acceptance fixture, not evidence from a production id
 
 启动 runner 后，终端会显示本次随机端口的 Mailpit 地址。Mailpit 只在本地回收邮件，不会向真实邮箱投递；Compose 项目随机命名，退出时会删除本项目容器、网络、卷和本地构建镜像，并删除本次才拉取的 Mailpit 镜像（预先已有的 Mailpit 镜像会保留）。邮箱变更验收会修改一次性浏览器用户邮箱，再使用新邮箱登录；runner 比对变更前后的 `sub`，并以新 token 读取先前创建的账户快照。另一用户读取该快照仍须返回 `404`。系统按稳定的身份主体 ID 归属业务数据，不按邮箱转移数据。
 
-此版本仅布置本地 Mailpit SMTP 接收端；密码恢复请求、恢复邮件中的一次性链接及重设后重新登录尚未纳入 runner 的端到端验证。因此不得把 Mailpit 已启动或邮件已捕获称为恢复验收通过。普通密码登录不要求 Passkey。localhost HTTP Passkey 注册和登录仍须真人在真实设备／认证器上执行；未执行前属于未通过，不可推断局域网明文可用。
+runner 实际提交密码恢复请求，轮询 Mailpit API 取得该一次性用户的邮件正文，从本机 Rauthy 链接完成密码重设，再用新密码执行真实浏览器登录，并使用新 access token 读取原账户快照。恢复链接、恢复令牌、密码和 access token 均只在进程内存中处理，不输出到 runner 日志；测试只接受 issuer 主机为 localhost 的恢复链接。Mailpit 已启动或只收到邮件仍不构成恢复通过。
 
 ## 当前验收边界
 
-runner 自动验证的是隔离 Compose 中的 Rauthy，而不是部署环境。用户邮箱变更会实际操作 Rauthy 管理 API，并通过浏览器重新认证及业务 API 验证主体连续性。用户自助注册关闭、真实管理员创建／审批、邮箱恢复全流程，以及 localhost Passkey 都需要分别完成相应的真实验收后，才能勾选 issue #226 对应标准。
+runner 自动验证的是隔离 Compose 中的 Rauthy，而不是部署环境。用户邮箱变更和 Mailpit 密码恢复会实际操作 Rauthy，并通过浏览器重新认证及业务 API 验证主体连续性。用户自助注册关闭、真实管理员创建／审批，以及 localhost Passkey 都需要分别完成相应的真实验收后，才能勾选 issue #226 对应标准。
 
 ## Cleanup and safety
 

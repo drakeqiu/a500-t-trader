@@ -219,6 +219,24 @@ def test_email_update_preserves_the_user_record_and_changes_only_email() -> None
         "roles": ["customer"],
     }
     assert current_user["email"] == "before@example.test"
+
+
+def test_extract_recovery_link_from_mailpit_message() -> None:
+    from scripts.compose_rauthy_browser_e2e import _recovery_link
+
+    assert _recovery_link(
+        [{"Text": "Use this link: https://localhost:18443/auth/v1/reset-password?token=secret"}],
+        "localhost",
+    ) == "https://localhost:18443/auth/v1/reset-password?token=secret"
+
+
+def test_recovery_link_rejects_non_localhost_and_missing_link() -> None:
+    from scripts.compose_rauthy_browser_e2e import _recovery_link
+
+    with pytest.raises(AssertionError, match="local Rauthy"):
+        _recovery_link([{"Text": "https://example.com/reset?token=secret"}], "localhost")
+    with pytest.raises(AssertionError, match="no recovery link"):
+        _recovery_link([{"Text": "https://localhost/account"}], "localhost")
 def test_refresh_token_accepts_local_self_signed_tls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -242,3 +260,12 @@ def test_refresh_token_accepts_local_self_signed_tls(
     monkeypatch.setattr(runner, "urlopen", fake_urlopen)
 
     assert runner._refresh_token("https://localhost/token", "client", "secret") == 401
+
+
+def test_extract_recovery_link_from_mailpit_html() -> None:
+    from scripts.compose_rauthy_browser_e2e import _recovery_link
+
+    assert _recovery_link(
+        [{"HTML": '<a href="https://localhost/auth/reset?token=secret&amp;code=once">Reset</a>'}],
+        "localhost",
+    ) == "https://localhost/auth/reset?token=secret&code=once"

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -15,14 +17,90 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
+
+
+def _recovery_link(messages: list[dict[str, object]], hostname: str) -> str:
+    for message in messages:
+        text = html.unescape(
+            "\n".join(str(message.get(field, "")) for field in ("Text", "HTML", "Subject"))
+        )
+        for match in re.finditer(r"https?://[^\s\"'<>]+", text):
+            link = match.group(0).rstrip(").,;")
+            parsed = urlsplit(link)
+            if parsed.hostname != hostname or "reset" not in parsed.path.lower():
+                continue
+            return link
+    raise AssertionError("Mailpit message has no recovery link for local Rauthy")
+
+
+def _mailpit_recovery_link(mailpit: str, email: str, hostname: str) -> str:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(mailpit + "/api/v1/messages", timeout=5) as response:
+                result = json.load(response)
+            messages = result.get("messages", []) if isinstance(result, dict) else []
+            for message in messages:
+                if not isinstance(message, dict) or email.lower() not in json.dumps(message).lower():
+                    continue
+                message_id = message.get("ID")
+                if not isinstance(message_id, str):
+                    continue
+                with urlopen(mailpit + "/api/v1/message/" + message_id, timeout=5) as response:
+                    detail = json.load(response)
+                if isinstance(detail, dict):
+                    return _recovery_link([detail], hostname)
+        except (OSError, TimeoutError, json.JSONDecodeError):
+            pass
+        time.sleep(1)
+    raise RuntimeError("Timed out waiting for local password recovery email")
 
 
 def _email_update_payload(user: dict[str, object], new_email: str) -> dict[str, object]:
     updated = dict(user)
     updated["email"] = new_email
     return updated
+
+
+def _perform_password_recovery(
+    issuer: str, mailpit: str, email: str, new_password: str
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    hostname = urlsplit(issuer).hostname or "localhost"
+    stage = "opening the password-reset request page"
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page(ignore_https_errors=True)
+        try:
+            page.goto(issuer + "users/password_reset", wait_until="domcontentloaded")
+            stage = "submitting the reset request"
+            page.get_by_role("textbox").first.fill(email)
+            page.locator('button[type="submit"]:visible').click()
+            page.locator(".success").wait_for(state="visible", timeout=30_000)
+            stage = "retrieving the reset email"
+            link = _mailpit_recovery_link(mailpit, email, hostname)
+            page.goto(link, wait_until="domcontentloaded")
+            stage = "submitting the new password"
+            password_fields = page.locator('input[type="password"]:visible')
+            password_fields.first.fill(new_password)
+            if password_fields.count() > 1:
+                password_fields.nth(1).fill(new_password)
+            page.locator('button[type="submit"]:visible').click()
+            page.wait_for_load_state("domcontentloaded")
+        except Exception as exc:
+            raise RuntimeError(
+                f"Local password recovery failed while {stage} ({type(exc).__name__})"
+            ) from None
+        finally:
+            browser.close()
+
+def _password_recovery(
+    issuer: str, mailpit: str, email: str, new_password: str
+) -> None:
+    _perform_password_recovery(issuer, mailpit, email, new_password)
 
 
 def _change_user_email(
@@ -435,17 +513,6 @@ def _browser_flow(
         username_field = page.locator(
             'input[autocomplete="username"], input[type="email"], input[name="login"], input[type="text"]'
         ).first
-        print(
-            "Rauthy login form:",
-            {
-                "url": page.url,
-                "title": page.title(),
-                "inputs": page.locator("input").evaluate_all(
-                    "(nodes) => nodes.map((node) => ({type: node.type, name: node.name, autocomplete: node.autocomplete}))"
-                ),
-                "body": page.locator("body").inner_text()[:1500],
-            },
-        )
         username_field.wait_for(state="visible", timeout=30_000)
         username_field.fill(username)
         page.locator("form").get_by_role("button", name="Login", exact=True).click()
@@ -726,6 +793,20 @@ def main() -> None:
             gateway, "/api/v1/account-snapshot", renamed_token
         )[0] != 200:
             raise AssertionError("Original business data was lost after email update")
+        recovered_password = secrets.token_urlsafe(24)
+        _password_recovery(issuer, mailpit, changed_email, recovered_password)
+        recovered_token, recovered_refresh_token = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            changed_email,
+            recovered_password,
+            create_snapshot=False,
+        )
+        if _decode(recovered_token.split(".")[1]).get("sub") != original_subject:
+            raise AssertionError("Recovered-password login changed the authenticated subject")
+        if _public_api_request(gateway, "/api/v1/account-snapshot", recovered_token)[0] != 200:
+            raise AssertionError("Recovered-password login could not access existing business data")
         browser_token = renamed_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
@@ -750,17 +831,9 @@ def main() -> None:
             gateway, preview_path + "/confirm", device_token, method="POST"
         )[0] != 404:
             raise AssertionError("Second Rauthy user could confirm the first user's trade-import preview")
-        # Renew the disposable session immediately before disabling the account.
-        browser_token, browser_refresh_token = _browser_flow(
-            gateway,
-            issuer,
-            str(discovery["token_endpoint"]),
-            changed_email,
-            user_password,
-            create_snapshot=False,
-        )
+        browser_token, browser_refresh_token = recovered_token, recovered_refresh_token
         if not browser_refresh_token:
-            raise AssertionError("Rauthy did not issue the browser refresh credential")
+            raise AssertionError("Rauthy did not issue the recovered user's browser refresh credential")
         token_exp = _decode(browser_token.split(".")[1]).get("exp")
         if not isinstance(token_exp, int):
             raise AssertionError("Browser access token has no expiry")
@@ -790,13 +863,6 @@ def main() -> None:
         )
         print("Verified real browser and device access tokens, ID-token rejection, and public API snapshot/trade-import subject isolation.")
     except BaseException:
-        subprocess.run(
-            [*prefix, "logs", "account-api", "signal-api", "gateway"],
-            cwd=ROOT,
-            env=env,
-            check=False,
-            timeout=30,
-        )
         raise
     finally:
         subprocess.run(
