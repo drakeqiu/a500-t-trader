@@ -323,7 +323,7 @@ def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> N
             self.headers = Message()
             if etag:
                 self.headers["ETag"] = etag
-            self.headers.set_content_type(
+            self.headers["Content-Type"] = (
                 "text/event-stream"
                 if status == 200 and body == b"event\n"
                 else "application/json"
