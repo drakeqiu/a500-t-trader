@@ -163,11 +163,11 @@ def _write_bootstrap(bootstrap_dir: Path, gateway: str) -> tuple[str, str, str]:
     api_keys = [{
         "name": key_name,
         "secret": {"Plain": api_secret},
-        "exp": int(time.time()) + 600,
-        "access": [{
-            "group": "Clients",
-            "access_rights": ["read", "create", "update"],
-        }],
+        "exp": int(time.time()) + 1800,
+        "access": [
+            {"group": "Clients", "access_rights": ["read", "create", "update"]},
+            {"group": "Users", "access_rights": ["read", "update"]},
+        ],
     }]
     for filename, value in (
         ("users.json", users),
@@ -377,7 +377,7 @@ def _browser_flow(
     holdings: int = 100,
     cash: str = "125.50",
     create_snapshot: bool = True,
-) -> str:
+) -> tuple[str, str | None]:
     from playwright.sync_api import sync_playwright
 
     if not username or not password:
@@ -418,8 +418,11 @@ def _browser_flow(
         page.wait_for_url(gateway + "/**", timeout=120_000)
         token_body = token_response.value.json()
         browser_token = token_body.get("access_token")
+        refresh_token = token_body.get("refresh_token")
         if not isinstance(browser_token, str):
             raise AssertionError("Browser OAuth response did not contain an access token")
+        if refresh_token is not None and not isinstance(refresh_token, str):
+            raise AssertionError("Browser OAuth response contained an invalid refresh token")
         page.wait_for_function("() => document.body.innerText.includes('策略信号')", timeout=60_000)
         verify_access_token(browser_token, issuer)
         status, _, api_error = _public_api_request(
@@ -454,7 +457,82 @@ def _browser_flow(
                 raise AssertionError("Snapshot readback did not match browser-written business data")
         context.close()
         browser.close()
-        return browser_token
+        return browser_token, refresh_token
+
+
+def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> None:
+    opener = build_opener(
+        ProxyHandler({}),
+        HTTPSHandler(context=ssl._create_unverified_context()),
+    )
+    headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
+    endpoint = issuer.rstrip("/") + f"/users/{email}"
+    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        user = json.load(response)
+    if not isinstance(user, dict) or user.get("email") != email:
+        raise AssertionError("Rauthy did not return the expected disposable user")
+    user["enabled"] = False
+    request = Request(
+        endpoint,
+        data=json.dumps(user).encode(),
+        headers={**headers, "Content-Type": "application/json"},
+        method="PUT",
+    )
+    with opener.open(request, timeout=10) as response:
+        if response.status not in (200, 204):
+            raise RuntimeError(f"Rauthy user disable returned HTTP {response.status}")
+    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        if json.load(response).get("enabled") is not False:
+            raise AssertionError("Rauthy did not persist the disabled user state")
+
+
+def _refresh_token(token_endpoint: str, client_id: str, refresh_token: str) -> int:
+    request = Request(
+        token_endpoint,
+        data=urlencode({
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "refresh_token": refresh_token,
+        }).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            return response.status
+    except HTTPError as error:
+        error.close()
+        return error.code
+
+
+def _new_login_rejected(
+    gateway: str, issuer: str, username: str, password: str
+) -> bool:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page(ignore_https_errors=True)
+        try:
+            page.goto(gateway + "/signals", wait_until="domcontentloaded")
+            page.get_by_role("button", name="安全连接", exact=True).first.click()
+            page.wait_for_url(issuer + "**", timeout=30_000)
+            page.locator(
+                'input[autocomplete="username"], input[type="email"], input[name="login"], input[type="text"]'
+            ).first.fill(username)
+            page.locator("form").get_by_role("button", name="Login", exact=True).click()
+            page.locator('input[type="password"]:visible').wait_for(timeout=30_000)
+            page.locator('input[type="password"]:visible').fill(password)
+            page.locator('button[type="submit"]:visible').click()
+            try:
+                page.wait_for_url(gateway + "/**", timeout=20_000)
+                return False
+            except Exception:
+                # A rejected credential must leave the user on the IdP login page.
+                return page.url.startswith(issuer) and page.locator(
+                    'input[type="password"]:visible'
+                ).count() > 0
+        finally:
+            browser.close()
 
 
 def main() -> None:
@@ -540,7 +618,7 @@ def main() -> None:
                 time.sleep(2)
         else:
             raise RuntimeError("Public gateway did not become ready")
-        browser_token = _browser_flow(
+        browser_token, browser_refresh_token = _browser_flow(
             gateway,
             issuer,
             str(discovery["token_endpoint"]),
@@ -550,7 +628,7 @@ def main() -> None:
         device_token, device_id_token = _device_flow(
             gateway, issuer, discovery, "device@example.test", user_password
         )
-        admin_token = _browser_flow(
+        admin_token, _ = _browser_flow(
             gateway,
             issuer,
             str(discovery["token_endpoint"]),
@@ -591,6 +669,44 @@ def main() -> None:
             gateway, preview_path + "/confirm", device_token, method="POST"
         )[0] != 404:
             raise AssertionError("Second Rauthy user could confirm the first user's trade-import preview")
+        # Renew the disposable session immediately before disabling the account.
+        browser_token, browser_refresh_token = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            "browser@example.test",
+            user_password,
+            create_snapshot=False,
+        )
+        if not browser_refresh_token:
+            raise AssertionError("Rauthy did not issue the browser refresh credential")
+        token_exp = _decode(browser_token.split(".")[1]).get("exp")
+        if not isinstance(token_exp, int):
+            raise AssertionError("Browser access token has no expiry")
+        _disable_user(issuer, api_key_name, api_key_secret, "browser@example.test")
+        if _public_api_request(gateway, "/api/v1/signals", browser_token)[0] != 200:
+            raise AssertionError("Previously issued token did not remain valid after user disable")
+        if _refresh_token(str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token) not in (400, 401):
+            raise AssertionError("Rauthy accepted refresh after the user was disabled")
+        if not _new_login_rejected(
+            gateway, issuer, "browser@example.test", user_password,
+        ):
+            raise AssertionError("Rauthy accepted a new browser login after the user was disabled")
+        wait_seconds = max(0, token_exp - int(time.time())) + 1
+        print(
+            "Disabled disposable browser user: prior token remains locally valid; "
+            f"waiting {wait_seconds}s for its five-minute expiry."
+        )
+        time.sleep(wait_seconds)
+        expiry_status = _public_api_request(gateway, "/api/v1/signals", browser_token)[0]
+        if expiry_status != 401:
+            raise AssertionError(
+                f"Previously issued access token returned HTTP {expiry_status} after expiry"
+            )
+        print(
+            "Verified disabled-user login and refresh rejection; prior access token "
+            "was accepted during its residual window and rejected after expiry."
+        )
         print("Verified real browser and device access tokens, ID-token rejection, and public API snapshot/trade-import subject isolation.")
     except BaseException:
         subprocess.run(

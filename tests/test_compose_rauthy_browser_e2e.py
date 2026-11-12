@@ -56,7 +56,11 @@ def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(tmp_path) 
     assert key_name == "a500-acceptance"
     assert api_keys[0]["secret"] == {"Plain": secret}
     assert len(secret) == 64 and secret.isalnum()
-    assert 500 <= api_keys[0]["exp"] - int(time.time()) <= 600
+    assert 1700 <= api_keys[0]["exp"] - int(time.time()) <= 1800
+    assert api_keys[0]["access"] == [
+        {"group": "Clients", "access_rights": ["read", "create", "update"]},
+        {"group": "Users", "access_rights": ["read", "update"]},
+    ]
     assert all(user["password"] == {"Plain": password} for user in users)
 
 
