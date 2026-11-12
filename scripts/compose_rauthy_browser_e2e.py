@@ -587,6 +587,7 @@ def main() -> None:
     command = shlex.split(os.environ.get("PODMAN_COMPOSE", "podman compose"))
     if not command or shutil.which(command[0]) is None or "podman" not in Path(command[0]).name:
         raise RuntimeError("Podman Compose is required")
+    project = "a500-rauthy-" + secrets.token_hex(6)
     mailpit_image = "docker.io/axllent/mailpit:v1.27.8"
     mailpit_image_preexisting = subprocess.run(
         ["podman", "image", "exists", mailpit_image], check=False, timeout=10
