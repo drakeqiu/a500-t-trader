@@ -6,6 +6,8 @@ import subprocess
 import time
 
 import pytest
+import io
+from email.message import Message
 
 from scripts.compose_rauthy_browser_e2e import (
     _email_update_payload,
@@ -308,83 +310,124 @@ def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
         assert client["access_token_lifetime"] == 300
 
 
-def test_bootstrap_key_is_created_after_wheel_and_image_builds(
-    tmp_path, monkeypatch
+def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    requests = []
+    snapshot_reads = 0
+
+    class Response(io.BytesIO):
+        def __init__(self, status, body=b"", etag=None):
+            super().__init__(body)
+            self.status = status
+            self.headers = Message()
+            if etag:
+                self.headers["ETag"] = etag
+            self.headers["Content-Type"] = (
+                "text/event-stream"
+                if status == 200 and body == b"event\n"
+                else "application/json"
+            )
+
+    class Opener:
+        def open(self, request, timeout):
+            nonlocal snapshot_reads
+            requests.append(request)
+            path = request.full_url.removeprefix("http://gateway")
+            method = request.get_method()
+            if path == "/api/v1/signals":
+                return Response(200, b"{}")
+            if path == "/api/v1/account-snapshot" and method == "PUT":
+                return Response(201 if request.get_header("If-none-match") else 200)
+            if path == "/api/v1/account-snapshot":
+                snapshot_reads += 1
+                cash = "125.50" if snapshot_reads == 1 else "126.50"
+                body = json.dumps(
+                    {"holdings": {"510300": 100}, "available_cash": cash}
+                ).encode()
+                return Response(200, body, '"snapshot-v1"')
+            if path.startswith("/api/v1/signals/stream"):
+                return Response(200, b"event\n")
+            raise AssertionError(f"Unexpected public API request: {method} {path}")
+
+    monkeypatch.setattr(runner, "build_opener", lambda *_args: Opener())
+    runner._device_public_api("http://gateway", "user-access-token")
+
+    snapshot_requests = [
+        request
+        for request in requests
+        if request.full_url.endswith("/api/v1/account-snapshot")
+    ]
+    assert [request.get_method() for request in snapshot_requests] == [
+        "PUT",
+        "GET",
+        "PUT",
+        "GET",
+    ]
+    assert snapshot_requests[0].get_header("If-none-match") == "*"
+    assert json.loads(snapshot_requests[2].data)["available_cash"] == "126.50"
+    assert snapshot_requests[2].get_header("If-match") == '"snapshot-v1"'
+    assert all(
+        request.get_header("Authorization") == "Bearer user-access-token"
+        for request in requests
+    )
+
+
+def test_token_rejection_returns_after_expected_unauthorized_response(monkeypatch) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    monkeypatch.setattr(runner, "_public_api_request", lambda *_args: (401, {}, None))
+    runner._assert_token_rejected("http://gateway", "id-token")
+
+
+@pytest.mark.parametrize(
+    ("survivor", "message"),
+    [
+        ("container", "containers survived"),
+        ("volume", "volumes survived"),
+        ("project-image", "project images survived"),
+        ("pinned-image", "pinned images survived"),
+    ],
+)
+def test_compose_cleanup_fails_when_test_resources_survive(
+    monkeypatch, survivor, message
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    events: list[str] = []
-    bootstrap = tmp_path / "bootstrap"
-    admin_password = "private-bootstrap-admin-password"
-    override = runner._compose_bootstrap_override(
-        tmp_path,
-        "raft-secret",
-        "internal-api-secret",
-        "https://localhost:18443",
-        admin_password,
-    )
-    override_config = json.loads(override.read_text())
-    assert (
-        override_config["services"]["rauthy"]["environment"][
-            "BOOTSTRAP_ADMIN_PASSWORD_PLAIN"
-        ]
-        == admin_password
-    )
-    assert override.stat().st_mode & 0o777 == 0o600
+    commands = []
 
-    def run(command, **_kwargs):
-        if command[0] == "uv":
-            events.append("wheel")
-        elif "build" in command:
-            events.append("images")
-        else:
-            events.append("start")
-            key = json.loads((bootstrap / "api_keys.json").read_text())[0]
-            assert key["exp"] > int(time.time())
-            assert command[command.index("-f") + 1] == str(override)
-            assert command[-3:] == ["up", "-d", "rauthy"]
+    def run(command, **kwargs):
+        commands.append(command)
+        stdout = ""
+        if survivor == "container" and command[1:3] == ["ps", "-aq"]:
+            stdout = "orphan\n"
+        if survivor == "volume" and command[1:3] == ["volume", "ls"]:
+            stdout = "orphan\n"
+        if survivor == "project-image" and command[1] == "images":
+            stdout = "localhost/test-project_api:latest\n"
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=stdout,
+            stderr="",
+        )
 
     monkeypatch.setattr(runner.subprocess, "run", run)
-    credentials = runner._build_bootstrap_and_start_rauthy(
-        ["podman", "compose"], {}, bootstrap, "http://localhost:8765", override
-    )
-    assert credentials[0].startswith("acceptance-")
-    assert events == ["wheel", "images", "start"]
-
-
-def test_bootstrap_and_start_failure_still_cleans_compose_project(
-    monkeypatch,
-) -> None:
-    from scripts import compose_rauthy_browser_e2e as runner
-
-    events: list[list[str]] = []
-
-    def run(command, **_kwargs):
-        events.append(command)
-        if "build" in command:
-            raise subprocess.CalledProcessError(1, command)
-
-    monkeypatch.setattr(runner.subprocess, "run", run)
-    monkeypatch.setattr(runner.shutil, "which", lambda _command: "/usr/bin/podman")
     monkeypatch.setattr(
-        runner.argparse.ArgumentParser,
-        "parse_args",
-        lambda _parser: None,
+        runner,
+        "_image_exists",
+        lambda _image: survivor == "pinned-image",
     )
-
-    with pytest.raises(subprocess.CalledProcessError):
-        runner.main()
-
-    cleanup = next(
-        command
-        for command in events
-        if command[0:2] == ["podman", "compose"] and "down" in command
-    )
-    assert "down" in cleanup
-    assert "--volumes" in cleanup
-    assert "--remove-orphans" in cleanup
-    assert "--rmi" in cleanup
-
+    with pytest.raises(RuntimeError, match=message):
+        runner._cleanup_run(
+            ["podman", "compose", "--project-name", "test-project"],
+            {},
+            "test-project",
+            ["example/rauthy:tag"] if survivor == "pinned-image" else [],
+        )
+    assert "--volumes" in commands[0]
+    assert "--remove-orphans" in commands[0]
+    assert "--rmi" in commands[0]
 
 def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -> None:
     verification_uri = "https://idp.example.test/device?user_code=secret-code"
