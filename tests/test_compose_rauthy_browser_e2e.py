@@ -219,3 +219,26 @@ def test_email_update_preserves_the_user_record_and_changes_only_email() -> None
         "roles": ["customer"],
     }
     assert current_user["email"] == "before@example.test"
+def test_refresh_token_accepts_local_self_signed_tls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    class Response:
+        status = 401
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+    def fake_urlopen(*args: object, **kwargs: object) -> Response:
+        context = kwargs["context"]
+        assert isinstance(context, runner.ssl.SSLContext)
+        assert context.verify_mode == runner.ssl.CERT_NONE
+        return Response()
+
+    monkeypatch.setattr(runner, "urlopen", fake_urlopen)
+
+    assert runner._refresh_token("https://localhost/token", "client", "secret") == 401
