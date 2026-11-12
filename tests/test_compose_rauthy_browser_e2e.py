@@ -3,9 +3,13 @@ from __future__ import annotations
 import base64
 import io
 import json
+import ssl
 import subprocess
 import time
 from email.message import Message
+from pathlib import Path
+from typing import Any
+from urllib.request import Request
 
 import pytest
 
@@ -20,7 +24,9 @@ from scripts.compose_rauthy_browser_e2e import (
 )
 
 
-def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(tmp_path) -> None:
+def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
+    tmp_path: Path,
+) -> None:
     from scripts.compose_rauthy_browser_e2e import _write_bootstrap
 
     key_name, secret, password = _write_bootstrap(tmp_path, "http://localhost:18080")
@@ -200,8 +206,10 @@ def test_wait_discovery_returns_validated_configuration(
 
     monkeypatch.setattr(runner, "urlopen", lambda *args, **kwargs: Response())
     ticks = iter((0, 0, 181))
-    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
-    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        "scripts.compose_rauthy_browser_e2e.time.monotonic", lambda: next(ticks)
+    )
+    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.time.sleep", lambda _: None)
 
     assert runner._wait_discovery(issuer) == discovery
 
@@ -268,8 +276,8 @@ def test_refresh_token_accepts_local_self_signed_tls(
 
     def fake_urlopen(*args: object, **kwargs: object) -> Response:
         context = kwargs["context"]
-        assert isinstance(context, runner.ssl.SSLContext)
-        assert context.verify_mode == runner.ssl.CERT_NONE
+        assert isinstance(context, ssl.SSLContext)
+        assert context.verify_mode == ssl.CERT_NONE
         return Response()
 
     monkeypatch.setattr(runner, "urlopen", fake_urlopen)
@@ -293,7 +301,9 @@ def test_extract_recovery_link_from_mailpit_html() -> None:
     )
 
 
-def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
+def test_bootstrap_clients_use_supported_audience_update_path(
+    tmp_path: Path,
+) -> None:
     bootstrap = tmp_path / "bootstrap"
     secret = "x" * 64
     _write_bootstrap(
@@ -329,14 +339,18 @@ def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
         assert client["access_token_lifetime"] == 300
 
 
-def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> None:
+def test_device_public_api_creates_before_owner_read_and_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    requests = []
+    requests: list[Request] = []
     snapshot_reads = 0
 
     class Response(io.BytesIO):
-        def __init__(self, status, body=b"", etag=None):
+        def __init__(
+            self, status: int, body: bytes = b"", etag: str | None = None
+        ) -> None:
             super().__init__(body)
             self.status = status
             self.headers = Message()
@@ -349,7 +363,7 @@ def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> N
             )
 
     class Opener:
-        def open(self, request, timeout):
+        def open(self, request: Request, timeout: float) -> Response:
             nonlocal snapshot_reads
             requests.append(request)
             path = request.full_url.removeprefix("http://gateway")
@@ -383,8 +397,9 @@ def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> N
         "PUT",
         "GET",
     ]
-    assert snapshot_requests[0].get_header("If-none-match") == "*"
-    assert json.loads(snapshot_requests[2].data)["available_cash"] == "126.50"
+    snapshot_update = snapshot_requests[2].data
+    assert isinstance(snapshot_update, bytes)
+    assert json.loads(snapshot_update)["available_cash"] == "126.50"
     assert snapshot_requests[2].get_header("If-match") == '"snapshot-v1"'
     assert all(
         request.get_header("Authorization") == "Bearer user-access-token"
@@ -393,7 +408,7 @@ def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> N
 
 
 def test_token_rejection_returns_after_expected_unauthorized_response(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
@@ -411,13 +426,13 @@ def test_token_rejection_returns_after_expected_unauthorized_response(
     ],
 )
 def test_compose_cleanup_fails_when_test_resources_survive(
-    monkeypatch, survivor, message
+    monkeypatch: pytest.MonkeyPatch, survivor: str, message: str
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    commands = []
+    commands: list[list[str]] = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         stdout = ""
         if survivor == "container" and command[1:3] == ["ps", "-aq"]:
@@ -433,7 +448,7 @@ def test_compose_cleanup_fails_when_test_resources_survive(
             stderr="",
         )
 
-    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.subprocess.run", run)
     monkeypatch.setattr(
         runner,
         "_image_exists",

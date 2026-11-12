@@ -18,9 +18,17 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Literal, cast, overload
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
+from urllib.request import (
+    HTTPSHandler,
+    OpenerDirector,
+    ProxyHandler,
+    Request,
+    build_opener,
+    urlopen,
+)
 
 
 def _recovery_link(messages: list[dict[str, object]], hostname: str) -> str:
@@ -217,7 +225,7 @@ def protocol_error(payload: dict[str, object]) -> str | None:
 
 
 def _oauth_post(
-    opener, endpoint: str, form: dict[str, str]
+    opener: OpenerDirector, endpoint: str, form: dict[str, str]
 ) -> tuple[int, dict[str, object]]:
     request = Request(
         endpoint,
@@ -234,7 +242,7 @@ def _oauth_post(
             response.close()
 
 
-def _submit_password_step(page, password: str) -> None:
+def _submit_password_step(page: Any, password: str) -> None:
     page.locator('button[type="submit"]').click()
     password_input = page.locator('input[type="password"]:visible')
     password_input.wait_for(state="visible", timeout=30_000)
@@ -579,6 +587,30 @@ def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
         raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
 
 
+@overload
+def _write_bootstrap(
+    bootstrap_dir: Path,
+    gateway: str,
+    username: str | None = None,
+    password: str | None = None,
+    api_secret: str | None = None,
+    *,
+    include_user_key: Literal[False] = False,
+) -> tuple[str, str, str]: ...
+
+
+@overload
+def _write_bootstrap(
+    bootstrap_dir: Path,
+    gateway: str,
+    username: str | None = None,
+    password: str | None = None,
+    api_secret: str | None = None,
+    *,
+    include_user_key: Literal[True],
+) -> tuple[str, str, str, str]: ...
+
+
 def _write_bootstrap(
     bootstrap_dir: Path,
     gateway: str,
@@ -711,7 +743,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
             ) as response:
                 result = json.load(response)
             _validate_discovery(issuer, result)
-            return result
+            return cast(dict[str, object], result)
         except OSError, TimeoutError, json.JSONDecodeError:
             time.sleep(2)
     raise RuntimeError("Rauthy discovery did not become ready")
@@ -947,7 +979,7 @@ def _refresh_token(token_endpoint: str, client_id: str, refresh_token: str) -> i
             context=ssl._create_unverified_context(),
             timeout=15,
         ) as response:
-            return response.status
+            return cast(int, response.status)
     except HTTPError as error:
         error.close()
         return error.code

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -299,7 +300,7 @@ def test_account_api_documentation_requires_valid_bearer_credentials(
 
 
 def test_account_api_starts_without_optional_market_data_credentials(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OIDC_ISSUER", ISSUER)
@@ -319,7 +320,7 @@ def test_account_api_starts_without_optional_market_data_credentials(
 
 
 def test_account_api_preserves_dotenv_market_data_provider(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -338,7 +339,7 @@ def test_account_api_preserves_dotenv_market_data_provider(
     calls: list[tuple[str, str, str, int]] = []
 
     class Provider:
-        def __init__(self, username, password, host, port):
+        def __init__(self, username: str, password: str, host: str, port: int) -> None:
             calls.append((username, password, host, port))
 
     monkeypatch.setattr(runtime, "AmazingDataProvider", Provider)
