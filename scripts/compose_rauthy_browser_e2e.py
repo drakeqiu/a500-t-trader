@@ -497,7 +497,11 @@ def _refresh_token(token_endpoint: str, client_id: str, refresh_token: str) -> i
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
-        with urlopen(request, timeout=15) as response:
+        with urlopen(
+            request,
+            context=ssl._create_unverified_context(),
+            timeout=15,
+        ) as response:
             return response.status
     except HTTPError as error:
         error.close()
