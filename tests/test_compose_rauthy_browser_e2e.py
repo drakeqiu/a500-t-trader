@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import subprocess
 import time
+from email.message import Message
 
 import pytest
-import io
-from email.message import Message
 
 from scripts.compose_rauthy_browser_e2e import (
     _email_update_payload,
@@ -228,19 +228,30 @@ def test_email_update_preserves_the_user_record_and_changes_only_email() -> None
 def test_extract_recovery_link_from_mailpit_message() -> None:
     from scripts.compose_rauthy_browser_e2e import _recovery_link
 
-    assert _recovery_link(
-        [{"Text": "Use this link: https://localhost:18443/auth/v1/reset-password?token=secret"}],
-        "localhost",
-    ) == "https://localhost:18443/auth/v1/reset-password?token=secret"
+    assert (
+        _recovery_link(
+            [
+                {
+                    "Text": "Use this link: https://localhost:18443/auth/v1/reset-password?token=secret"
+                }
+            ],
+            "localhost",
+        )
+        == "https://localhost:18443/auth/v1/reset-password?token=secret"
+    )
 
 
 def test_recovery_link_rejects_non_localhost_and_missing_link() -> None:
     from scripts.compose_rauthy_browser_e2e import _recovery_link
 
     with pytest.raises(AssertionError, match="local Rauthy"):
-        _recovery_link([{"Text": "https://example.com/reset?token=secret"}], "localhost")
+        _recovery_link(
+            [{"Text": "https://example.com/reset?token=secret"}], "localhost"
+        )
     with pytest.raises(AssertionError, match="no recovery link"):
         _recovery_link([{"Text": "https://localhost/account"}], "localhost")
+
+
 def test_refresh_token_accepts_local_self_signed_tls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -269,10 +280,18 @@ def test_refresh_token_accepts_local_self_signed_tls(
 def test_extract_recovery_link_from_mailpit_html() -> None:
     from scripts.compose_rauthy_browser_e2e import _recovery_link
 
-    assert _recovery_link(
-        [{"HTML": '<a href="https://localhost/auth/reset?token=secret&amp;code=once">Reset</a>'}],
-        "localhost",
-    ) == "https://localhost/auth/reset?token=secret&code=once"
+    assert (
+        _recovery_link(
+            [
+                {
+                    "HTML": '<a href="https://localhost/auth/reset?token=secret&amp;code=once">Reset</a>'
+                }
+            ],
+            "localhost",
+        )
+        == "https://localhost/auth/reset?token=secret&code=once"
+    )
+
 
 def test_bootstrap_clients_use_supported_audience_update_path(tmp_path) -> None:
     bootstrap = tmp_path / "bootstrap"
@@ -373,7 +392,9 @@ def test_device_public_api_creates_before_owner_read_and_write(monkeypatch) -> N
     )
 
 
-def test_token_rejection_returns_after_expected_unauthorized_response(monkeypatch) -> None:
+def test_token_rejection_returns_after_expected_unauthorized_response(
+    monkeypatch,
+) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
     monkeypatch.setattr(runner, "_public_api_request", lambda *_args: (401, {}, None))
@@ -428,6 +449,7 @@ def test_compose_cleanup_fails_when_test_resources_survive(
     assert "--volumes" in commands[0]
     assert "--remove-orphans" in commands[0]
     assert "--rmi" in commands[0]
+
 
 def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -> None:
     verification_uri = "https://idp.example.test/device?user_code=secret-code"

@@ -90,9 +90,9 @@ def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
         )
         assert admin_write.status_code == 412
         assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
-        assert client.get("/v1/account-snapshot", headers=alice).json()[
-            "holdings"
-        ] == {"510300": 100}
+        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
+            "510300": 100
+        }
 
 
 @pytest.fixture
@@ -113,7 +113,6 @@ def _client(
     )
     authenticator = OIDCAuthenticator(ISSUER, SHARED_AUDIENCE, "https://jwks.test")
     return TestClient(create_app(postgres_url, authenticator))
-
 
 
 def test_account_api_accepts_signed_shared_audience_token(
@@ -146,7 +145,6 @@ def test_oidc_issuer_preserves_trailing_slash(
     assert authenticator(_token(private_key, issuer=issuer)) == "alice"
     with pytest.raises(jwt.InvalidTokenError):
         authenticator(_token(private_key, issuer=issuer.rstrip("/")))
-
 
 
 def test_account_snapshot_ownership_uses_verified_subject(

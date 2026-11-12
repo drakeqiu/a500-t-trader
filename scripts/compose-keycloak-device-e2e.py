@@ -79,7 +79,7 @@ def _wait_for_keycloak(base_url: str) -> None:
             status, _ = _request(url)
             if status == 200:
                 return
-        except (TimeoutError, URLError, OSError):
+        except TimeoutError, URLError, OSError:
             pass
         time.sleep(1)
     raise RuntimeError("临时 Keycloak 未在 180 秒内就绪")
@@ -166,7 +166,10 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
                 parsed = urlsplit(request.url)
                 if parsed.path.endswith("/protocol/openid-connect/auth"):
                     authorization_requests.append(parse_qs(parsed.query))
-                elif parsed.path.endswith("/protocol/openid-connect/token") and request.method == "POST":
+                elif (
+                    parsed.path.endswith("/protocol/openid-connect/token")
+                    and request.method == "POST"
+                ):
                     token_forms.append(parse_qs(request.post_data or ""))
 
             def capture_token(response: Any) -> None:
@@ -195,14 +198,16 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
                 state="visible", timeout=90000
             )
             code_requests = [
-                request for request in authorization_requests
+                request
+                for request in authorization_requests
                 if request.get("response_type") == ["code"]
                 and request.get("client_id") == ["a500-browser-client"]
                 and request.get("code_challenge_method") == ["S256"]
                 and bool(request.get("code_challenge", [""])[0])
             ]
             pkce_token_forms = [
-                form for form in token_forms
+                form
+                for form in token_forms
                 if form.get("grant_type") == ["authorization_code"]
                 and bool(form.get("code_verifier", [""])[0])
             ]
@@ -216,7 +221,7 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
 
 
 def _check_browser_snapshot_api(gateway_url: str, token: str) -> None:
-    """Prove the browser-issued access token can read and write a snapshot via gateway."""
+    """Prove the browser token can read and write a snapshot via the gateway."""
     url = f"{gateway_url.rstrip('/')}/api/v1/account-snapshot"
     request = Request(url, headers={"Authorization": f"Bearer {token}"})
     with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:
@@ -256,7 +261,6 @@ def _check_browser_snapshot_api(gateway_url: str, token: str) -> None:
         updated = json.loads(response.read())
     if updated.get("available_cash") != "126.50":
         raise AssertionError("浏览器令牌写入后的账户快照未能读取")
-
 
 
 def _device_authorize(base_url: str, username: str, password: str) -> str:
@@ -564,7 +568,7 @@ def _check_binding(
 def _check_no_plaintext(port: int) -> None:
     try:
         status, _ = _request(f"http://localhost:{port}/api/v1/signals")
-    except (OSError, URLError):
+    except OSError, URLError:
         return
     if status in (200, 401):
         raise AssertionError("HTTPS 入口接受了明文 API 请求")

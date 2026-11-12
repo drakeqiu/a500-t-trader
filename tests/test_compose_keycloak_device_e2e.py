@@ -43,5 +43,3 @@ def test_https_requests_use_certificate_validation(
     monkeypatch.setattr(E2E, "urlopen", reject_untrusted)
     with pytest.raises(E2E.URLError, match="certificate verify failed"):
         E2E._request("https://localhost:8443/")
-
-

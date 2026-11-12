@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator, Iterable
@@ -172,9 +172,7 @@ def create_app(
         try:
             auth(credentials.credentials)
         except Exception as error:
-            _LOG.warning(
-                "OIDC bearer authentication failed: %s", type(error).__name__
-            )
+            _LOG.warning("OIDC bearer authentication failed: %s", type(error).__name__)
             raise HTTPException(
                 status_code=401,
                 detail="Invalid bearer credentials",

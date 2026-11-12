@@ -23,7 +23,16 @@ def test_development_mode_or_unpinned_image_is_rejected(monkeypatch) -> None:
     monkeypatch.setattr(
         BASELINE,
         "_run",
-        lambda *_args, **_kwargs: type("Result", (), {"stdout": '{"services":{"idp":{"image":"example/keycloak:latest","command":"start-dev"}}}'})(),
+        lambda *_args, **_kwargs: type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"services":{"idp":{"image":"example/keycloak:latest",'
+                    '"command":"start-dev"}}}'
+                )
+            },
+        )(),
     )
     try:
         BASELINE._deployment_mode([], [], "idp")
@@ -31,22 +40,33 @@ def test_development_mode_or_unpinned_image_is_rejected(monkeypatch) -> None:
         assert "development-mode" in str(error)
     else:
         raise AssertionError("development Keycloak must not qualify as a baseline")
+
+
 def test_resource_sampling_uses_the_selected_compose_definition(monkeypatch) -> None:
     import argparse
     import subprocess
-    from threading import Event
 
     baseline = BASELINE
 
-    definition = ["podman", "compose", "--env-file", "/dev/null", "--project-name", "test"]
+    definition = [
+        "podman",
+        "compose",
+        "--env-file",
+        "/dev/null",
+        "--project-name",
+        "test",
+    ]
     files = ["compose.yaml", "compose.production.yaml"]
     observed = []
     inputs = iter(["", "", "", "1,2"])
     monkeypatch.setattr("builtins.input", lambda: next(inputs))
-    monkeypatch.setattr(baseline, "_run", lambda command, **kwargs: observed.append(command))
+    monkeypatch.setattr(
+        baseline, "_run", lambda command, **kwargs: observed.append(command)
+    )
     monkeypatch.setattr(baseline, "_ready", lambda *_args: None)
     monkeypatch.setattr(
-        baseline, "_collect",
+        baseline,
+        "_collect",
         lambda compose, services, seconds: (
             observed.append(compose) or [{"memory_bytes": 10, "cpu_percent_sum": 1}]
         ),

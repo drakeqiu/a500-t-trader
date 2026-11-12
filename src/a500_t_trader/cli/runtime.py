@@ -38,9 +38,9 @@ class ConfigurationError(ProviderStartupError):
     """Provider settings are missing or malformed."""
 
 
-
 class MissingConfigurationError(ConfigurationError):
     """Required provider settings are absent."""
+
 
 class AuthenticationError(ProviderStartupError):
     """Provider credentials were rejected."""

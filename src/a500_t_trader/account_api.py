@@ -10,6 +10,7 @@ from .account_snapshot_api import create_app
 from .cli.runtime import MissingConfigurationError, create_provider_from_env
 from .market_data import MarketDataService
 
+
 def create_market_data_service() -> MarketDataService | None:
     """Use configured market data, while keeping it optional for API startup."""
     if os.environ.get("ACCOUNT_API_MARKET_DATA") == "disabled":

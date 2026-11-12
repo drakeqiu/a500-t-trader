@@ -19,14 +19,16 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
 
 
 def _recovery_link(messages: list[dict[str, object]], hostname: str) -> str:
     for message in messages:
         text = html.unescape(
-            "\n".join(str(message.get(field, "")) for field in ("Text", "HTML", "Subject"))
+            "\n".join(
+                str(message.get(field, "")) for field in ("Text", "HTML", "Subject")
+            )
         )
         for match in re.finditer(r"https?://[^\s\"'<>]+", text):
             link = match.group(0).rstrip(").,;")
@@ -45,16 +47,21 @@ def _mailpit_recovery_link(mailpit: str, email: str, hostname: str) -> str:
                 result = json.load(response)
             messages = result.get("messages", []) if isinstance(result, dict) else []
             for message in messages:
-                if not isinstance(message, dict) or email.lower() not in json.dumps(message).lower():
+                if (
+                    not isinstance(message, dict)
+                    or email.lower() not in json.dumps(message).lower()
+                ):
                     continue
                 message_id = message.get("ID")
                 if not isinstance(message_id, str):
                     continue
-                with urlopen(mailpit + "/api/v1/message/" + message_id, timeout=5) as response:
+                with urlopen(
+                    mailpit + "/api/v1/message/" + message_id, timeout=5
+                ) as response:
                     detail = json.load(response)
                 if isinstance(detail, dict):
                     return _recovery_link([detail], hostname)
-        except (OSError, TimeoutError, json.JSONDecodeError):
+        except OSError, TimeoutError, json.JSONDecodeError:
             pass
         time.sleep(1)
     raise RuntimeError("Timed out waiting for local password recovery email")
@@ -124,7 +131,9 @@ def _change_user_email(
     )
     with opener.open(request, timeout=10) as response:
         if response.status not in (200, 204):
-            raise RuntimeError(f"Rauthy user email update returned HTTP {response.status}")
+            raise RuntimeError(
+                f"Rauthy user email update returned HTTP {response.status}"
+            )
     with opener.open(
         Request(issuer.rstrip("/") + f"/users/{new_email}", headers=headers),
         timeout=10,
@@ -135,7 +144,6 @@ def _change_user_email(
     return user_id
 
 
-
 def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
     opener = build_opener(
         ProxyHandler({}),
@@ -143,12 +151,29 @@ def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
     )
     headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
     fields = (
-        "name", "confidential", "redirect_uris", "post_logout_redirect_uris",
-        "allowed_origins", "enabled", "flows_enabled", "access_token_alg",
-        "id_token_alg", "auth_code_lifetime", "access_token_lifetime",
-        "scopes", "default_scopes", "challenges", "force_mfa", "client_uri",
-        "contacts", "backchannel_logout_uri", "restrict_group_prefix",
-        "claims", "claims_at_root", "allowed_resources", "scim",
+        "name",
+        "confidential",
+        "redirect_uris",
+        "post_logout_redirect_uris",
+        "allowed_origins",
+        "enabled",
+        "flows_enabled",
+        "access_token_alg",
+        "id_token_alg",
+        "auth_code_lifetime",
+        "access_token_lifetime",
+        "scopes",
+        "default_scopes",
+        "challenges",
+        "force_mfa",
+        "client_uri",
+        "contacts",
+        "backchannel_logout_uri",
+        "restrict_group_prefix",
+        "claims",
+        "claims_at_root",
+        "allowed_resources",
+        "scim",
     )
     for client_id in (CLIENT_ID, DEVICE_CLIENT_ID):
         endpoint = issuer.rstrip("/") + f"/clients/{client_id}"
@@ -164,23 +189,16 @@ def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
         )
         with opener.open(request, timeout=10) as response:
             if response.status not in (200, 204):
-                raise RuntimeError(f"Rauthy client audience update returned HTTP {response.status}")
+                raise RuntimeError(
+                    f"Rauthy client audience update returned HTTP {response.status}"
+                )
         with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
             configured = json.load(response)
         if configured.get("default_aud") != [AUDIENCE]:
             raise AssertionError("Rauthy did not persist the client's default_aud")
 
-from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import (
-    HTTPError,
-    HTTPSHandler,
-    ProxyHandler,
-    Request,
-    build_opener,
-    urlopen,
-)
-
 ROOT = Path(__file__).resolve().parents[1]
+
 AUDIENCE = "a500-api"
 CLIENT_ID = "a500-browser-client"
 DEVICE_CLIENT_ID = "a500-device-client"
@@ -381,6 +399,7 @@ def _device_grant(
     print("Device protocol: expiry terminated without a token.")
     return token, id_token
 
+
 def _device_public_api(gateway: str, token: str) -> None:
     opener = build_opener(ProxyHandler({}))
     headers = {"Authorization": f"Bearer {token}"}
@@ -416,7 +435,9 @@ def _device_public_api(gateway: str, token: str) -> None:
         Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
     ) as response:
         if response.status != 200:
-            raise AssertionError(f"Public snapshot read returned HTTP {response.status}")
+            raise AssertionError(
+                f"Public snapshot read returned HTTP {response.status}"
+            )
         etag = response.headers.get("ETag")
         saved = json.load(response)
     if not etag:
@@ -439,7 +460,9 @@ def _device_public_api(gateway: str, token: str) -> None:
     )
     with opener.open(update, timeout=20) as response:
         if response.status not in (200, 201):
-            raise AssertionError(f"Public snapshot write returned HTTP {response.status}")
+            raise AssertionError(
+                f"Public snapshot write returned HTTP {response.status}"
+            )
     with opener.open(
         Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
     ) as response:
@@ -502,9 +525,6 @@ def internal_jwks_uri(uri: str) -> str:
     return urlunsplit(("http", "rauthy:8080", parsed.path, parsed.query, ""))
 
 
-
-
-
 def _compose_bootstrap_override(
     directory: Path,
     raft_secret: str,
@@ -551,8 +571,6 @@ def _rauthy_settings(port: str) -> dict[str, str]:
     }
 
 
-
-
 def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
     if discovery.get("issuer") != issuer or not isinstance(
         discovery.get("jwks_uri"), str
@@ -590,15 +608,17 @@ def _write_bootstrap(
             )
         ]
     else:
-        users = [{
-            "email": username,
-            "given_name": "Acceptance",
-            "family_name": "Tester",
-            "password": {"Plain": password},
-            "enabled": True,
-            "email_verified": True,
-            "roles": ["user"],
-        }]
+        users = [
+            {
+                "email": username,
+                "given_name": "Acceptance",
+                "family_name": "Tester",
+                "password": {"Plain": password},
+                "enabled": True,
+                "email_verified": True,
+                "roles": ["user"],
+            }
+        ]
     key_name = "acceptance-client-update" if api_secret else "a500-acceptance"
     api_secret = api_secret or secrets.token_hex(32)
     clients = [
@@ -619,8 +639,18 @@ def _write_bootstrap(
             "force_mfa": False,
         }
         for client_id, client_name, redirect, flows in (
-            (CLIENT_ID, "A500 browser acceptance", True, ["authorization_code", "refresh_token"]),
-            (DEVICE_CLIENT_ID, "A500 independent device acceptance", False, [DEVICE_GRANT]),
+            (
+                CLIENT_ID,
+                "A500 browser acceptance",
+                True,
+                ["authorization_code", "refresh_token"],
+            ),
+            (
+                DEVICE_CLIENT_ID,
+                "A500 independent device acceptance",
+                False,
+                [DEVICE_GRANT],
+            ),
         )
     ]
     client_access = [{"group": "Clients", "access_rights": ["update"]}]
@@ -629,21 +659,25 @@ def _write_bootstrap(
             {"group": "Clients", "access_rights": ["read", "create", "update"]},
             {"group": "Users", "access_rights": ["read", "update"]},
         ]
-    api_keys = [{
-        "name": key_name,
-        "secret": {"Plain": api_secret},
-        "exp": int(time.time()) + (1800 if username is None else 600),
-        "access": client_access,
-    }]
+    api_keys = [
+        {
+            "name": key_name,
+            "secret": {"Plain": api_secret},
+            "exp": int(time.time()) + (1800 if username is None else 600),
+            "access": client_access,
+        }
+    ]
     user_api_secret = None
     if include_user_key:
         user_api_secret = secrets.token_hex(32)
-        api_keys.append({
-            "name": "a500-user-acceptance",
-            "secret": {"Plain": user_api_secret},
-            "exp": int(time.time()) + 1800,
-            "access": [{"group": "Users", "access_rights": ["read", "update"]}],
-        })
+        api_keys.append(
+            {
+                "name": "a500-user-acceptance",
+                "secret": {"Plain": user_api_secret},
+                "exp": int(time.time()) + 1800,
+                "access": [{"group": "Users", "access_rights": ["read", "update"]}],
+            }
+        )
     for filename, value in (
         ("users.json", users),
         ("clients.json", clients),
@@ -657,6 +691,7 @@ def _write_bootstrap(
         return key_name, api_secret, password, user_api_secret
     return key_name, api_secret, password
 
+
 def _port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -666,8 +701,6 @@ def _port() -> int:
 def _wait_discovery(issuer: str) -> dict[str, object]:
     ctx = ssl._create_unverified_context()
     deadline = time.monotonic() + 180
-    failures: dict[str, int] = {}
-    last_status: int | None = None
     while time.monotonic() < deadline:
         try:
             with urlopen(
@@ -678,7 +711,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
                 result = json.load(response)
             _validate_discovery(issuer, result)
             return result
-        except (OSError, TimeoutError, json.JSONDecodeError):
+        except OSError, TimeoutError, json.JSONDecodeError:
             time.sleep(2)
     raise RuntimeError("Rauthy discovery did not become ready")
 
@@ -712,10 +745,14 @@ def _public_api_request(
         payload = response.read()
         try:
             decoded = json.loads(payload) if payload else None
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except json.JSONDecodeError, UnicodeDecodeError:
             raise AssertionError("Public API returned a non-JSON response") from None
         status = int(getattr(response, "status", response.code))
-        return status, {key.lower(): value for key, value in response.headers.items()}, decoded
+        return (
+            status,
+            {key.lower(): value for key, value in response.headers.items()},
+            decoded,
+        )
     finally:
         response.close()
 
@@ -729,23 +766,23 @@ def _multipart_csv(trade_number: int) -> tuple[bytes, str]:
     )
     content = (TRADE_CSV_HEADER + row).encode("gb18030")
     multipart = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="file"; filename="fills.csv"\r\n'
-        "Content-Type: text/csv\r\n\r\n"
-    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="fills.csv"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+        ).encode()
+        + content
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     return multipart, f"multipart/form-data; boundary={boundary}"
 
 
 def _assert_token_rejected(gateway: str, id_token: str) -> None:
-    status, _, _ = _public_api_request(
-        gateway, "/api/v1/signals", id_token
-    )
+    status, _, _ = _public_api_request(gateway, "/api/v1/signals", id_token)
     if status != 401:
         raise AssertionError(
             f"Public API accepted an ID token (HTTP {status}, expected 401)"
         )
-
-
 
 
 def _browser_flow(
@@ -771,7 +808,8 @@ def _browser_flow(
         page.get_by_role("button", name="安全连接", exact=True).first.click()
         page.wait_for_url(issuer + "**", timeout=120_000)
         username_field = page.locator(
-            'input[autocomplete="username"], input[type="email"], input[name="login"], input[type="text"]'
+            'input[autocomplete="username"], input[type="email"], '
+            'input[name="login"], input[type="text"]'
         ).first
         username_field.wait_for(state="visible", timeout=30_000)
         username_field.fill(username)
@@ -780,8 +818,10 @@ def _browser_flow(
         password_field.wait_for(state="visible", timeout=30_000)
         password_field.fill(password)
         with page.expect_response(
-            lambda response: "/oidc/token" in urlsplit(response.url).path
-            and response.request.method == "POST",
+            lambda response: (
+                "/oidc/token" in urlsplit(response.url).path
+                and response.request.method == "POST"
+            ),
             timeout=60_000,
         ) as token_response:
             page.locator('button[type="submit"]:visible').click()
@@ -790,17 +830,24 @@ def _browser_flow(
         browser_token = token_body.get("access_token")
         refresh_token = token_body.get("refresh_token")
         if not isinstance(browser_token, str):
-            raise AssertionError("Browser OAuth response did not contain an access token")
+            raise AssertionError(
+                "Browser OAuth response did not contain an access token"
+            )
         if refresh_token is not None and not isinstance(refresh_token, str):
-            raise AssertionError("Browser OAuth response contained an invalid refresh token")
-        page.wait_for_function("() => document.body.innerText.includes('策略信号')", timeout=60_000)
+            raise AssertionError(
+                "Browser OAuth response contained an invalid refresh token"
+            )
+        page.wait_for_function(
+            "() => document.body.innerText.includes('策略信号')", timeout=60_000
+        )
         verify_access_token(browser_token, issuer)
         status, _, api_error = _public_api_request(
             gateway, "/api/v1/signals", browser_token
         )
         if status != 200:
             raise AssertionError(
-                f"Browser access token was rejected by public API (HTTP {status}: {api_error})"
+                "Browser access token was rejected by public API "
+                f"(HTTP {status}: {api_error})"
             )
 
         if create_snapshot:
@@ -809,7 +856,9 @@ def _browser_flow(
 
         if create_snapshot:
             page.get_by_role("button", name="创建快照").click()
-            page.get_by_label("快照时间").fill(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            page.get_by_label("快照时间").fill(
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            )
             page.get_by_label("可用现金", exact=True).fill(cash)
             page.get_by_role("button", name="添加证券").click()
             page.get_by_label("第 1 行证券代码").fill("510300")
@@ -817,14 +866,37 @@ def _browser_flow(
             page.get_by_label("第 1 行保护底仓").fill("20")
             page.get_by_label("第 1 行当前可卖").fill(str(holdings - 20))
             page.get_by_label("第 1 行成本基础").fill("3.8500")
-            with page.expect_response(lambda r: r.url == gateway + "/api/v1/account-snapshot" and r.request.method == "PUT") as saved:
+            with page.expect_response(
+                lambda r: (
+                    r.url == gateway + "/api/v1/account-snapshot"
+                    and r.request.method == "PUT"
+                )
+            ) as saved:
                 page.get_by_role("button", name="创建账户快照", exact=True).click()
             if saved.value.status not in (200, 201):
-                raise AssertionError(f"Snapshot write returned HTTP {saved.value.status}")
-            page.wait_for_function("() => document.body.innerText.includes('账户快照已保存')")
-            readback = page.evaluate("""async token => { const r = await fetch('/api/v1/account-snapshot', {headers: {Authorization: `Bearer ${token}`}}); return {status:r.status, body:await r.json()}; }""", browser_token)
-            if readback["status"] != 200 or readback["body"]["holdings"] != {"510300": holdings} or readback["body"]["available_cash"] != cash:
-                raise AssertionError("Snapshot readback did not match browser-written business data")
+                raise AssertionError(
+                    f"Snapshot write returned HTTP {saved.value.status}"
+                )
+            page.wait_for_function(
+                "() => document.body.innerText.includes('账户快照已保存')"
+            )
+            readback = page.evaluate(
+                """async token => {
+                    const r = await fetch('/api/v1/account-snapshot', {
+                        headers: {Authorization: `Bearer ${token}`}
+                    });
+                    return {status: r.status, body: await r.json()};
+                }""",
+                browser_token,
+            )
+            if (
+                readback["status"] != 200
+                or readback["body"]["holdings"] != {"510300": holdings}
+                or readback["body"]["available_cash"] != cash
+            ):
+                raise AssertionError(
+                    "Snapshot readback did not match browser-written business data"
+                )
         context.close()
         browser.close()
         return browser_token, refresh_token
@@ -859,11 +931,13 @@ def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> No
 def _refresh_token(token_endpoint: str, client_id: str, refresh_token: str) -> int:
     request = Request(
         token_endpoint,
-        data=urlencode({
-            "grant_type": "refresh_token",
-            "client_id": client_id,
-            "refresh_token": refresh_token,
-        }).encode(),
+        data=urlencode(
+            {
+                "grant_type": "refresh_token",
+                "client_id": client_id,
+                "refresh_token": refresh_token,
+            }
+        ).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
@@ -889,9 +963,9 @@ def _new_login_rejected(
         try:
             page.goto(gateway + "/signals", wait_until="domcontentloaded")
             page.get_by_role("button", name="安全连接", exact=True).first.click()
-            page.wait_for_url(issuer + "**", timeout=30_000)
             page.locator(
-                'input[autocomplete="username"], input[type="email"], input[name="login"], input[type="text"]'
+                'input[autocomplete="username"], input[type="email"], '
+                'input[name="login"], input[type="text"]'
             ).first.fill(username)
             page.locator("form").get_by_role("button", name="Login", exact=True).click()
             page.locator('input[type="password"]:visible').wait_for(timeout=30_000)
@@ -902,13 +976,12 @@ def _new_login_rejected(
                 return False
             except Exception:
                 # A rejected credential must leave the user on the IdP login page.
-                return page.url.startswith(issuer) and page.locator(
-                    'input[type="password"]:visible'
-                ).count() > 0
+                return (
+                    page.url.startswith(issuer)
+                    and page.locator('input[type="password"]:visible').count() > 0
+                )
         finally:
             browser.close()
-
-
 
 
 def _image_exists(image: str) -> bool:
@@ -936,12 +1009,25 @@ def _cleanup_run(
     resources = (
         (
             "containers",
-            ["podman", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"],
+            [
+                "podman",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+            ],
             ["podman", "rm", "-f"],
         ),
         (
             "volumes",
-            ["podman", "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={project}"],
+            [
+                "podman",
+                "volume",
+                "ls",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+            ],
             ["podman", "volume", "rm", "-f"],
         ),
     )
@@ -982,7 +1068,8 @@ def _cleanup_run(
         timeout=30,
     )
     if any(
-        image.startswith(f"localhost/{project}_") for image in result.stdout.splitlines()
+        image.startswith(f"localhost/{project}_")
+        for image in result.stdout.splitlines()
     ):
         raise RuntimeError("Test-created project images survived cleanup")
     remaining = [image for image in disposable_images if _image_exists(image)]
@@ -1007,46 +1094,67 @@ def main() -> None:
     preexisting_images = {
         image for image in (mailpit_image, rauthy_image) if _image_exists(image)
     }
-    ports = {name: str(_port()) for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")}
+    ports = {
+        name: str(_port())
+        for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")
+    }
     issuer = f"https://localhost:{ports['rauthy']}/auth/v1/"
     mailpit = f"http://127.0.0.1:{ports['mailpit']}"
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     env.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
-    for name in ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD", "AD_USERNAME", "AD_PASSWORD", "KEYCLOAK_HOSTNAME", "KEYCLOAK_HOST_PORT", "TLS_CERT", "TLS_KEY"):
+    for name in (
+        "KEYCLOAK_ADMIN_USERNAME",
+        "KEYCLOAK_ADMIN_PASSWORD",
+        "AD_USERNAME",
+        "AD_PASSWORD",
+        "KEYCLOAK_HOSTNAME",
+        "KEYCLOAK_HOST_PORT",
+        "TLS_CERT",
+        "TLS_KEY",
+    ):
         env.pop(name, None)
     temp = tempfile.TemporaryDirectory(prefix=project + "-")
     Path(temp.name).chmod(0o711)
     bootstrap_dir = Path(temp.name) / "bootstrap"
     encryption_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
-    subprocess.run(["uv", "build", "--wheel"], cwd=ROOT, env=env, check=True, timeout=120)
-    env.update({
-        "ACCOUNT_API_MARKET_DATA": "disabled",
-        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
-        "POSTGRES_PORT": ports["postgres"],
-        "RABBITMQ_BIND_HOST": "127.0.0.1",
-        "RABBITMQ_HOST_PORT": ports["rabbit"],
-        "OIDC_ISSUER": issuer,
-        "OIDC_AUDIENCE": AUDIENCE,
-        "OIDC_JWKS_URI": "http://rauthy:8080/auth/v1/oidc/jwks",
-        "OIDC_CLIENT_ID": CLIENT_ID,
-        "GATEWAY_HOST": "127.0.0.1",
-        "GATEWAY_HOST_PORT": ports["gateway"],
-        "MARKET_DATA_MODE": "replay",
-        "RAUTHY_LOCAL_TEST": "false",
-        "RAUTHY_BOOTSTRAP_HOST_DIR": str(bootstrap_dir),
-        "RAUTHY_NODE_ID": "1",
-        "RAUTHY_NODES": "1 localhost:8100 localhost:8200",
-        "RAUTHY_SECRET_RAFT": secrets.token_urlsafe(32),
-        "RAUTHY_SECRET_API": secrets.token_urlsafe(32),
-        "MAILPIT_HOST_PORT": ports["mailpit"],
-        "SMTP_USERNAME": "",
-        "SMTP_PASSWORD": "",
-        "RAUTHY_ENC_KEYS": "test/" + encryption_key,
-        "RAUTHY_ENC_KEY_ACTIVE": "test",
-        **_rauthy_settings(ports["rauthy"]),
-    })
-    files = ["compose.yaml", "compose.web.yaml", "compose.web-http.yaml", "compose.rauthy.yaml"]
+    subprocess.run(
+        ["uv", "build", "--wheel"], cwd=ROOT, env=env, check=True, timeout=120
+    )
+    env.update(
+        {
+            "ACCOUNT_API_MARKET_DATA": "disabled",
+            "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+            "POSTGRES_PORT": ports["postgres"],
+            "RABBITMQ_BIND_HOST": "127.0.0.1",
+            "RABBITMQ_HOST_PORT": ports["rabbit"],
+            "OIDC_ISSUER": issuer,
+            "OIDC_AUDIENCE": AUDIENCE,
+            "OIDC_JWKS_URI": "http://rauthy:8080/auth/v1/oidc/jwks",
+            "OIDC_CLIENT_ID": CLIENT_ID,
+            "GATEWAY_HOST": "127.0.0.1",
+            "GATEWAY_HOST_PORT": ports["gateway"],
+            "MARKET_DATA_MODE": "replay",
+            "RAUTHY_LOCAL_TEST": "false",
+            "RAUTHY_BOOTSTRAP_HOST_DIR": str(bootstrap_dir),
+            "RAUTHY_NODE_ID": "1",
+            "RAUTHY_NODES": "1 localhost:8100 localhost:8200",
+            "RAUTHY_SECRET_RAFT": secrets.token_urlsafe(32),
+            "RAUTHY_SECRET_API": secrets.token_urlsafe(32),
+            "MAILPIT_HOST_PORT": ports["mailpit"],
+            "SMTP_USERNAME": "",
+            "SMTP_PASSWORD": "",
+            "RAUTHY_ENC_KEYS": "test/" + encryption_key,
+            "RAUTHY_ENC_KEY_ACTIVE": "test",
+            **_rauthy_settings(ports["rauthy"]),
+        }
+    )
+    files = [
+        "compose.yaml",
+        "compose.web.yaml",
+        "compose.web-http.yaml",
+        "compose.rauthy.yaml",
+    ]
     prefix = [*command, "--env-file", os.devnull, "--project-name", project]
     for file in files:
         prefix.extend(("-f", str(ROOT / file)))
@@ -1098,7 +1206,22 @@ def main() -> None:
         discovery = _wait_discovery(issuer)
         _set_client_audience(issuer, api_key_name, api_key_secret)
         env["OIDC_JWKS_URI"] = internal_jwks_uri(str(discovery["jwks_uri"]))
-        subprocess.run([*prefix, "up", "-d", "signal-api", "account-api", "jobs-api", "frontend", "gateway"], cwd=ROOT, env=env, check=True, timeout=300)
+        subprocess.run(
+            [
+                *prefix,
+                "up",
+                "-d",
+                "signal-api",
+                "account-api",
+                "jobs-api",
+                "frontend",
+                "gateway",
+            ],
+            cwd=ROOT,
+            env=env,
+            check=True,
+            timeout=300,
+        )
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             try:
@@ -1138,23 +1261,46 @@ def main() -> None:
         _assert_token_rejected(gateway, device_id_token)
         for token in (None, "not.a.jwt"):
             if _public_api_request(gateway, "/api/v1/signals", token)[0] != 401:
-                raise AssertionError("Public API accepted an absent or malformed bearer token")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", device_token)[0] == 200:
-            raise AssertionError("Second Rauthy user could read the browser user's account snapshot")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", admin_token)[0] == 200:
-            raise AssertionError("Rauthy identity admin could read the browser user's account snapshot")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", browser_token)[0] != 200:
-            raise AssertionError("Browser user's account snapshot was not available to its owner")
+                raise AssertionError(
+                    "Public API accepted an absent or malformed bearer token"
+                )
+        if (
+            _public_api_request(gateway, "/api/v1/account-snapshot", device_token)[0]
+            == 200
+        ):
+            raise AssertionError(
+                "Second Rauthy user could read the browser user's account snapshot"
+            )
+        if (
+            _public_api_request(gateway, "/api/v1/account-snapshot", admin_token)[0]
+            == 200
+        ):
+            raise AssertionError(
+                "Rauthy identity admin could read the browser user's account snapshot"
+            )
+        if (
+            _public_api_request(gateway, "/api/v1/account-snapshot", browser_token)[0]
+            != 200
+        ):
+            raise AssertionError(
+                "Browser user's account snapshot was not available to its owner"
+            )
         original_subject = _decode(browser_token.split(".")[1]).get("sub")
         changed_email = "browser-renamed@example.test"
-        if _change_user_email(
-            issuer,
-            "a500-user-acceptance",
-            user_api_key_secret,
-            "browser@example.test",
-            changed_email,
-        ) != original_subject:
-            raise AssertionError("Rauthy changed the user's subject during email update")
+        recovered_password = secrets.token_urlsafe(24)
+        if (
+            _change_user_email(
+                issuer,
+                "a500-user-acceptance",
+                user_api_key_secret,
+                "browser@example.test",
+                changed_email,
+            )
+            != original_subject
+        ):
+            raise AssertionError(
+                "Rauthy changed the user's subject during email update"
+            )
         renamed_token, _ = _browser_flow(
             gateway,
             issuer,
@@ -1165,9 +1311,10 @@ def main() -> None:
         )
         if _decode(renamed_token.split(".")[1]).get("sub") != original_subject:
             raise AssertionError("Email login changed the authenticated subject")
-        if _public_api_request(
-            gateway, "/api/v1/account-snapshot", renamed_token
-        )[0] != 200:
+        if (
+            _public_api_request(gateway, "/api/v1/account-snapshot", renamed_token)[0]
+            != 200
+        ):
             raise AssertionError("Original business data was lost after email update")
         _perform_password_recovery(issuer, mailpit, changed_email, recovered_password)
         recovered_token, recovered_refresh_token = _browser_flow(
@@ -1179,9 +1326,16 @@ def main() -> None:
             create_snapshot=False,
         )
         if _decode(recovered_token.split(".")[1]).get("sub") != original_subject:
-            raise AssertionError("Recovered-password login changed the authenticated subject")
-        if _public_api_request(gateway, "/api/v1/account-snapshot", recovered_token)[0] != 200:
-            raise AssertionError("Recovered-password login could not access existing business data")
+            raise AssertionError(
+                "Recovered-password login changed the authenticated subject"
+            )
+        if (
+            _public_api_request(gateway, "/api/v1/account-snapshot", recovered_token)[0]
+            != 200
+        ):
+            raise AssertionError(
+                "Recovered-password login could not access existing business data"
+            )
         browser_token = renamed_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
@@ -1193,22 +1347,35 @@ def main() -> None:
             content_type=import_type,
         )
         if status != 200 or not isinstance(imported, dict):
-            raise AssertionError(f"Browser user trade-import preview returned HTTP {status}")
+            raise AssertionError(
+                f"Browser user trade-import preview returned HTTP {status}"
+            )
         batch_id = imported.get("batch_id")
         if not isinstance(batch_id, str):
-            raise AssertionError("Trade-import preview did not return a batch identifier")
+            raise AssertionError(
+                "Trade-import preview did not return a batch identifier"
+            )
         preview_path = f"/api/v1/trade-imports/previews/{batch_id}"
         if _public_api_request(gateway, preview_path, browser_token)[0] != 200:
             raise AssertionError("Trade-import preview was not visible to its owner")
         if _public_api_request(gateway, preview_path, device_token)[0] != 404:
-            raise AssertionError("Second Rauthy user could read the first user's trade-import preview")
-        if _public_api_request(
-            gateway, preview_path + "/confirm", device_token, method="POST"
-        )[0] != 404:
-            raise AssertionError("Second Rauthy user could confirm the first user's trade-import preview")
+            raise AssertionError(
+                "Second Rauthy user could read the first user's trade-import preview"
+            )
+        if (
+            _public_api_request(
+                gateway, preview_path + "/confirm", device_token, method="POST"
+            )[0]
+            != 404
+        ):
+            raise AssertionError(
+                "Second Rauthy user could confirm the first user's trade-import preview"
+            )
         browser_token, browser_refresh_token = recovered_token, recovered_refresh_token
         if not browser_refresh_token:
-            raise AssertionError("Rauthy did not issue the recovered user's browser refresh credential")
+            raise AssertionError(
+                "Rauthy did not issue the recovered user's browser refresh credential"
+            )
         token_exp = _decode(browser_token.split(".")[1]).get("exp")
         if not isinstance(token_exp, int):
             raise AssertionError("Browser access token has no expiry")
@@ -1216,29 +1383,44 @@ def main() -> None:
             issuer, "a500-user-acceptance", user_api_key_secret, changed_email
         )
         if _public_api_request(gateway, "/api/v1/signals", browser_token)[0] != 200:
-            raise AssertionError("Previously issued token did not remain valid after user disable")
-        if _refresh_token(str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token) not in (400, 401):
+            raise AssertionError(
+                "Previously issued token did not remain valid after user disable"
+            )
+        if _refresh_token(
+            str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token
+        ) not in (400, 401):
             raise AssertionError("Rauthy accepted refresh after the user was disabled")
         if not _new_login_rejected(
-            gateway, issuer, changed_email, recovered_password,
+            gateway,
+            issuer,
+            changed_email,
+            recovered_password,
         ):
-            raise AssertionError("Rauthy accepted a new browser login after the user was disabled")
+            raise AssertionError(
+                "Rauthy accepted a new browser login after the user was disabled"
+            )
         wait_seconds = max(0, token_exp - int(time.time())) + 1
         print(
             "Disabled disposable browser user: prior token remains locally valid; "
             f"waiting {wait_seconds}s for its five-minute expiry."
         )
         time.sleep(wait_seconds)
-        expiry_status = _public_api_request(gateway, "/api/v1/signals", browser_token)[0]
+        expiry_status = _public_api_request(gateway, "/api/v1/signals", browser_token)[
+            0
+        ]
         if expiry_status != 401:
             raise AssertionError(
-                f"Previously issued access token returned HTTP {expiry_status} after expiry"
+                "Previously issued access token returned "
+                f"HTTP {expiry_status} after expiry"
             )
         print(
             "Verified disabled-user login and refresh rejection; prior access token "
             "was accepted during its residual window and rejected after expiry."
         )
-        print("Verified real browser and device access tokens, ID-token rejection, and public API snapshot/trade-import subject isolation.")
+        print(
+            "Verified real browser and device access tokens, ID-token rejection, "
+            "and public API snapshot/trade-import subject isolation."
+        )
     finally:
         try:
             _cleanup_run(
@@ -1253,6 +1435,7 @@ def main() -> None:
             )
         finally:
             temp.cleanup()
+
 
 if __name__ == "__main__":
     main()
