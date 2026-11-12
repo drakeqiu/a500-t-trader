@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -38,6 +39,7 @@ from .market_data import (
 
 CLASSIFICATION = "user-entered; not broker-verified"
 SHARED_OIDC_AUDIENCE = "a500-api"
+_LOG = logging.getLogger(__name__)
 
 
 class Authenticator(Protocol):
@@ -52,7 +54,7 @@ class OIDCAuthenticator:
             raise ValueError(
                 f"OIDC audience must be the shared audience {SHARED_OIDC_AUDIENCE!r}"
             )
-        self.issuer = issuer.rstrip("/")
+        self.issuer = issuer
         self.audience = audience
         self.jwks = PyJWKClient(jwks_uri)
 
@@ -440,6 +442,7 @@ def _authenticated_subject(auth: Authenticator, authorization: str | None) -> st
     try:
         return auth(token)
     except Exception as exc:
+        _LOG.warning("OIDC bearer validation failed: %s", type(exc).__name__)
         raise HTTPException(
             status_code=401,
             detail="Invalid bearer credentials",
