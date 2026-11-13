@@ -42,7 +42,7 @@ runner 实际提交密码恢复请求，轮询 Mailpit API 取得该一次性用
 
 ## 当前验收边界
 
-runner 自动验证的是隔离 Compose 中的 Rauthy，而不是部署环境。用户邮箱变更和 Mailpit 密码恢复会实际操作 Rauthy，并通过浏览器重新认证及业务 API 验证主体连续性。用户自助注册关闭、真实管理员创建／审批，以及 localhost Passkey 都需要分别完成相应的真实验收后，才能勾选 issue #226 对应标准。
+runner 自动验证的是隔离 Compose 中的 Rauthy，不代表生产部署。#226 的用户准入、邮箱变更、localhost 虚拟 Passkey 和历史 Mailpit 恢复证据已分别记录在该 issue；其中邮件恢复不属于当前切换门槛，localhost Passkey 不外推到远程 HTTP WebAuthn。
 The runner creates a disposable enabled, email-verified account and separate public clients for browser authorization and the independent device-code grant in a private temporary bootstrap directory. Rauthy v0.37.2's bootstrap client schema does not contain `default_aud`; the runner bootstraps a temporary API key restricted to client updates, then sets and reads back `default_aud: ["a500-api"]` through Rauthy's supported client API. The device client enables only `urn:ietf:params:oauth:grant-type:device_code`, signs access and ID tokens with RS256, and issues five-minute access tokens.
 Browser automation failures are reported with a fixed message; Playwright diagnostics, verification URLs, test credentials, and page content are not included in the raised error.
 
@@ -60,6 +60,27 @@ Browser automation failures are reported with a fixed message; Playwright diagno
 
 The runner performs the PKCE browser-login acceptance, then exercises a separate device authorization context without reusing the A500 browser session. The device flow checks pending, early-poll `slow_down`, approval, denial, and natural expiry. It verifies issuer, audience, RS256, and five-minute token lifetime, then accesses signals, writes and reads an account snapshot, and verifies SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
 
+## #231 切换准入审核（2026-11-13）
+
+**结论：GO，允许开始 #232 迁移实施；这不是切换已完成、生产部署已验收或旧数据可清理的授权。** 当前有效的剩余核心门槛均有通过证据；失败、缺证、未执行：无。该结论供 #231 集成负责人记录处理，本文件变更不关闭 issue。
+
+| 有效门槛 | 状态与证据 |
+|---|---|
+| 浏览器 PKCE 与真实业务 API | **通过**：[#223](https://github.com/drakeqiu/a500-t-trader/issues/223) 记录真实浏览器登录和业务 API 访问；[#228 最终运行](https://github.com/drakeqiu/a500-t-trader/issues/228#issuecomment-6852074539) 重新验证 HTTP 候选下真实浏览器 token 调用 API。 |
+| 独立设备授权及 pending/slow_down/拒绝/过期 | **通过**：[#224](https://github.com/drakeqiu/a500-t-trader/issues/224) 记录真实设备协议边界及 API；#228 又验证 HTTP 候选设备 token API 路径。 |
+| JWT 拒绝边界、token 用途、主体与管理员隔离 | **通过**：[#225](https://github.com/drakeqiu/a500-t-trader/issues/225) 记录签名/issuer/audience/ID token 拒绝及跨主体隔离；#228 验证 issuer/JWKS 路径、token subject、跨用户及管理主体隔离。 |
+| 用户准入、邮箱变更、密码、可选 localhost Passkey | **通过**：[#226](https://github.com/drakeqiu/a500-t-trader/issues/226) 保留已完成证据；Passkey 使用 localhost 虚拟 WebAuthn，不证明远程 HTTP WebAuthn 可用。Mailpit 恢复仅为历史能力证据，不是当前门槛。 |
+| 停用、续期拒绝及到期边界 | **通过**：[#227](https://github.com/drakeqiu/a500-t-trader/issues/227) 记录停用后新登录/refresh 被拒、旧令牌到期前仍能访问且到期后拒绝。API 本地 JWT 校验意味着最多 5 分钟残余窗口，不提供即时撤权。 |
+| HTTP 候选真实浏览器/设备 API、issuer/JWKS 与普通重启持久化 | **通过**：[#228 最终运行](https://github.com/drakeqiu/a500-t-trader/issues/228#issuecomment-6852074539) 报告本机隔离 Rauthy/Compose HTTP 候选完整 runner exit 0、25 个聚焦 pytest 通过，两个真实客户端均访问 API，身份和配置在同一独立持久卷正常重启后仍可用；候选资源已清理，未触及既有业务数据。 |
+
+[#222](https://github.com/drakeqiu/a500-t-trader/issues/222) 是 Keycloak 本地验收历史基线，不作为 Rauthy 通过证据；Rauthy 能力以 #223–#228 的具体运行记录为准。
+
+**范围取消/N/A（不算通过）：** HTTPS、证书/CA/TLS，LAN/VPN/内网或公网访问隔离；MFA/应急账号；外部/加密 SMTP 与开户/凭据恢复邮件；备份/灾难恢复；资源收益及性能数值。HTTP 接受凭据、授权码、会话、令牌被监听、篡改或窃取并导致账号接管的风险，不声称具备传输保护或安全的公网认证部署。真实浏览器若因非安全上下文、混合内容等限制不能完成登录仍须报告失败，不能借范围取消标为通过。
+
+[#229](https://github.com/drakeqiu/a500-t-trader/issues/229) 的 not planned 关闭表示取消灾备/恢复验收；[#230](https://github.com/drakeqiu/a500-t-trader/issues/230) 的 not planned 关闭表示取消资源收益验收。两者均非通过证据，也不阻塞准入；保留的 Mailpit 历史恢复证据不等于灾难恢复保证。
+
+#232 可据此开始迁移实施，但仍须保持单一 issuer、API issuer/签名/audience/token-use 校验和主体隔离。此 GO 不执行切换、不批准清理 Keycloak 或任何身份/业务数据卷；迁移实施、验证与资源处置须在 #232 范围内另行完成/授权。
+
 ## Redacted acceptance evidence
 
 Previously recorded HTTPS-only evidence is historical and does not satisfy the current local HTTP acceptance.
@@ -70,4 +91,4 @@ Previously recorded HTTPS-only evidence is historical and does not satisfy the c
 
 ## Source note
 
-Issue #221 references `docs/adr/0021-rauthy-identity-provider.md`, absent from this worktree. The issue descriptions and version-pinned official Rauthy research are used; this is a test fixture, not a production IdP decision.
+`docs/adr/0021-rauthy-identity-provider.md` records the accepted migration scope; this fixture is an acceptance runner, not a production deployment.
