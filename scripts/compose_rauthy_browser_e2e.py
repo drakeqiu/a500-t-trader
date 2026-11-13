@@ -260,7 +260,12 @@ def _run_device_browser_step(step: Callable[[], None]) -> None:
 
 
 def _device_grant(
-    gateway: str, issuer: str, username: str, password: str
+    gateway: str,
+    issuer: str,
+    username: str,
+    password: str,
+    *,
+    create_snapshot: bool = True,
 ) -> tuple[str, str]:
     from playwright.sync_api import sync_playwright
 
@@ -371,7 +376,7 @@ def _device_grant(
     if not isinstance(id_token, str):
         raise AssertionError("Device grant returned no ID token")
     verify_access_token(token, issuer)
-    _device_public_api(gateway, token)
+    _device_public_api(gateway, token, create_snapshot=create_snapshot)
     print(
         "Device protocol: approved; RS256, default audience and "
         "five-minute token verified."
@@ -421,11 +426,13 @@ def _device_grant(
     if not isinstance(id_token, str):
         raise AssertionError("Device grant returned no ID token")
     verify_access_token(token, issuer)
-    _device_public_api(gateway, token)
+    _device_public_api(gateway, token, create_snapshot=False)
     print("Device protocol: fresh approved token verified after expiry checks.")
 
 
-def _device_public_api(gateway: str, token: str) -> None:
+def _device_public_api(
+    gateway: str, token: str, *, create_snapshot: bool = True
+) -> None:
     opener = build_opener(ProxyHandler({}))
     headers = {"Authorization": f"Bearer {token}"}
     with opener.open(
@@ -433,29 +440,30 @@ def _device_public_api(gateway: str, token: str) -> None:
     ) as response:
         if response.status != 200:
             raise AssertionError(f"Public signal API returned HTTP {response.status}")
-    snapshot = {
-        "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "holdings": {"510300": 100},
-        "protected_floor": {"510300": 20},
-        "sellable": {"510300": 80},
-        "cost_basis": {"510300": "3.8500"},
-        "available_cash": "125.50",
-    }
-    create = Request(
-        gateway + "/api/v1/account-snapshot",
-        data=json.dumps(snapshot).encode(),
-        headers={
-            **headers,
-            "Content-Type": "application/json",
-            "If-None-Match": "*",
-        },
-        method="PUT",
-    )
-    with opener.open(create, timeout=20) as response:
-        if response.status not in (200, 201):
-            raise AssertionError(
-                f"Public snapshot creation returned HTTP {response.status}"
-            )
+    if create_snapshot:
+        snapshot = {
+            "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "holdings": {"510300": 100},
+            "protected_floor": {"510300": 20},
+            "sellable": {"510300": 80},
+            "cost_basis": {"510300": "3.8500"},
+            "available_cash": "125.50",
+        }
+        create = Request(
+            gateway + "/api/v1/account-snapshot",
+            data=json.dumps(snapshot).encode(),
+            headers={
+                **headers,
+                "Content-Type": "application/json",
+                "If-None-Match": "*",
+            },
+            method="PUT",
+        )
+        with opener.open(create, timeout=20) as response:
+            if response.status not in (200, 201):
+                raise AssertionError(
+                    f"Public snapshot creation returned HTTP {response.status}"
+                )
     with opener.open(
         Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
     ) as response:
@@ -467,33 +475,36 @@ def _device_public_api(gateway: str, token: str) -> None:
         saved = json.load(response)
     if not etag:
         raise AssertionError("Public snapshot read returned no ETag")
+    expected_cash = "125.50" if create_snapshot else "126.50"
     if (
         saved.get("holdings") != {"510300": 100}
-        or saved.get("available_cash") != "125.50"
+        or saved.get("available_cash") != expected_cash
     ):
         raise AssertionError("Public snapshot readback mismatch")
-    snapshot["available_cash"] = "126.50"
-    update = Request(
-        gateway + "/api/v1/account-snapshot",
-        data=json.dumps(snapshot).encode(),
-        headers={
-            **headers,
-            "Content-Type": "application/json",
-            "If-Match": etag,
-        },
-        method="PUT",
-    )
-    with opener.open(update, timeout=20) as response:
-        if response.status not in (200, 201):
-            raise AssertionError(
-                f"Public snapshot write returned HTTP {response.status}"
-            )
-    with opener.open(
-        Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
-    ) as response:
-        saved = json.load(response)
-    if saved.get("available_cash") != "126.50":
-        raise AssertionError("Public snapshot write was not visible to its owner")
+    if create_snapshot:
+        snapshot["available_cash"] = "126.50"
+        update = Request(
+            gateway + "/api/v1/account-snapshot",
+            data=json.dumps(snapshot).encode(),
+            headers={
+                **headers,
+                "Content-Type": "application/json",
+                "If-Match": etag,
+            },
+            method="PUT",
+        )
+        with opener.open(update, timeout=20) as response:
+            if response.status not in (200, 201):
+                raise AssertionError(
+                    f"Public snapshot write returned HTTP {response.status}"
+                )
+        with opener.open(
+            Request(gateway + "/api/v1/account-snapshot", headers=headers),
+            timeout=20,
+        ) as response:
+            saved = json.load(response)
+        if saved.get("available_cash") != "126.50":
+            raise AssertionError("Public snapshot write was not visible to its owner")
     request = Request(
         gateway + "/api/v1/signals/stream?symbols=563360", headers=headers
     )
@@ -1472,7 +1483,11 @@ def main() -> None:
             create_snapshot=False,
         )
         persisted_device_token, persisted_device_id_token = _device_grant(
-            gateway, issuer, "device@example.test", user_password
+            gateway,
+            issuer,
+            "device@example.test",
+            user_password,
+            create_snapshot=False,
         )
         persisted_token, _ = _browser_flow(
             gateway,
