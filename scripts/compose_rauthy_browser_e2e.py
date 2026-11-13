@@ -416,6 +416,7 @@ def _device_grant(
     if not isinstance(fresh_code, str):
         raise AssertionError("Malformed post-expiry device authorization response")
     decision(fresh, True)
+    time.sleep(float(fresh.get("interval", 5)))
     status, response = poll(fresh_code)
     if status != 200 or not isinstance(response.get("access_token"), str):
         raise AssertionError(
