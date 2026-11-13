@@ -419,6 +419,55 @@ def test_token_rejection_returns_after_expected_unauthorized_response(
     runner._assert_token_rejected("http://gateway", "id-token")
 
 
+def test_device_grant_returns_fresh_token_after_expiry_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    payloads = [
+        {
+            "device_code": f"code-{index}",
+            "expires_in": 0,
+            "interval": 0,
+            "verification_uri_complete": "http://localhost/device?code=x",
+            "user_code": "x",
+        }
+        for index in range(4)
+    ]
+    polls = iter(
+        [
+            (400, {"error": "authorization_pending"}),
+            (400, {"error": "slow_down"}),
+            (200, {"access_token": "initial-access", "id_token": "initial-id"}),
+            (400, {"error": "expired_token"}),
+            (400, {"error": "expired_token"}),
+            (200, {"access_token": "fresh-access", "id_token": "fresh-id"}),
+        ]
+    )
+    monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runner, "_device_public_api", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
+
+    starts = iter(payloads)
+    monkeypatch.setattr(
+        runner,
+        "_oauth_post",
+        lambda _opener, url, _data: (200, next(starts))
+        if url.endswith("/device")
+        else next(polls),
+    )
+
+    assert runner._device_grant(
+        "http://localhost:18080", "http://localhost:8081/auth/v1/", "user", "pass"
+    ) == ("fresh-access", "fresh-id")
+
+
 @pytest.mark.parametrize(
     ("survivor", "message"),
     [

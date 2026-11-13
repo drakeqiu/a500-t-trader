@@ -381,7 +381,6 @@ def _device_grant(
         "Device protocol: approved; RS256, default audience and "
         "five-minute token verified."
     )
-    approved_token, approved_id_token = token, id_token
 
     denied = start()
     denied_code = denied.get("device_code")
@@ -430,7 +429,7 @@ def _device_grant(
     verify_access_token(token, issuer)
     _device_public_api(gateway, token, create_snapshot=False)
     print("Device protocol: fresh approved token verified after expiry checks.")
-    return approved_token, approved_id_token
+    return token, id_token
 
 
 def _device_public_api(
@@ -1518,7 +1517,14 @@ def main() -> None:
             or browser_snapshot.get("available_cash") != "125.50"
         ):
             raise AssertionError(
-                "Independent device client/user configuration or subject isolation did not survive restart"
+                "Independent device client/user configuration or subject isolation "
+                "did not survive restart: "
+                f"device_subject_matches={_decode(persisted_device_token.split('.')[1]).get('sub') == device_subject}, "
+                f"subjects_are_distinct={device_subject != original_subject}, "
+                f"device_snapshot_http={device_snapshot_status}, "
+                f"device_cash={device_snapshot.get('available_cash') if isinstance(device_snapshot, dict) else None!r}, "
+                f"browser_snapshot_http={browser_snapshot_status}, "
+                f"browser_cash={browser_snapshot.get('available_cash') if isinstance(browser_snapshot, dict) else None!r}"
             )
         _assert_token_rejected(gateway, persisted_device_id_token)
         if (
