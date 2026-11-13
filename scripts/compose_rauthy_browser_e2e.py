@@ -1458,6 +1458,14 @@ def main() -> None:
         persisted_device_token, persisted_device_id_token = _device_grant(
             gateway, issuer, "device@example.test", user_password
         )
+        persisted_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            changed_email,
+            user_password,
+            create_snapshot=False,
+        )
         device_snapshot_status, _, device_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", persisted_device_token
         )
