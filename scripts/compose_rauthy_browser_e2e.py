@@ -381,6 +381,7 @@ def _device_grant(
         "Device protocol: approved; RS256, default audience and "
         "five-minute token verified."
     )
+    approved_token, approved_id_token = token, id_token
 
     denied = start()
     denied_code = denied.get("device_code")
@@ -429,6 +430,7 @@ def _device_grant(
     verify_access_token(token, issuer)
     _device_public_api(gateway, token, create_snapshot=False)
     print("Device protocol: fresh approved token verified after expiry checks.")
+    return approved_token, approved_id_token
 
 
 def _device_public_api(
