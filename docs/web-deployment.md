@@ -56,7 +56,7 @@ python3 scripts/start-local.py down
 ./scripts/start-lan-replay.py 192.168.1.10 down
 ```
 
-将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Keycloak 端口；同步配置浏览器客户端允许来源和回调 URI。HTTP 与默认凭据仅适合受防火墙保护的可信局域网，禁止暴露到公网；RabbitMQ 不应暴露给不受信网络。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
+将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Keycloak 端口；同步配置浏览器客户端允许来源和回调 URI。本段的默认凭据与网络约束仅适用于此本地开发 helper，不构成 Rauthy HTTP 候选的验收门槛。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
 
 LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-worker` 直接使用 `.env` 中的 `AD_*` 配置，不依赖盘中行情。启动器也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`。确认 AmazingData 条款允许持久化后，直接运行：
 
@@ -70,7 +70,7 @@ LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-
 
 ### 配置身份和外部服务
 
-由 IdP 管理员配置支持 Authorization Code 和 PKCE S256 的 public client，提供获准用户，使 access token 包含 API 所需 audience，并精确允许 UI 来源及根路径回调 URI。issuer 的 discovery 地址及其返回的端点必须可由用户浏览器访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全相同，audience 必须与 access token 的 `aud` 匹配。API 验证签名、issuer、audience 和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
+由 IdP 管理员配置支持 Authorization Code + PKCE S256 的 public client 和独立设备授权 public client，提供获准用户；两种流程签发的 access token 都须包含 API 所需 audience。issuer 的 discovery 地址及授权／令牌端点必须由实际浏览器和设备客户端访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全一致。API 验证签名、issuer、audience、令牌用途和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
 
 以下域名和账户参数须替换成实际环境值。输入的密码不显示；也可由部署环境安全注入这些变量。
 
@@ -87,7 +87,7 @@ read -r -p 'AmazingData port: ' AD_PORT
 export AD_USERNAME AD_PASSWORD AD_HOST AD_PORT
 ```
 
-`OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
+`OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；Rauthy HTTP 候选不以 HTTPS、LAN/VPN 或公网访问限制作为验收门槛，但明文传输可能导致凭据、授权码、会话或令牌被监听、篡改、窃取并造成账号接管。不得将 HTTP 描述为提供 HTTPS 保护或安全的公网认证部署。
 
 ### Keycloak 实际部署资源基线
 
@@ -114,7 +114,7 @@ python3 scripts/keycloak-resource-baseline.py \
 
 每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
 
-HTTP 只适用于可信网络或由外部设施终止 TLS、且该设施到本机的链路受保护的场景；不可信网络必须使用 HTTPS。默认回环地址不能从其他主机访问。若确需远程访问，显式设置如 `GATEWAY_HOST=0.0.0.0`，并配置主机防火墙、网络访问控制、DNS 和 IdP 允许来源。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口，必须限制对可信生产者的访问并妥善管理凭据，不要暴露到不受信网络。
+HTTP 默认回环绑定不能从其他主机访问；按实际浏览器、设备客户端和后端的访问路径设置绑定地址、身份 issuer、网关及 DNS/hosts。该候选允许实际路径使用 HTTP，不要求配置 TLS、受控 LAN/VPN 或限制公网访问。HTTP 不提供传输机密性或完整性，攻击者可能监听或篡改登录与令牌流量、窃取凭据和令牌并接管账号；HTTPS 能降低这些风险，但不是候选验收条件。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口。
 
 HTTP 示例：
 
@@ -135,6 +135,12 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 ```
 
 在客户端打开 `https://实际域名:8443`（若覆盖端口则使用实际端口）；证书须覆盖该域名。回环绑定适合本机浏览器，使用对应本机 DNS/hosts 和证书名称。HTTP 模式则打开实际 `http://主机:端口`。登录时跳转至独立 IdP。切换模式前，使用旧模式的文件组合执行 `down`，再以新模式启动；不要同时启动两个入口。更新 UI 来源时同步更新 IdP 的允许来源和回调 URI。
+
+### Rauthy HTTP 候选验收
+
+验收必须针对部署方提供的真实身份 URL、公开网关 URL 和 Rauthy 配置，不得把 localhost fixture、配置审查、discovery/JWKS 请求或失败的浏览器登录记为通过。分别以真实浏览器完成 PKCE S256 和以独立设备授权客户端完成设备流程，再使用两者取得的真实 access token 经公开网关调用 Bearer API；确认签名、issuer、audience、令牌用途及有效期校验有效，并验证两个主体只能访问各自账户数据。若真实 HTTP 来源上的浏览器登录因安全上下文或浏览器限制失败，结果为未通过。localhost Passkey 结果不证明远程 HTTP WebAuthn 可用。
+
+同一候选使用独立持久卷完成验收后，执行普通停止／启动（不删除卷），重新用原用户登录并确认客户端／身份配置及重启前的账户测试数据仍在、主体保持一致。不得用 `down -v`；测试清理只能移除本轮创建的资源，不能删除其他项目卷。记录实际 URL、服务版本、流程/API/隔离/重启结果及清理动作；证据不得包含密码、授权码、令牌或密钥。所有验收同时明确记录 HTTP 的明文拦截、篡改、凭据／令牌盗窃及账号接管风险。
 
 ### 访问与直接调用
 
