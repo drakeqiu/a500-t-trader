@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import secrets
@@ -46,7 +47,7 @@ def configure_local_build_environment(environment: dict[str, str]) -> dict[str, 
 
 def local_environment() -> dict[str, str]:
     """Read literal dotenv values, never execute the user's configuration file."""
-    environment: dict[str, str] = os.environ.copy()
+    environment: dict[str, str] = {}
     dotenv = ROOT / ".env"
     if dotenv.exists():
         for number, line in enumerate(dotenv.read_text().splitlines(), 1):
@@ -66,19 +67,21 @@ def local_environment() -> dict[str, str]:
             if len(tokens) > 1:
                 raise ValueError(f".env line {number}: quote values containing spaces")
             environment[key] = tokens[0] if tokens else ""
+    environment.update(os.environ)
     environment["POSTGRES_PASSWORD"] = (
         environment.get("POSTGRES_PASSWORD") or "changeme"
     )
+    environment.setdefault("RAUTHY_HOST_PORT", "8081")
     environment["OIDC_ISSUER"] = environment.get(
-        "OIDC_ISSUER", "http://localhost:8081/auth/v1/"
+        "OIDC_ISSUER", f"http://localhost:{environment['RAUTHY_HOST_PORT']}/auth/v1/"
     )
     environment.setdefault("OIDC_AUDIENCE", "a500-api")
     environment.setdefault("OIDC_JWKS_URI", "http://rauthy:8080/auth/v1/oidc/certs")
     environment.setdefault("OIDC_CLIENT_ID", "a500-browser-client")
-    environment.setdefault("RAUTHY_HOST_PORT", "8081")
-    environment.setdefault("RAUTHY_PUB_URL", "localhost:8081")
+    environment.setdefault("MAILPIT_HOST_PORT", "8025")
+    environment.setdefault("RAUTHY_PUB_URL", f"localhost:{environment['RAUTHY_HOST_PORT']}")
     environment.setdefault("RAUTHY_LISTEN_SCHEME", "http")
-    environment.setdefault("RAUTHY_LOCAL_TEST", "true")
+    environment.setdefault("RAUTHY_LOCAL_TEST", "false")
     environment.setdefault("RAUTHY_BOOTSTRAP_HOST_DIR", str(ROOT / ".rauthy-bootstrap"))
     environment.setdefault("RAUTHY_RP_ID", "localhost")
     environment.setdefault(
@@ -87,14 +90,49 @@ def local_environment() -> dict[str, str]:
     )
     environment.setdefault("HISTORY_PERSISTENCE_PERMITTED", "true")
     configure_local_build_environment(environment)
-    # Compose must use the sanitized literal environment, not parse .env again.
     return environment
 
 
+def _persisted_secret(directory: Path, filename: str, length: int = 32) -> str:
+    path = directory / filename
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    value = secrets.token_urlsafe(length)
+    path.write_text(value + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return value
+
+
 def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
-    """Provision first-run Rauthy clients without exposing credentials."""
+    """Provision first-run Rauthy clients and stable private secrets."""
     directory = Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.mkdir(mode=0o711, parents=True, exist_ok=True)
+    directory.chmod(0o711)
+    environment.setdefault("RAUTHY_NODE_ID", "1")
+    environment.setdefault("RAUTHY_NODES", "1 localhost:8100 localhost:8200")
+    environment["RAUTHY_SECRET_RAFT"] = _persisted_secret(
+        directory, "rauthy-secret-raft"
+    )
+    environment["RAUTHY_SECRET_API"] = _persisted_secret(
+        directory, "rauthy-secret-api"
+    )
+    enc_key_file = directory / "rauthy-enc-key"
+    enc_key_id_file = directory / "rauthy-enc-key-id"
+    if enc_key_file.exists() and enc_key_id_file.exists():
+        enc_key = enc_key_file.read_text(encoding="utf-8").strip()
+        enc_key_id = enc_key_id_file.read_text(encoding="utf-8").strip()
+    else:
+        enc_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+        enc_key_id = secrets.token_hex(4)
+        enc_key_file.write_text(enc_key + "\n", encoding="utf-8")
+        enc_key_id_file.write_text(enc_key_id + "\n", encoding="utf-8")
+        enc_key_file.chmod(0o600)
+        enc_key_id_file.chmod(0o600)
+    environment["RAUTHY_ENC_KEY_ACTIVE"] = enc_key_id
+    environment["RAUTHY_ENC_KEYS"] = (
+        environment["RAUTHY_ENC_KEY_ACTIVE"] + "/" + enc_key
+    )
+
     password_file = directory / "admin-password"
     if password_file.exists():
         admin_password = password_file.read_text(encoding="utf-8").strip()
@@ -103,6 +141,14 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
         password_file.write_text(admin_password + "\n", encoding="utf-8")
         password_file.chmod(0o600)
     environment["RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN"] = admin_password
+
+    api_key_file = directory / "client-update-api-key"
+    if api_key_file.exists():
+        key_name, key_secret = api_key_file.read_text(encoding="utf-8").strip().split(":", 1)
+    else:
+        key_name, key_secret = "a500-client-update", secrets.token_urlsafe(32)
+        api_key_file.write_text(f"{key_name}:{key_secret}\n", encoding="utf-8")
+        api_key_file.chmod(0o600)
 
     gateway = environment.get(
         "RAUTHY_BROWSER_ORIGIN",
@@ -117,7 +163,6 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
             "redirect_uris": [gateway + "/"],
             "allowed_origins": [gateway],
             "flows_enabled": ["authorization_code", "refresh_token"],
-            "default_aud": "a500-api",
             "access_token_alg": "RS256",
             "id_token_alg": "RS256",
             "auth_code_lifetime": 60,
@@ -133,12 +178,10 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
             "enabled": True,
             "redirect_uris": ["http://localhost/"],
             "allowed_origins": [],
-            "flows_enabled": [
-                "urn:ietf:params:oauth:grant-type:device_code"
-            ],
-            "default_aud": "a500-api",
+            "flows_enabled": ["urn:ietf:params:oauth:grant-type:device_code"],
             "access_token_alg": "RS256",
             "id_token_alg": "RS256",
+            "auth_code_lifetime": 60,
             "access_token_lifetime": 300,
             "scopes": ["openid", "profile", "email"],
             "default_scopes": ["openid", "profile", "email"],
@@ -147,10 +190,83 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     ]
     path = directory / "clients.json"
     path.write_text(json.dumps(clients), encoding="utf-8")
-    path.chmod(0o600)
+    path.chmod(0o644)
     (directory / "users.json").write_text("[]", encoding="utf-8")
-    (directory / "api_keys.json").write_text("[]", encoding="utf-8")
+    (directory / "api_keys.json").write_text(
+        json.dumps(
+            [{
+                "name": key_name,
+                "secret": {"Plain": key_secret},
+                "exp": int(time.time()) + 31536000,
+                "access": [{"group": "Clients", "access_rights": ["read", "update"]}],
+            }]
+        ),
+        encoding="utf-8",
+    )
+    (directory / "api_keys.json").chmod(0o644)
+    (directory / "users.json").chmod(0o644)
 
+
+def set_client_audience(environment: dict[str, str]) -> None:
+    """Set and verify Rauthy's supported default audience field for both clients."""
+    from urllib.request import ProxyHandler, Request, build_opener
+
+    issuer = environment["OIDC_ISSUER"].rstrip("/")
+    key_name, key_secret = (
+        Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
+        .joinpath("client-update-api-key")
+        .read_text(encoding="utf-8")
+        .strip()
+        .split(":", 1)
+    )
+    opener = build_opener(ProxyHandler({}))
+    headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
+    fields = (
+        "name",
+        "confidential",
+        "redirect_uris",
+        "post_logout_redirect_uris",
+        "allowed_origins",
+        "enabled",
+        "flows_enabled",
+        "access_token_alg",
+        "id_token_alg",
+        "auth_code_lifetime",
+        "access_token_lifetime",
+        "scopes",
+        "default_scopes",
+        "challenges",
+        "force_mfa",
+        "client_uri",
+        "contacts",
+        "backchannel_logout_uri",
+        "restrict_group_prefix",
+        "claims",
+        "claims_at_root",
+        "allowed_resources",
+        "scim",
+    )
+    for client_id in ("a500-browser-client", "a500-device-client"):
+        endpoint = f"{issuer}/clients/{client_id}"
+        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+            client = json.load(response)
+        update = {field: client.get(field) for field in fields}
+        update["default_aud"] = ["a500-api"]
+        request = Request(
+            endpoint,
+            data=json.dumps(update).encode(),
+            headers={**headers, "Content-Type": "application/json"},
+            method="PUT",
+        )
+        with opener.open(request, timeout=10) as response:
+            if response.status not in (200, 204):
+                raise RuntimeError(
+                    f"Rauthy client audience update returned HTTP {response.status}"
+                )
+        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+            configured = json.load(response)
+        if configured.get("default_aud") != ["a500-api"]:
+            raise RuntimeError("Rauthy did not persist the configured client audience")
 
 def compose_command(environment: dict[str, str]) -> list[str]:
     configured = environment.get("COMPOSE_COMMAND") or environment.get("PODMAN_COMPOSE")
@@ -181,7 +297,7 @@ def compose_command(environment: dict[str, str]) -> list[str]:
         "--env-file",
         os.devnull,
         "--project-name",
-        "a500-local",
+        environment.get("COMPOSE_PROJECT_NAME", "a500-local"),
         "-f",
         str(ROOT / "compose.yaml"),
         "-f",
@@ -311,6 +427,7 @@ def main() -> int:
             gateway_port = environment.get("GATEWAY_HOST_PORT", "8080")
             issuer = environment["OIDC_ISSUER"]
             wait_ready(arguments.timeout, gateway_port, issuer)
+            set_client_audience(environment)
             print(f"Ready: http://localhost:{gateway_port} (Rauthy: {issuer})")
             print(
                 "No user is created by default. Use the Rauthy admin UI to provision one."
