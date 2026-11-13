@@ -406,7 +406,23 @@ def _device_grant(
     if status != 400 or protocol_error(response) != "expired_token":
         raise AssertionError("Expired device authorization did not terminate")
     print("Device protocol: expiry terminated without a token.")
-    return token, id_token
+    fresh = start()
+    fresh_code = fresh.get("device_code")
+    if not isinstance(fresh_code, str):
+        raise AssertionError("Malformed post-expiry device authorization response")
+    decision(fresh, True)
+    status, response = poll(fresh_code)
+    if status != 200 or not isinstance(response.get("access_token"), str):
+        raise AssertionError(
+            f"Post-expiry device approval failed: {protocol_error(response)}"
+        )
+    token = str(response["access_token"])
+    id_token = response.get("id_token")
+    if not isinstance(id_token, str):
+        raise AssertionError("Device grant returned no ID token")
+    verify_access_token(token, issuer)
+    _device_public_api(gateway, token)
+    print("Device protocol: fresh approved token verified after expiry checks.")
 
 
 def _device_public_api(gateway: str, token: str) -> None:
