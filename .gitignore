@@ -32,6 +32,8 @@ dist/
 *.pem
 *.key
 
+.rauthy-bootstrap/
+
 # Editors and operating systems
 .idea/
 .vscode/

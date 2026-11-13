@@ -146,13 +146,15 @@ def test_internal_jwks_keeps_compose_route_and_query() -> None:
     assert internal_jwks_uri(jwks) == ("http://rauthy:8080/auth/v1/oidc/certs?k=v")
 
 
-def test_internal_jwks_accepts_http_localhost_and_rejects_remote_hosts() -> None:
-    assert internal_jwks_uri("http://localhost:18443/keys") == (
-        "http://rauthy:8080/keys"
-    )
-    with pytest.raises(ValueError):
-        internal_jwks_uri("http://idp.example.test/keys")
+def test_internal_jwks_routes_public_http_identity_host_to_compose_service() -> None:
+    assert internal_jwks_uri(
+        "http://identity.example.test:8081/auth/v1/oidc/certs?tenant=a500"
+    ) == "http://rauthy:8080/auth/v1/oidc/certs?tenant=a500"
 
+
+def test_internal_jwks_rejects_invalid_public_endpoint() -> None:
+    with pytest.raises(ValueError):
+        internal_jwks_uri("file:///etc/passwd")
 
 def test_rauthy_public_issuer_settings_match_http_discovery() -> None:
     settings = _rauthy_settings("18443")
@@ -473,6 +475,7 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
     [
         ("container", "containers survived"),
         ("volume", "volumes survived"),
+        ("network", "networks survived"),
         ("project-image", "project images survived"),
         ("pinned-image", "pinned images survived"),
     ],
@@ -490,6 +493,8 @@ def test_compose_cleanup_fails_when_test_resources_survive(
         if survivor == "container" and command[1:3] == ["ps", "-aq"]:
             stdout = "orphan\n"
         if survivor == "volume" and command[1:3] == ["volume", "ls"]:
+            stdout = "orphan\n"
+        if survivor == "network" and command[1:3] == ["network", "ls"]:
             stdout = "orphan\n"
         if survivor == "project-image" and command[1] == "images":
             stdout = "localhost/test-project_api:latest\n"
@@ -516,6 +521,26 @@ def test_compose_cleanup_fails_when_test_resources_survive(
     assert "--volumes" in commands[0]
     assert "--remove-orphans" in commands[0]
     assert "--rmi" in commands[0]
+
+
+def test_cleanup_verifies_resources_even_when_compose_down_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        code = 1 if command[1:3] == ["compose", "--project-name"] else 0
+        return subprocess.CompletedProcess(command, code, stdout="", stderr="failed")
+
+    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.subprocess.run", run)
+    monkeypatch.setattr(runner, "_image_exists", lambda _image: False)
+
+    runner._cleanup_run(
+        ["podman", "compose", "--project-name", "test-project"],
+        {},
+        "test-project",
+        [],
+    )
 
 
 def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -> None:

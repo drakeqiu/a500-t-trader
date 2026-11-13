@@ -15,8 +15,8 @@ services:
       LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-http}
       PUB_URL: ${RAUTHY_PUB_URL:?RAUTHY_PUB_URL is required}
       HQL_DATA_DIR: /app/data
-      RP_ID: localhost
-      RP_ORIGIN: http://localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
+      RP_ID: ${RAUTHY_RP_ID:-localhost}
+      RP_ORIGIN: ${RAUTHY_RP_ORIGIN:?RAUTHY_RP_ORIGIN is required}
       SMTP_URL: mailpit
       SMTP_PORT: "1025"
       SMTP_TLS_MODE: danger-insecure
@@ -29,10 +29,11 @@ services:
       HQL_SECRET_RAFT: ${RAUTHY_SECRET_RAFT:-}
       HQL_SECRET_API: ${RAUTHY_SECRET_API:-}
       ENC_KEYS: ${RAUTHY_ENC_KEYS:-}
+      BOOTSTRAP_ADMIN_PASSWORD_PLAIN: ${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN:?RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN is required}
       ENC_KEY_ACTIVE: ${RAUTHY_ENC_KEY_ACTIVE:-}
       BOOTSTRAP_DIR: /app/bootstrap
     ports:
-      - "127.0.0.1:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8080"
+      - "${RAUTHY_HOST:-127.0.0.1}:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8080"
     volumes:
       - ${RAUTHY_BOOTSTRAP_HOST_DIR:?RAUTHY_BOOTSTRAP_HOST_DIR is required}:/app/bootstrap:ro
       - rauthy-data:/app/data

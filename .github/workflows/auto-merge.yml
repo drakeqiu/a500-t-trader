@@ -108,7 +108,7 @@ jobs:
           required_checks=(
             "Python, docs, and E2E checks"
             "Frontend checks and tests"
-            "Market data and Keycloak E2E"
+            "Market data and Rauthy E2E"
           )
           # gh exits 1 for failed checks and 8 for pending checks.
           check_status=0

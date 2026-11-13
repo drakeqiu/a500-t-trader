@@ -76,4 +76,4 @@ start(
 );
 
 console.log(`Mock frontend: ${origin}`);
-console.log("Click ‘安全连接’ to enter the mock session; no Keycloak or business API is used.");
+console.log("Click ‘安全连接’ to enter the mock session; no Rauthy or business API is used.");

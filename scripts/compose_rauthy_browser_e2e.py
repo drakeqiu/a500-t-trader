@@ -558,8 +558,15 @@ def verify_access_token(token: str, issuer: str, *, now: int | None = None) -> N
 
 def internal_jwks_uri(uri: str) -> str:
     parsed = urlsplit(uri)
-    if parsed.scheme not in ("http", "https") or parsed.hostname != "localhost" or not parsed.path:
-        raise ValueError("Expected Rauthy localhost JWKS URL")
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or not parsed.path
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError("Expected an HTTP(S) Rauthy JWKS URL")
     return urlunsplit(("http", "rauthy:8080", parsed.path, parsed.query, ""))
 
 
@@ -1060,7 +1067,7 @@ def _cleanup_run(
     project: str,
     disposable_images: list[str],
 ) -> None:
-    teardown = subprocess.run(
+    subprocess.run(
         [*prefix, "down", "--volumes", "--remove-orphans", "--rmi", "local"],
         cwd=ROOT,
         env=env,
@@ -1092,6 +1099,18 @@ def _cleanup_run(
                 f"label=com.docker.compose.project={project}",
             ],
             ["podman", "volume", "rm", "-f"],
+        ),
+        (
+            "networks",
+            [
+                "podman",
+                "network",
+                "ls",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+            ],
+            ["podman", "network", "rm"],
         ),
     )
     for resource, command, remove in resources:
@@ -1138,8 +1157,7 @@ def _cleanup_run(
     remaining = [image for image in disposable_images if _image_exists(image)]
     if remaining:
         raise RuntimeError("Test-created pinned images survived cleanup")
-    if teardown.returncode:
-        raise RuntimeError("Compose teardown failed")
+
 
 
 def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
@@ -1214,23 +1232,16 @@ def main() -> None:
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     env.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
-    for name in (
-        "KEYCLOAK_ADMIN_USERNAME",
-        "KEYCLOAK_ADMIN_PASSWORD",
-        "AD_USERNAME",
-        "AD_PASSWORD",
-        "KEYCLOAK_HOSTNAME",
-        "KEYCLOAK_HOST_PORT",
-        "TLS_CERT",
-        "TLS_KEY",
-    ):
+    for name in ("AD_USERNAME", "AD_PASSWORD", "TLS_CERT", "TLS_KEY"):
         env.pop(name, None)
     temp = tempfile.TemporaryDirectory(prefix=project + "-")
     Path(temp.name).chmod(0o711)
     bootstrap_dir = Path(temp.name) / "bootstrap"
+    admin_password = secrets.token_urlsafe(24)
     encryption_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
     env.update(
         {
+            "GATEWAY_HOST_PORT": ports["gateway"],
             "ACCOUNT_API_MARKET_DATA": "disabled",
             "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
             "POSTGRES_PORT": ports["postgres"],
@@ -1240,12 +1251,12 @@ def main() -> None:
             "OIDC_AUDIENCE": AUDIENCE,
             "OIDC_JWKS_URI": "http://rauthy:8080/auth/v1/oidc/jwks",
             "OIDC_CLIENT_ID": CLIENT_ID,
-            "GATEWAY_HOST": "127.0.0.1",
-            "GATEWAY_HOST_PORT": ports["gateway"],
             "MARKET_DATA_MODE": "replay",
-            "RAUTHY_LOCAL_TEST": "false",
+            "RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN": admin_password,
             "RAUTHY_BOOTSTRAP_HOST_DIR": str(bootstrap_dir),
-            "RAUTHY_NODE_ID": "1",
+            "RAUTHY_LOCAL_TEST": "false",
+            "RAUTHY_RP_ID": "localhost",
+            "RAUTHY_RP_ORIGIN": f"http://localhost:{ports['rauthy']}",
             "RAUTHY_NODES": "1 localhost:8100 localhost:8200",
             "RAUTHY_SECRET_RAFT": secrets.token_urlsafe(32),
             "RAUTHY_SECRET_API": secrets.token_urlsafe(32),
@@ -1306,7 +1317,6 @@ def main() -> None:
             gateway,
             include_user_key=True,
         )
-        admin_password = secrets.token_urlsafe(24)
         override = _compose_bootstrap_override(
             Path(temp.name),
             env["RAUTHY_SECRET_RAFT"],
@@ -1349,6 +1359,35 @@ def main() -> None:
             except OSError:
                 time.sleep(2)
         else:
+            diagnostics = subprocess.run(
+                [
+                    "podman",
+                    "ps",
+                    "-a",
+                    "--filter",
+                    f"name={project}",
+                    "--format",
+                    "{{.Names}} {{.Status}}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            print("Project container status at gateway readiness failure:")
+            print(diagnostics.stdout, end="")
+            print(diagnostics.stderr, end="")
+            for service in ("rauthy", "gateway", "frontend", "signal-api", "account-api"):
+                logs = subprocess.run(
+                    ["podman", "logs", "--tail", "100", f"{project}_{service}_1"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                print(f"Logs for {service} at gateway readiness failure:")
+                print(logs.stdout, end="")
+                print(logs.stderr, end="")
             raise RuntimeError("Public gateway did not become ready")
         print(f"Disposable Mailpit inbox: {mailpit}")
         browser_token, browser_refresh_token = _browser_flow(

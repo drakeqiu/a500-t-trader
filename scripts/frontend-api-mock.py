@@ -240,7 +240,7 @@ def create_fixture(port: int) -> FastAPI:
         )
         return (
             "<!doctype html><html lang='en'><title>Fixture authorization</title>"
-            "<h1>Deterministic test IdP — not Keycloak</h1>"
+            "<h1>Deterministic test identity provider</h1>"
             f"<form method='post'>{hidden}"
             "<label>Fixture account<input name='subject' required></label>"
             "<button type='submit'>Authorize fixture account</button></form></html>"

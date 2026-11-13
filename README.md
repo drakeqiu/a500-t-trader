@@ -15,7 +15,7 @@
 
 项目要求 Python 3.14。运行时依赖、供应商 wheel 获取及环境同步见[项目依赖说明](docs/dependencies.md)；行情查询、推送适配与命令行工作流见[使用指南](docs/user-guide.md)。
 
-需要启动真实前后端集成时，见[统一 Web 部署与运维](docs/web-deployment.md#本地集成真实服务和开发-keycloak)。该指南包含依赖准备、管理员与行情配置、启动、登录及停止步骤；本地入口使用真实 API 和数据服务，不是 mock 后端。
+需要启动真实前后端集成时，见[统一 Web 部署与运维](docs/web-deployment.md#本地集成真实服务和-rauthy)。该指南包含依赖准备、Rauthy 用户与行情配置、启动、登录及停止步骤；本地入口使用真实 API 和数据服务，不是 mock 后端。
 
 实时信号使用显式 YAML 配置，命令和规则边界见[使用指南](docs/user-guide.md#已完成-5-分钟技术分析与策略评估-api)及 [ADR-0009](docs/adr/0009-live-signals-and-configurable-v1-parameters.md)。独立行情消费者和历史回放见[单机行情消费者部署](docs/single-host-market-data-compose.md)。
 

@@ -56,8 +56,8 @@ jobs:
       - name: Run RabbitMQ market data E2E
         run: uv run --no-sync python scripts/compose-market-data-e2e.py
 
-  keycloak-e2e:
-    name: Keycloak device authorization E2E
+  rauthy-e2e:
+    name: Rauthy browser and device authorization E2E
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -100,25 +100,23 @@ jobs:
           uv run --no-sync python -m playwright install --with-deps --only-shell
           chromium
 
-      - name: Run Keycloak device authorization E2E with mock market data
-        run: >-
-          uv run --no-sync python scripts/compose-keycloak-device-e2e.py
-          --mock-market-data
+      - name: Run Rauthy browser and device authorization E2E with mock market data
+        run: uv run --no-sync python scripts/compose_rauthy_browser_e2e.py
 
   compose-e2e:
-    name: Market data and Keycloak E2E
+    name: Market data and Rauthy E2E
     if: always()
-    needs: [market-data-e2e, keycloak-e2e]
+    needs: [market-data-e2e, rauthy-e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Require both E2E jobs to succeed
         env:
           MARKET_DATA_RESULT: ${{ needs.market-data-e2e.result }}
-          KEYCLOAK_RESULT: ${{ needs.keycloak-e2e.result }}
+          RAUTHY_RESULT: ${{ needs.rauthy-e2e.result }}
         run: |
           if [[ "$MARKET_DATA_RESULT" != success ||
-                "$KEYCLOAK_RESULT" != success ]]; then
+                "$RAUTHY_RESULT" != success ]]; then
             echo "Market data E2E: $MARKET_DATA_RESULT"
-            echo "Keycloak E2E: $KEYCLOAK_RESULT"
+            echo "Rauthy E2E: $RAUTHY_RESULT"
             exit 1
           fi

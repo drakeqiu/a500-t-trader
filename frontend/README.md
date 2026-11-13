@@ -4,13 +4,13 @@ Next.js App Router 工作台，调用仓库唯一的 Python REST 业务后端，
 
 ### 真实服务统一启动
 
-在仓库根目录按 [根 README](../README.md#本地前后端集成) 配置 AmazingData、临时 Keycloak 管理员凭据和行情模式，然后执行：
+在仓库根目录按 [根 README](../README.md#本地前后端集成) 配置 AmazingData 和行情模式，然后执行：
 
 ```bash
 python3 scripts/start-local.py
 ```
 
-打开 **<http://localhost:8080>**（不要替换为 `127.0.0.1`）；本地 Keycloak 为 `http://localhost:8081`，必须由管理员在 `a500` Realm 创建获准用户。没有默认用户或注册入口。启动器构建前端和 Python 服务，保持 RabbitMQ/Redis 原有拓扑；不是 mock 或行情采集器。
+打开 **<http://localhost:8080>**（不要替换为 `127.0.0.1`）；本地 Rauthy 管理界面为 `http://localhost:8081`；管理员须创建获准用户。启动器 bootstrap 客户端及管理员凭据，不创建用户。没有默认用户或注册入口。启动器构建前端和 Python 服务，保持 RabbitMQ/Redis 原有拓扑；不是 mock 或行情采集器。
 
 ### 前端 mock 开发
 
@@ -20,7 +20,7 @@ python3 scripts/start-local.py
 bun run dev
 ```
 
-打开 <http://localhost:3000>，点击一次“安全连接”即可进入自动授权的 `local-demo` mock 会话；信号页会展示内存 fixture 的 `BUY`/`SELL` 示例。此模式不需要 Keycloak、业务 API、数据库或行情服务，示例不是实时行情或交易建议。数据仅驻留在 mock 进程内存中，重启会清空。此开发入口只用于演示和开发，不能承载真实账户或生产流量。
+打开 <http://localhost:3000>，点击一次“安全连接”即可进入自动授权的 `local-demo` mock 会话；信号页会展示内存 fixture 的 `BUY`/`SELL` 示例。此模式不需要 Rauthy、业务 API、数据库或行情服务，示例不是实时行情或交易建议。数据仅驻留在 mock 进程内存中，重启会清空。此开发入口只用于演示和开发，不能承载真实账户或生产流量。
 网关监听 `0.0.0.0`，mock issuer、discovery 与回调 URI 均跟随浏览器访问的来源；从其他机器访问时，使用该机器可达的宿主机 IP 或域名。
 
 ### 真实集成公开配置
@@ -28,15 +28,15 @@ bun run dev
 Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重新执行 `python3 scripts/start-local.py`，构建并重建 Compose 服务。网关将 UI 与 API 统一暴露在同一来源；不支持通过宿主机独立 Next 开发服务器访问真实 API。
 
 - 浏览器使用同源 `/api/v1/*`，Nginx 网关转发至业务 API；Bearer、ETag 前置条件、CSV multipart 与 SSE 游标均经由网关传递。Next 不承担 API 代理，不需要 API CORS。
-- `NEXT_PUBLIC_OIDC_ISSUER`：浏览器可访问的 issuer；集成默认 `http://localhost:8081/realms/a500`。discovery 必须提供 authorization endpoint 和 token endpoint。
-- `NEXT_PUBLIC_OIDC_CLIENT_ID`：默认 `a500-browser-client`。IdP public client 必须启用 Authorization Code 和 PKCE S256，精确允许前端来源及根路径回调 URI；仓库 Realm 默认允许 `http://localhost:8080`。
+- `NEXT_PUBLIC_OIDC_ISSUER`：浏览器可访问的 issuer；本地集成默认 `http://localhost:8081/auth/v1/`。discovery 必须提供 authorization endpoint 和 token endpoint。
+- `NEXT_PUBLIC_OIDC_CLIENT_ID`：默认 `a500-browser-client`。IdP public client 必须启用 Authorization Code 和 PKCE S256，精确允许前端来源及根路径回调 URI；本地 Rauthy 客户端允许 `http://localhost:8080`。
 - SSE 断线后由客户端携带游标重新连接。
 
 公开变量写入 production build；修改后需重新构建，不能只改运行时容器环境。`NEXT_PUBLIC_*` 不得放客户端密钥。缺少服务配置时应按页面提示设置配置，不会假装后端可用。自定义来源/外部 IdP 请直接配置 Compose 与 public client，不要混用 `localhost` 和 `127.0.0.1`。
 
 ### 身份与工作流
 
-前端通过 Authorization Code + PKCE 跳转 Keycloak 登录，用户密码仅输入 Keycloak，不再使用设备码。访问令牌仅留在当前页面内存，不写 localStorage、URL 或日志；刷新或失效后需重新登录，有效的 Keycloak 会话可免去重新输入密码。当前前端不使用 refresh token 自动续期；A500 API 仅验签，不签发/刷新 token。局域网 HTTP 仅适合可信网络，生产环境应使用 HTTPS。
+前端通过 Authorization Code + PKCE 跳转兼容 OIDC IdP 登录，用户密码仅输入 IdP；本地真实集成使用 Rauthy，不再使用设备码。访问令牌仅留在当前页面内存，不写 localStorage、URL 或日志；刷新或失效后需重新登录，有效的 IdP 会话可免去重新输入密码。当前前端不使用 refresh token 自动续期；A500 API 仅验签，不签发/刷新 token。HTTP 明文流量可能被监听或篡改，凭据或令牌可能被窃取并导致账号接管；不要将其描述为 HTTPS 保护。
 
 工作台提供：
 
@@ -48,7 +48,7 @@ Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重�
 - `/data/history` 只提交后端支持的日线任务，并以真实后端状态、分片进度和失败原因更新；长时间无后端更新时间时只提示仍在查询，不伪报失败。每次任务状态/结果读取以及创建、取消请求限时 15 秒；失败保留最后确认状态或显示“状态未知”任务编号，并提供重试。提交超时会明确警告后端可能已创建任务但没有返回编号，提示勿盲目重复提交。成功任务读取真实分页结果，明确显示空结果；结果续读失败时标记此前数据可能不是最新页。快速重复点击不会并发提交。后端不提供任务列表、幂等键或重试接口：浏览器保存最多 30 个任务编号以便同一浏览器刷新恢复；重新拉取会创建新任务。历史行情持久化仍需部署者授权。
 
 账户数据由用户录入、未经券商核验；没有下单、账户历史或部署管理入口。
-入口 `/` 仅负责 OIDC 根路径回调；普通访问会进入 `/signals`。授权回调验证成功后返回发起连接的 `/signals`、`/assets`、`/data/trades` 或 `/data/history` 页面，无法识别的目标回退到 `/signals`。各页的“断开”会清除当前标签页内存令牌并返回策略信号；不会注销 Keycloak 浏览器会话。
+入口 `/` 仅负责 OIDC 根路径回调；普通访问会进入 `/signals`。授权回调验证成功后返回发起连接的 `/signals`、`/assets`、`/data/trades` 或 `/data/history` 页面，无法识别的目标回退到 `/signals`。各页的“断开”会清除当前标签页内存令牌并返回策略信号；不会注销 IdP 浏览器会话。
 
 ### 测试
 
@@ -56,4 +56,4 @@ Bun 与 Python/uv 分别管理依赖。修改前端后，在仓库根目录重�
 - `bun run test:e2e`：Playwright 浏览器流程，启动本地 OIDC fixture 与内存 REST/SSE API mock；不启动 Python 业务 API、PostgreSQL 或 Redis。行情 fixture 是测试数据，不是实时行情或实际 IdP 证明。
   当设置 `NO_COLOR` 时，测试进程将其转换为 `FORCE_COLOR=0`，避免 Playwright 子进程的颜色变量冲突；Playwright 自身仍会强制测试 worker 输出颜色。
   并行开发端口被占用时可设置 `E2E_FIXTURE_PORT`、`E2E_WEB_PORT` 与 `E2E_NEXT_PORT`（默认 Web 端口加一）；测试专用网关把 UI 和 API 汇集到同一来源，不用于生产。测试产物按 Web 端口隔离。独立 Next 实例可用 `NEXT_DIST_DIR` 隔离构建目录。
-- 真实 Keycloak/设备授权/API 验收命令见 [信号 API 文档](../docs/signal-monitoring-api.md#compose-真实端到端验收)。
+- 本地真实 Rauthy 浏览器/设备授权/API 验收命令见 [信号 API 文档](../docs/signal-monitoring-api.md#rauthy-本地真实端到端验收)。

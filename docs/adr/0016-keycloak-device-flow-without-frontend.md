@@ -1,4 +1,6 @@
 # Use Keycloak device authorization; retain it for the approved frontend
+**Historical status:** The Keycloak provider choice and setup below are superseded by the Rauthy cutover in #232. The historical OAuth flow and API-boundary rationale remain for context; this document is not an active runtime configuration.
+
 
 The browser client and its Authorization Code with PKCE flow from ADR-0015 were superseded by the original decision to provide no bundled browser frontend, CLI, or SDK; callers obtained tokens directly from the trusted OIDC provider using OAuth 2.0 Device Authorization Flow. Keycloak remains the Compose-managed provider for local and test environments, with its data persisted in a named volume; production may use an externally managed Keycloak instance. A reproducible realm configuration enables a public client for device authorization and issues access tokens for the shared `a500-api` audience, without committing client secrets or default users. Administrators provision permitted users in Keycloak; self-registration remains disabled. A500 APIs only validate IdP-issued Bearer access tokens and identify account ownership by verified `sub`; they do not expose login routes, validate passwords, issue tokens, or refresh them. Token lifetime and refresh policy belong to Keycloak, and callers are responsible for safely storing and refreshing tokens.
 

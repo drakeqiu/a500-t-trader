@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the development stack for browsers on a trusted LAN."""
+"""Expose the development stack over plain HTTP at a specified IPv4 address."""
 
 import argparse
 import ipaddress
@@ -19,7 +19,7 @@ LOCAL = runpy.run_path(str(ROOT / "scripts/start-local.py"))
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "host", help="host machine's IPv4 address reachable from the LAN"
+        "host", help="host machine's IPv4 address reachable by the intended clients"
     )
     parser.add_argument(
         "action",
@@ -38,24 +38,24 @@ def main() -> int:
                 "host must be a LAN IPv4 address, not loopback or a wildcard"
             )
         env = LOCAL["local_environment"]()
-        env.update(
-            KEYCLOAK_ADMIN_USERNAME="admin",
-            KEYCLOAK_ADMIN_PASSWORD="changeme",
-            MARKET_DATA_MODE="replay",
-        )
-        # Validate the standard local prerequisites before applying the LAN topology.
+        env.update(MARKET_DATA_MODE="replay")
         LOCAL["check_configuration"](env)
         origin = f"http://{host}:8080"
-        keycloak = f"http://{host}:8081"
+        issuer = f"http://{host}:8081/auth/v1/"
         env.update(
             GATEWAY_HOST="0.0.0.0",
             GATEWAY_HOST_PORT="8080",
-            KEYCLOAK_BIND_HOST="0.0.0.0",
-            KEYCLOAK_HOST_PORT="8081",
-            KEYCLOAK_HOSTNAME=keycloak,
-            OIDC_ISSUER=f"{keycloak}/realms/a500",
+            RAUTHY_HOST="0.0.0.0",
+            RAUTHY_HOST_PORT="8081",
+            RAUTHY_PUB_URL=f"{host}:8081",
+            RAUTHY_RP_ID=str(host),
+            RAUTHY_RP_ORIGIN=f"http://{host}:8081",
+            RAUTHY_BROWSER_ORIGIN=origin,
+            OIDC_ISSUER=issuer,
+            OIDC_JWKS_URI="http://rauthy:8080/auth/v1/oidc/certs",
             RABBITMQ_BIND_HOST="127.0.0.1",
         )
+        LOCAL["prepare_rauthy_bootstrap"](env)
         command = LOCAL["compose_command"](env)
         command[command.index("a500-local")] = "a500-lan"
         if args.action == "up":
@@ -73,7 +73,7 @@ def main() -> int:
             )
             deadline = time.monotonic() + args.timeout
             discovery_url = (
-                "http://127.0.0.1:8081/realms/a500/.well-known/openid-configuration"
+                "http://127.0.0.1:8081/auth/v1/.well-known/openid-configuration"
             )
             while True:
                 try:
@@ -83,40 +83,8 @@ def main() -> int:
                 except OSError, URLError, ValueError:
                     pass
                 if time.monotonic() >= deadline:
-                    raise ValueError("Keycloak readiness timed out; inspect logs")
+                    raise ValueError("Rauthy readiness timed out; inspect logs")
                 time.sleep(1)
-            # Realm import is skipped for existing Keycloak data volumes.
-            admin = LOCAL["keycloak_admin"](command, env)
-            LOCAL["configure_browser_client"](admin, origin)
-            users = json.loads(
-                admin("get", "users", "-r", "a500", "-q", "username=admin")
-            )
-            if not any(user.get("username") == "admin" for user in users):
-                admin(
-                    "create",
-                    "users",
-                    "-r",
-                    "a500",
-                    "-s",
-                    "username=admin",
-                    "-s",
-                    "enabled=true",
-                    "-s",
-                    "firstName=Admin",
-                    "-s",
-                    "lastName=Local",
-                    "-s",
-                    "email=admin@example.com",
-                )
-                admin(
-                    "set-password",
-                    "-r",
-                    "a500",
-                    "--username",
-                    "admin",
-                    "--new-password",
-                    "changeme",
-                )
             for path, expected in (
                 ("/", 200),
                 ("/api/v1/signals", 401),
@@ -137,8 +105,10 @@ def main() -> int:
                     if time.monotonic() >= deadline:
                         raise ValueError(f"Gateway readiness timed out: {path}")
                     time.sleep(1)
-            print(f"Ready: {origin} (Keycloak: {keycloak})")
-            print("Trusted LAN only: HTTP and default admin credentials are insecure.")
+            print(f"Ready: {origin} (Rauthy: {issuer})")
+            print(
+                "HTTP provides no confidentiality or integrity; use only with accepted risk."
+            )
         elif args.action == "replay":
             subprocess.run(
                 [

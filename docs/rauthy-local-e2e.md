@@ -1,6 +1,6 @@
 # Isolated Rauthy browser/device/API acceptance
 
-This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, a per-run generated initial administrator password, and cleartext HTTP bound only to `127.0.0.1`. The bootstrap override is private to the run, and the explicit initial password prevents Rauthy from generating and logging a default administrator password. A separate `rauthy-data` volume persists Rauthy data only for the run. The default Keycloak configuration and API token validation are unchanged. Cleartext HTTP is strictly for this isolated local acceptance, not production use.
+This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, a per-run generated initial administrator password, and cleartext HTTP bound only to `127.0.0.1`. The bootstrap override is private to the run, and the explicit initial password prevents Rauthy from generating and logging a default administrator password. A separate `rauthy-data` volume persists Rauthy data only for the run. The existing API JWT validation boundaries remain unchanged. Cleartext HTTP is strictly for this isolated local acceptance, not production use.
 
 ## Prerequisites and run
 
@@ -13,6 +13,7 @@ uv run python scripts/compose_rauthy_browser_e2e.py
 ```
 
 The runner rebuilds the current backend wheel before building the Compose services, so the container tests the checked-out source rather than a stale wheel in `dist/`.
+`scripts/start-local.py` checks the configured `OIDC_ISSUER` discovery document and the configured gateway port, so local overrides use the same readiness checks as their Compose endpoints.
 
 Rauthy's discovery issuer is `http://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation. Issuer, browser PKCE, device authorization, and discovery traffic use real HTTP; the acceptance does not count HTTPS with certificate verification disabled as HTTP.
 
@@ -79,7 +80,7 @@ The runner performs the PKCE browser-login acceptance, then exercises a separate
 
 [#229](https://github.com/drakeqiu/a500-t-trader/issues/229) 的 not planned 关闭表示取消灾备/恢复验收；[#230](https://github.com/drakeqiu/a500-t-trader/issues/230) 的 not planned 关闭表示取消资源收益验收。两者均非通过证据，也不阻塞准入；保留的 Mailpit 历史恢复证据不等于灾难恢复保证。
 
-#232 可据此开始迁移实施，但仍须保持单一 issuer、API issuer/签名/audience/token-use 校验和主体隔离。此 GO 不执行切换、不批准清理 Keycloak 或任何身份/业务数据卷；迁移实施、验证与资源处置须在 #232 范围内另行完成/授权。
+Issue #232 migrates active local and CI identity-provider paths to Rauthy while preserving API issuer/signature/audience/token-use validation and subject isolation. It does not remove, migrate, or authorize cleanup of any pre-existing identity or business-data volumes. This isolated runner only uses a fresh random project and its disposable resources.
 
 ## Redacted acceptance evidence
 
@@ -91,4 +92,4 @@ Previously recorded HTTPS-only evidence is historical and does not satisfy the c
 
 ## Source note
 
-`docs/adr/0021-rauthy-identity-provider.md` records the accepted migration scope; this fixture is an acceptance runner, not a production deployment.
+This fixture is an isolated acceptance runner, not a production deployment. Historical decisions and evidence remain in the ADR and issue records; no additional ADR was created for the migration.
