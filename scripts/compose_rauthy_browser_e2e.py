@@ -1113,11 +1113,15 @@ def _cleanup_run(
         raise RuntimeError("Compose teardown failed")
 
 
-def _rauthy_volume_binding(
-    prefix: list[str], env: dict[str, str], project: str
-) -> tuple[str, str]:
+def _rauthy_volume_binding(env: dict[str, str], project: str) -> tuple[str, str]:
     result = subprocess.run(
-        [*prefix, "ps", "-q", "rauthy"],
+        [
+            "podman",
+            "inspect",
+            "--format",
+            "{{.Id}}",
+            f"{project}_rauthy_1",
+        ],
         cwd=ROOT,
         env=env,
         check=True,
@@ -1424,9 +1428,7 @@ def main() -> None:
             != 200
         ):
             raise AssertionError("Original business data was lost after email update")
-        original_container, original_volume = _rauthy_volume_binding(
-            prefix, env, project
-        )
+        original_container, original_volume = _rauthy_volume_binding(env, project)
         subprocess.run(
             [*prefix, "stop", "rauthy"],
             cwd=ROOT,
@@ -1441,9 +1443,7 @@ def main() -> None:
             check=True,
             timeout=120,
         )
-        restarted_container, restarted_volume = _rauthy_volume_binding(
-            prefix, env, project
-        )
+        restarted_container, restarted_volume = _rauthy_volume_binding(env, project)
         if (
             restarted_container != original_container
             or restarted_volume != original_volume
