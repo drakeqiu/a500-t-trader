@@ -1557,7 +1557,7 @@ def main() -> None:
             raise AssertionError(
                 "Recovered-password login could not access existing business data"
             )
-        browser_token = renamed_token
+        browser_token = recovered_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
             gateway,
