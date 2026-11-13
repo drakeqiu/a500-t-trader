@@ -1557,6 +1557,19 @@ def main() -> None:
             raise AssertionError(
                 "Recovered-password login could not access existing business data"
             )
+        fresh_device_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            "device@example.test",
+            user_password,
+            create_snapshot=False,
+        )
+        if _decode(fresh_device_token.split(".")[1]).get("sub") != device_subject:
+            raise AssertionError(
+                "Fresh login for the device user changed the authenticated subject"
+            )
+        device_token = fresh_device_token
         browser_token = recovered_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
