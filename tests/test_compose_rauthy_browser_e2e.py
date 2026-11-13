@@ -87,7 +87,7 @@ def token(header: dict[str, object], claims: dict[str, object]) -> str:
 
 def test_accepts_required_access_token_contract() -> None:
     now = int(time.time())
-    issuer = "https://localhost:18443/auth/v1/"
+    issuer = "http://localhost:18443/auth/v1/"
     claims = {
         "iss": issuer,
         "aud": ["a500-api"],
@@ -103,7 +103,7 @@ def test_accepts_required_access_token_contract() -> None:
         (
             {"alg": "EdDSA"},
             {
-                "iss": "https://localhost:18443/auth/v1/",
+                "iss": "http://localhost:18443/auth/v1/",
                 "aud": "a500-api",
                 "iat": 100,
                 "exp": 400,
@@ -111,12 +111,12 @@ def test_accepts_required_access_token_contract() -> None:
         ),
         (
             {"alg": "RS256"},
-            {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400},
+            {"iss": "http://wrong", "aud": "a500-api", "iat": 100, "exp": 400},
         ),
         (
             {"alg": "RS256"},
             {
-                "iss": "https://localhost:18443/auth/v1/",
+                "iss": "http://localhost:18443/auth/v1/",
                 "aud": "other",
                 "iat": 100,
                 "exp": 400,
@@ -125,7 +125,7 @@ def test_accepts_required_access_token_contract() -> None:
         (
             {"alg": "RS256"},
             {
-                "iss": "https://localhost:18443/auth/v1/",
+                "iss": "http://localhost:18443/auth/v1/",
                 "aud": "a500-api",
                 "iat": 100,
                 "exp": 401,
@@ -136,7 +136,7 @@ def test_accepts_required_access_token_contract() -> None:
 def test_rejects_wrong_token_contract(
     header: dict[str, object], claims: dict[str, object]
 ) -> None:
-    issuer = "https://localhost:18443/auth/v1/"
+    issuer = "http://localhost:18443/auth/v1/"
     with pytest.raises(AssertionError):
         verify_access_token(token(header, claims), issuer, now=200)
 
@@ -146,27 +146,28 @@ def test_internal_jwks_keeps_compose_route_and_query() -> None:
     assert internal_jwks_uri(jwks) == ("http://rauthy:8080/auth/v1/oidc/certs?k=v")
 
 
-def test_rejects_remote_or_http_jwks() -> None:
+def test_internal_jwks_accepts_http_localhost_and_rejects_remote_hosts() -> None:
+    assert internal_jwks_uri("http://localhost:18443/keys") == (
+        "http://rauthy:8080/keys"
+    )
     with pytest.raises(ValueError):
-        internal_jwks_uri("https://idp.example.test/keys")
-    with pytest.raises(ValueError):
-        internal_jwks_uri("http://localhost:18443/keys")
+        internal_jwks_uri("http://idp.example.test/keys")
 
 
-def test_rauthy_public_issuer_settings_match_discovery() -> None:
+def test_rauthy_public_issuer_settings_match_http_discovery() -> None:
     settings = _rauthy_settings("18443")
-    expected_issuer = "https://localhost:18443/auth/v1/"
+    expected_issuer = "http://localhost:18443/auth/v1/"
     assert settings == {
         "OIDC_ISSUER": expected_issuer,
         "RAUTHY_HOST_PORT": "18443",
-        "RAUTHY_LISTEN_SCHEME": "http_https",
+        "RAUTHY_LISTEN_SCHEME": "http",
         "RAUTHY_PUB_URL": "localhost:18443",
     }
     _validate_discovery(
         expected_issuer,
         {
             "issuer": expected_issuer,
-            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+            "jwks_uri": "http://localhost:18443/auth/v1/oidc/certs",
         },
     )
 
@@ -174,10 +175,10 @@ def test_rauthy_public_issuer_settings_match_discovery() -> None:
 def test_rejects_discovery_with_mismatched_issuer() -> None:
     with pytest.raises(RuntimeError, match="issuer/JWKS mismatch"):
         _validate_discovery(
-            "https://localhost:18443/auth/v1/",
+            "http://localhost:18443/auth/v1/",
             {
-                "issuer": "https://wrong:18443/auth/v1/",
-                "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+                "issuer": "http://wrong:18443/auth/v1/",
+                "jwks_uri": "http://localhost:18443/auth/v1/oidc/certs",
             },
         )
 
@@ -187,7 +188,7 @@ def test_wait_discovery_returns_validated_configuration(
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    issuer = "https://localhost:18443/auth/v1/"
+    issuer = "http://localhost:18443/auth/v1/"
     discovery = {
         "issuer": issuer,
         "jwks_uri": issuer + "oidc/certs",
@@ -332,7 +333,9 @@ def test_bootstrap_clients_use_supported_audience_update_path(
     assert api_keys[0]["exp"] >= int(time.time())
     assert api_keys[0]["secret"] == {"Plain": secret}
     assert len(api_keys[0]["secret"]["Plain"]) >= 64
-    assert api_keys[0]["access"] == [{"group": "Clients", "access_rights": ["update"]}]
+    assert api_keys[0]["access"] == [
+        {"group": "Clients", "access_rights": ["read", "update"]}
+    ]
     for client in clients:
         assert client["access_token_alg"] == "RS256"
         assert client["id_token_alg"] == "RS256"
@@ -414,6 +417,55 @@ def test_token_rejection_returns_after_expected_unauthorized_response(
 
     monkeypatch.setattr(runner, "_public_api_request", lambda *_args: (401, {}, None))
     runner._assert_token_rejected("http://gateway", "id-token")
+
+
+def test_device_grant_returns_fresh_token_after_expiry_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    payloads = [
+        {
+            "device_code": f"code-{index}",
+            "expires_in": 0,
+            "interval": 0,
+            "verification_uri_complete": "http://localhost/device?code=x",
+            "user_code": "x",
+        }
+        for index in range(4)
+    ]
+    polls = iter(
+        [
+            (400, {"error": "authorization_pending"}),
+            (400, {"error": "slow_down"}),
+            (200, {"access_token": "initial-access", "id_token": "initial-id"}),
+            (400, {"error": "expired_token"}),
+            (400, {"error": "expired_token"}),
+            (200, {"access_token": "fresh-access", "id_token": "fresh-id"}),
+        ]
+    )
+    monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runner, "_device_public_api", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
+
+    starts = iter(payloads)
+    monkeypatch.setattr(
+        runner,
+        "_oauth_post",
+        lambda _opener, url, _data: (200, next(starts))
+        if url.endswith("/device")
+        else next(polls),
+    )
+
+    assert runner._device_grant(
+        "http://localhost:18080", "http://localhost:8081/auth/v1/", "user", "pass"
+    ) == ("fresh-access", "fresh-id")
 
 
 @pytest.mark.parametrize(
