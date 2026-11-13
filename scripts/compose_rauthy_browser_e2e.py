@@ -1620,6 +1620,17 @@ def main() -> None:
             raise AssertionError(
                 "Second Rauthy user could confirm the first user's trade-import preview"
             )
+        fresh_admin_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            "identity-admin@example.test",
+            user_password,
+            create_snapshot=False,
+        )
+        if _decode(fresh_admin_token.split(".")[1]).get("sub") != admin_subject:
+            raise AssertionError("Fresh administrator login changed its subject")
+        admin_token = fresh_admin_token
         if _public_api_request(gateway, preview_path, admin_token)[0] != 404:
             raise AssertionError(
                 "Rauthy identity administrator could read the browser user's trade-import preview"
@@ -1633,7 +1644,16 @@ def main() -> None:
             raise AssertionError(
                 "Rauthy identity administrator could confirm the browser user's trade-import preview"
             )
-        browser_token, browser_refresh_token = recovered_token, recovered_refresh_token
+        browser_token, browser_refresh_token = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            changed_email,
+            recovered_password,
+            create_snapshot=False,
+        )
+        if _decode(browser_token.split(".")[1]).get("sub") != original_subject:
+            raise AssertionError("Fresh browser login changed the authenticated subject")
         if not browser_refresh_token:
             raise AssertionError(
                 "Rauthy did not issue the recovered user's browser refresh credential"
