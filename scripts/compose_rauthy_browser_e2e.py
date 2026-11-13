@@ -1579,9 +1579,24 @@ def main() -> None:
         preview_path = f"/api/v1/trade-imports/previews/{batch_id}"
         if _public_api_request(gateway, preview_path, browser_token)[0] != 200:
             raise AssertionError("Trade-import preview was not visible to its owner")
-        if _public_api_request(gateway, preview_path, device_token)[0] != 404:
+        device_claims = _decode(device_token.split(".")[1])
+        browser_claims = _decode(browser_token.split(".")[1])
+        other_owner_status, _, other_owner_body = _public_api_request(
+            gateway, preview_path, device_token
+        )
+        if other_owner_status != 404:
+            expires_at = device_claims.get("exp")
+            remaining_seconds = (
+                int(expires_at) - int(time.time())
+                if isinstance(expires_at, (int, float))
+                else None
+            )
             raise AssertionError(
-                "Second Rauthy user could read the first user's trade-import preview"
+                "Second Rauthy user could not prove preview isolation: "
+                f"HTTP {other_owner_status}, body={other_owner_body!r}, "
+                f"request_sub={device_claims.get('sub')!r}, "
+                f"request_exp_remaining_seconds={remaining_seconds!r}, "
+                f"owner_sub={browser_claims.get('sub')!r}"
             )
         if (
             _public_api_request(
