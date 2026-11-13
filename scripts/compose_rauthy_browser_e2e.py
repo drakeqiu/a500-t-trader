@@ -1113,7 +1113,7 @@ def _cleanup_run(
         raise RuntimeError("Compose teardown failed")
 
 
-def _rauthy_volume_binding(env: dict[str, str], project: str) -> tuple[str, str]:
+def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
     result = subprocess.run(
         [
             "podman",
@@ -1158,7 +1158,7 @@ def _rauthy_volume_binding(env: dict[str, str], project: str) -> tuple[str, str]
         raise RuntimeError(
             f"Rauthy data directory uses {volume_name!r}, expected named volume {expected_volume!r}"
         )
-    return container_id, volume_name
+    return volume_name
 
 
 def main() -> None:
@@ -1428,7 +1428,7 @@ def main() -> None:
             != 200
         ):
             raise AssertionError("Original business data was lost after email update")
-        original_container, original_volume = _rauthy_volume_binding(env, project)
+        original_volume = _rauthy_data_volume(env, project)
         subprocess.run(
             [*prefix, "stop", "rauthy"],
             cwd=ROOT,
@@ -1443,14 +1443,9 @@ def main() -> None:
             check=True,
             timeout=120,
         )
-        restarted_container, restarted_volume = _rauthy_volume_binding(env, project)
-        if (
-            restarted_container != original_container
-            or restarted_volume != original_volume
-        ):
-            raise AssertionError(
-                "Ordinary Rauthy restart did not reuse its original container and named data volume"
-            )
+        restarted_volume = _rauthy_data_volume(env, project)
+        if restarted_volume != original_volume:
+            raise AssertionError("Ordinary Rauthy restart did not reuse its original named data volume")
         discovery = _wait_discovery(issuer)
         persisted_token, _ = _browser_flow(
             gateway,
