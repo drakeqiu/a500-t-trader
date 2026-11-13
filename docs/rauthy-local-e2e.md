@@ -20,7 +20,7 @@ The runner creates a random Compose project, free localhost ports, and disposabl
 
 The runner drives the real browser authorization-code flow with PKCE/S256 and the real device-authorization flow in a browser, obtaining each user's access token from Rauthy. It checks token issuer, audience, signature algorithm, five-minute lifetime, and that both tokens can call the public signal API. It verifies each subject's separately valued snapshot, rejects the real ID token, and checks the second subject cannot read or confirm the browser subject's trade-import preview. The actual identity-administrator token is also denied access to the browser user's subject-owned preview.
 
-After ordinary Rauthy stop/start, the runner verifies that the same Rauthy container and same named `/app/data` volume are in use, then logs in again through both separate clients and verifies the original subjects and their isolated account data remain usable.
+After ordinary Rauthy stop/start, the runner verifies that the same named `/app/data` volume is mounted, then logs in again through both separate clients and verifies the original subjects and isolated account data remain usable.
 
 The successful API requests verify access-token signatures through the existing Rauthy JWKS validator. Failure of either token path or any cross-subject/admin isolation check is an acceptance failure. The runner does not log credentials or tokens and does not bypass validation.
 
