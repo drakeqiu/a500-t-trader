@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -104,6 +105,22 @@ def test_local_environment_defaults_to_single_rauthy_issuer(
     assert environment["OIDC_CLIENT_ID"] == "a500-browser-client"
 
 
+def test_rauthy_public_urls_follow_host_port_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    monkeypatch.setenv("RAUTHY_HOST_PORT", "18081")
+    monkeypatch.delenv("OIDC_ISSUER", raising=False)
+    monkeypatch.delenv("RAUTHY_PUB_URL", raising=False)
+    monkeypatch.delenv("RAUTHY_RP_ORIGIN", raising=False)
+
+    environment = LOCAL.local_environment()
+
+    assert environment["OIDC_ISSUER"] == "http://localhost:18081/auth/v1/"
+    assert environment["RAUTHY_PUB_URL"] == "localhost:18081"
+    assert environment["RAUTHY_RP_ORIGIN"] == "http://localhost:18081"
+
+
 def test_local_environment_preserves_configured_build_mirrors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -116,6 +133,139 @@ def test_local_environment_preserves_configured_build_mirrors(
     assert environment["UV_HTTP_TIMEOUT"] == "90"
     assert environment["APT_MIRROR"] == "apt.example"
 
+
+def test_exported_environment_overrides_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text("MARKET_DATA_MODE=tgw\nMAILPIT_HOST_PORT=8010\n")
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKET_DATA_MODE", "replay")
+    monkeypatch.setenv("MAILPIT_HOST_PORT", "8020")
+
+    environment = LOCAL.local_environment()
+
+    assert environment["MARKET_DATA_MODE"] == "replay"
+    assert environment["MAILPIT_HOST_PORT"] == "8020"
+
+
+def test_local_environment_defaults_mailpit_and_rauthy_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    monkeypatch.delenv("MAILPIT_HOST_PORT", raising=False)
+    monkeypatch.delenv("RAUTHY_HOST_PORT", raising=False)
+
+    environment = LOCAL.local_environment()
+
+    assert environment["MAILPIT_HOST_PORT"] == "8025"
+    assert environment["RAUTHY_HOST_PORT"] == "8081"
+    assert environment["RAUTHY_LOCAL_TEST"] == "false"
+
+
+def test_rauthy_bootstrap_persists_secure_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    environment = {
+        "RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path / ".rauthy-bootstrap"),
+        "GATEWAY_HOST_PORT": "8080",
+    }
+
+    LOCAL.prepare_rauthy_bootstrap(environment)
+    first = {
+        key: environment[key]
+        for key in ("RAUTHY_SECRET_RAFT", "RAUTHY_SECRET_API", "RAUTHY_ENC_KEYS")
+    }
+    LOCAL.prepare_rauthy_bootstrap(environment)
+
+    assert environment["RAUTHY_NODE_ID"] == "1"
+    assert environment["RAUTHY_NODES"] == "1 localhost:8100 localhost:8200"
+    assert all(environment[key] == value for key, value in first.items())
+    bootstrap = tmp_path / ".rauthy-bootstrap"
+    key_id, key = environment["RAUTHY_ENC_KEYS"].split("/", 1)
+    assert environment["RAUTHY_ENC_KEY_ACTIVE"] == key_id
+    assert len(key_id) == 8
+    assert len(base64.b64decode(key, validate=True)) == 32
+    assert bootstrap.stat().st_mode & 0o777 == 0o711
+    assert all(
+        (bootstrap / name).stat().st_mode & 0o777 == 0o600
+        for name in (
+            "rauthy-secret-raft",
+            "rauthy-secret-api",
+            "rauthy-enc-key",
+            "rauthy-enc-key-id",
+            "admin-password",
+            "client-update-api-key",
+        )
+    )
+    assert all(
+        (bootstrap / name).stat().st_mode & 0o777 == 0o644
+        for name in ("clients.json", "users.json", "api_keys.json")
+    )
+
+
+def test_rauthy_bootstrap_sets_client_audience_using_persisted_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    environment = {"RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path / "bootstrap")}
+    LOCAL.prepare_rauthy_bootstrap(environment)
+    clients = json.loads((tmp_path / "bootstrap" / "clients.json").read_text())
+    api_keys = json.loads((tmp_path / "bootstrap" / "api_keys.json").read_text())
+
+    assert all("default_aud" not in client for client in clients)
+    assert api_keys[0]["access"] == [
+        {"group": "Clients", "access_rights": ["read", "update"]}
+    ]
+    assert api_keys[0]["secret"]["Plain"]
+
+def test_rauthy_audience_is_updated_and_verified_for_both_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from urllib.request import Request
+
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    environment = {
+        "RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path / "bootstrap"),
+        "OIDC_ISSUER": "http://localhost:8081/auth/v1/",
+    }
+    LOCAL.prepare_rauthy_bootstrap(environment)
+    updates: list[str] = []
+
+    class Response:
+        status = 200
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode()
+
+    class Opener:
+        def open(self, request: Request, timeout: int) -> Response:
+            if request.get_method() == "PUT":
+                updates.append(request.full_url)
+                assert json.loads(request.data or b"{}")["default_aud"] == [
+                    "a500-api"
+                ]
+                return Response({})
+            if request.data is None:
+                return Response({"id": "client", "default_aud": ["a500-api"]})
+            return Response({})
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+
+    LOCAL.set_client_audience(environment)
+
+    assert updates == [
+        "http://localhost:8081/auth/v1/clients/a500-browser-client",
+        "http://localhost:8081/auth/v1/clients/a500-device-client",
+    ]
 
 def test_rauthy_bootstrap_creates_browser_and_device_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -131,10 +281,9 @@ def test_rauthy_bootstrap_creates_browser_and_device_clients(
     bootstrap = tmp_path / ".rauthy-bootstrap"
     clients = json.loads((bootstrap / "clients.json").read_text())
     browser, device = clients
-    assert browser["id"] == "a500-browser-client"
-    assert browser["redirect_uris"] == ["http://localhost:8080/"]
-    assert browser["default_aud"] == "a500-api"
-    assert device["id"] == "a500-device-client"
+    assert browser["auth_code_lifetime"] == device["auth_code_lifetime"] == 60
+    assert "default_aud" not in browser
+    assert "default_aud" not in device
     assert device["flows_enabled"] == [
         "urn:ietf:params:oauth:grant-type:device_code"
     ]
