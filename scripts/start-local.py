@@ -72,7 +72,7 @@ def local_environment() -> dict[str, str]:
         environment.get("POSTGRES_PASSWORD") or "changeme"
     )
     environment.setdefault("RAUTHY_HOST_PORT", "8081")
-    environment["OIDC_ISSUER"] = environment.get(
+    environment.setdefault(
         "OIDC_ISSUER", f"http://localhost:{environment['RAUTHY_HOST_PORT']}/auth/v1/"
     )
     environment.setdefault("OIDC_AUDIENCE", "a500-api")
