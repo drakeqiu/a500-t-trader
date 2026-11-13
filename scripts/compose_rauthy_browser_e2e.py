@@ -529,8 +529,8 @@ def verify_access_token(token: str, issuer: str, *, now: int | None = None) -> N
 
 def internal_jwks_uri(uri: str) -> str:
     parsed = urlsplit(uri)
-    if parsed.scheme != "https" or parsed.hostname != "localhost" or not parsed.path:
-        raise ValueError("Expected Rauthy HTTPS localhost JWKS URL")
+    if parsed.scheme not in ("http", "https") or parsed.hostname != "localhost" or not parsed.path:
+        raise ValueError("Expected Rauthy localhost JWKS URL")
     return urlunsplit(("http", "rauthy:8080", parsed.path, parsed.query, ""))
 
 
@@ -572,10 +572,11 @@ def _compose_bootstrap_override(
 
 
 def _rauthy_settings(port: str) -> dict[str, str]:
+    issuer = f"http://localhost:{port}/auth/v1/"
     return {
-        "OIDC_ISSUER": f"https://localhost:{port}/auth/v1/",
+        "OIDC_ISSUER": issuer,
         "RAUTHY_HOST_PORT": port,
-        "RAUTHY_LISTEN_SCHEME": "http_https",
+        "RAUTHY_LISTEN_SCHEME": "http",
         "RAUTHY_PUB_URL": f"localhost:{port}",
     }
 
@@ -686,7 +687,9 @@ def _write_bootstrap(
             ),
         )
     ]
-    client_access = [{"group": "Clients", "access_rights": ["update"]}]
+    client_access = [
+        {"group": "Clients", "access_rights": ["read", "update"]}
+    ]
     if username is None and not include_user_key:
         client_access = [
             {"group": "Clients", "access_rights": ["read", "create", "update"]},
@@ -732,13 +735,11 @@ def _port() -> int:
 
 
 def _wait_discovery(issuer: str) -> dict[str, object]:
-    ctx = ssl._create_unverified_context()
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         try:
             with urlopen(
                 issuer.rstrip("/") + "/.well-known/openid-configuration",
-                context=ctx,
                 timeout=3,
             ) as response:
                 result = json.load(response)
@@ -1112,6 +1113,50 @@ def _cleanup_run(
         raise RuntimeError("Compose teardown failed")
 
 
+def _rauthy_volume_binding(
+    prefix: list[str], env: dict[str, str], project: str
+) -> tuple[str, str]:
+    result = subprocess.run(
+        [*prefix, "ps", "-q", "rauthy"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    container_id = result.stdout.strip()
+    if not container_id:
+        raise RuntimeError("Rauthy container is missing during persistence check")
+    inspected = subprocess.run(
+        [
+            "podman",
+            "inspect",
+            "--format",
+            "{{json .Mounts}}",
+            container_id,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    mounts = json.loads(inspected.stdout)
+    if not isinstance(mounts, list):
+        raise RuntimeError("Could not inspect Rauthy data-volume mount")
+    data_mount = next(
+        (mount for mount in mounts if mount.get("Destination") == "/app/data"),
+        None,
+    )
+    volume_name = data_mount.get("Name") if isinstance(data_mount, dict) else None
+    expected_volume = f"{project}_rauthy-data"
+    if volume_name != expected_volume:
+        raise RuntimeError(
+            f"Rauthy data directory uses {volume_name!r}, expected named volume {expected_volume!r}"
+        )
+    return container_id, volume_name
+
+
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     command = shlex.split(os.environ.get("PODMAN_COMPOSE", "podman compose"))
@@ -1131,7 +1176,7 @@ def main() -> None:
         name: str(_port())
         for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")
     }
-    issuer = f"https://localhost:{ports['rauthy']}/auth/v1/"
+    issuer = f"http://localhost:{ports['rauthy']}/auth/v1/"
     mailpit = f"http://127.0.0.1:{ports['mailpit']}"
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
@@ -1151,9 +1196,6 @@ def main() -> None:
     Path(temp.name).chmod(0o711)
     bootstrap_dir = Path(temp.name) / "bootstrap"
     encryption_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
-    subprocess.run(
-        ["uv", "build", "--wheel"], cwd=ROOT, env=env, check=True, timeout=120
-    )
     env.update(
         {
             "ACCOUNT_API_MARKET_DATA": "disabled",
@@ -1193,6 +1235,13 @@ def main() -> None:
         prefix.extend(("-f", str(ROOT / file)))
     try:
         subprocess.run(
+            ["uv", "build", "--wheel"],
+            cwd=ROOT,
+            env=env,
+            check=True,
+            timeout=120,
+        )
+        subprocess.run(
             [*prefix, "build", "account-api", "frontend"],
             cwd=ROOT,
             env=env,
@@ -1219,13 +1268,17 @@ def main() -> None:
             api_key_secret,
             user_password,
             user_api_key_secret,
-        ) = _write_bootstrap(bootstrap_dir, gateway, include_user_key=True)
+        ) = _write_bootstrap(
+            bootstrap_dir,
+            gateway,
+            include_user_key=True,
+        )
         admin_password = secrets.token_urlsafe(24)
         override = _compose_bootstrap_override(
             Path(temp.name),
             env["RAUTHY_SECRET_RAFT"],
             env["RAUTHY_SECRET_API"],
-            f"https://localhost:{ports['rauthy']}",
+            f"http://localhost:{ports['rauthy']}",
             admin_password,
         )
         prefix.extend(("-f", str(override)))
@@ -1275,6 +1328,17 @@ def main() -> None:
         device_token, device_id_token = _device_grant(
             gateway, issuer, "device@example.test", user_password
         )
+        device_subject = _decode(device_token.split(".")[1]).get("sub")
+        if not isinstance(device_subject, str) or not device_subject:
+            raise AssertionError("Device token has no stable subject")
+        browser_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            "browser@example.test",
+            user_password,
+            create_snapshot=False,
+        )
         device_token, _ = _browser_flow(
             gateway,
             issuer,
@@ -1297,26 +1361,37 @@ def main() -> None:
                 raise AssertionError(
                     "Public API accepted an absent or malformed bearer token"
                 )
+        browser_subject = _decode(browser_token.split(".")[1]).get("sub")
+        device_browser_subject = _decode(device_token.split(".")[1]).get("sub")
+        admin_subject = _decode(admin_token.split(".")[1]).get("sub")
         if (
-            _public_api_request(gateway, "/api/v1/account-snapshot", device_token)[0]
-            == 200
+            not isinstance(browser_subject, str)
+            or not isinstance(device_browser_subject, str)
+            or not isinstance(admin_subject, str)
+            or len({browser_subject, device_browser_subject, admin_subject}) != 3
+            or device_browser_subject != device_subject
+        ):
+            raise AssertionError("Rauthy clients did not preserve distinct user subjects")
+        browser_snapshot_status, _, browser_snapshot = _public_api_request(
+            gateway, "/api/v1/account-snapshot", browser_token
+        )
+        device_snapshot_status, _, device_snapshot = _public_api_request(
+            gateway, "/api/v1/account-snapshot", device_token
+        )
+        if (
+            browser_snapshot_status != 200
+            or not isinstance(browser_snapshot, dict)
+            or browser_snapshot.get("available_cash") != "125.50"
+            or device_snapshot_status != 200
+            or not isinstance(device_snapshot, dict)
+            or device_snapshot.get("available_cash") != "126.50"
         ):
             raise AssertionError(
-                "Second Rauthy user could read the browser user's account snapshot"
-            )
-        if (
-            _public_api_request(gateway, "/api/v1/account-snapshot", admin_token)[0]
-            == 200
-        ):
-            raise AssertionError(
-                "Rauthy identity admin could read the browser user's account snapshot"
-            )
-        if (
-            _public_api_request(gateway, "/api/v1/account-snapshot", browser_token)[0]
-            != 200
-        ):
-            raise AssertionError(
-                "Browser user's account snapshot was not available to its owner"
+                "Browser and device users did not retain isolated snapshot data: "
+                f"browser HTTP {browser_snapshot_status}, cash "
+                f"{browser_snapshot.get('available_cash') if isinstance(browser_snapshot, dict) else None!r}; "
+                f"device HTTP {device_snapshot_status}, cash "
+                f"{device_snapshot.get('available_cash') if isinstance(device_snapshot, dict) else None!r}"
             )
         original_subject = _decode(browser_token.split(".")[1]).get("sub")
         changed_email = "browser-renamed@example.test"
@@ -1349,6 +1424,76 @@ def main() -> None:
             != 200
         ):
             raise AssertionError("Original business data was lost after email update")
+        original_container, original_volume = _rauthy_volume_binding(
+            prefix, env, project
+        )
+        subprocess.run(
+            [*prefix, "stop", "rauthy"],
+            cwd=ROOT,
+            env=env,
+            check=True,
+            timeout=60,
+        )
+        subprocess.run(
+            [*prefix, "up", "-d", "rauthy"],
+            cwd=ROOT,
+            env=env,
+            check=True,
+            timeout=120,
+        )
+        restarted_container, restarted_volume = _rauthy_volume_binding(
+            prefix, env, project
+        )
+        if (
+            restarted_container != original_container
+            or restarted_volume != original_volume
+        ):
+            raise AssertionError(
+                "Ordinary Rauthy restart did not reuse its original container and named data volume"
+            )
+        discovery = _wait_discovery(issuer)
+        persisted_token, _ = _browser_flow(
+            gateway,
+            issuer,
+            str(discovery["token_endpoint"]),
+            changed_email,
+            user_password,
+            create_snapshot=False,
+        )
+        persisted_device_token, persisted_device_id_token = _device_grant(
+            gateway, issuer, "device@example.test", user_password
+        )
+        device_snapshot_status, _, device_snapshot = _public_api_request(
+            gateway, "/api/v1/account-snapshot", persisted_device_token
+        )
+        browser_snapshot_status, _, browser_snapshot = _public_api_request(
+            gateway, "/api/v1/account-snapshot", persisted_token
+        )
+        if (
+            _decode(persisted_device_token.split(".")[1]).get("sub")
+            != device_subject
+            or device_subject == original_subject
+            or device_snapshot_status != 200
+            or not isinstance(device_snapshot, dict)
+            or device_snapshot.get("available_cash") != "126.50"
+            or browser_snapshot_status != 200
+            or not isinstance(browser_snapshot, dict)
+            or browser_snapshot.get("available_cash") != "125.50"
+        ):
+            raise AssertionError(
+                "Independent device client/user configuration or subject isolation did not survive restart"
+            )
+        _assert_token_rejected(gateway, persisted_device_id_token)
+        if (
+            _decode(persisted_token.split(".")[1]).get("sub") != original_subject
+            or _public_api_request(
+                gateway, "/api/v1/account-snapshot", persisted_token
+            )[0]
+            != 200
+        ):
+            raise AssertionError(
+                "Rauthy identity or existing API data did not survive ordinary restart"
+            )
         _perform_password_recovery(issuer, mailpit, changed_email, recovered_password)
         recovered_token, recovered_refresh_token = _browser_flow(
             gateway,
@@ -1403,6 +1548,19 @@ def main() -> None:
         ):
             raise AssertionError(
                 "Second Rauthy user could confirm the first user's trade-import preview"
+            )
+        if _public_api_request(gateway, preview_path, admin_token)[0] != 404:
+            raise AssertionError(
+                "Rauthy identity administrator could read the browser user's trade-import preview"
+            )
+        if (
+            _public_api_request(
+                gateway, preview_path + "/confirm", admin_token, method="POST"
+            )[0]
+            != 404
+        ):
+            raise AssertionError(
+                "Rauthy identity administrator could confirm the browser user's trade-import preview"
             )
         browser_token, browser_refresh_token = recovered_token, recovered_refresh_token
         if not browser_refresh_token:
@@ -1467,7 +1625,18 @@ def main() -> None:
                 ],
             )
         finally:
-            temp.cleanup()
+            subprocess.run(
+                [
+                    "podman",
+                    "unshare",
+                    "python3",
+                    "-c",
+                    "import shutil, sys; shutil.rmtree(sys.argv[1])",
+                    temp.name,
+                ],
+                check=True,
+                timeout=30,
+            )
 
 
 if __name__ == "__main__":

@@ -12,11 +12,11 @@ services:
     image: ghcr.io/sebadob/rauthy:0.37.2
     environment:
       LOCAL_TEST: ${RAUTHY_LOCAL_TEST:-true}
-      LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-https}
+      LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-http}
       PUB_URL: ${RAUTHY_PUB_URL:?RAUTHY_PUB_URL is required}
       HQL_DATA_DIR: /app/data
       RP_ID: localhost
-      RP_ORIGIN: https://localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
+      RP_ORIGIN: http://localhost:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}
       SMTP_URL: mailpit
       SMTP_PORT: "1025"
       SMTP_TLS_MODE: danger-insecure
@@ -32,7 +32,7 @@ services:
       ENC_KEY_ACTIVE: ${RAUTHY_ENC_KEY_ACTIVE:-}
       BOOTSTRAP_DIR: /app/bootstrap
     ports:
-      - "127.0.0.1:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8443"
+      - "127.0.0.1:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8080"
     volumes:
       - ${RAUTHY_BOOTSTRAP_HOST_DIR:?RAUTHY_BOOTSTRAP_HOST_DIR is required}:/app/bootstrap:ro
       - rauthy-data:/app/data

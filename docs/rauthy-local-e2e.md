@@ -1,6 +1,6 @@
 # Isolated Rauthy browser/device/API acceptance
 
-This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, a per-run generated initial administrator password, and generated self-signed HTTPS; only HTTPS is published, bound to `127.0.0.1`. The bootstrap override is private to the run, and the explicit initial password prevents Rauthy from generating and logging a default administrator password. A separate `rauthy-data` volume persists Rauthy data only for the run. The default Keycloak configuration and API token validation are unchanged.
+This disposable topology pins Rauthy v0.37.2 and is localhost-only. It runs Rauthy with a per-run bootstrap directory, private Hiqlite secrets, a per-run generated initial administrator password, and cleartext HTTP bound only to `127.0.0.1`. The bootstrap override is private to the run, and the explicit initial password prevents Rauthy from generating and logging a default administrator password. A separate `rauthy-data` volume persists Rauthy data only for the run. The default Keycloak configuration and API token validation are unchanged. Cleartext HTTP is strictly for this isolated local acceptance, not production use.
 
 ## Prerequisites and run
 
@@ -14,11 +14,13 @@ uv run python scripts/compose_rauthy_browser_e2e.py
 
 The runner rebuilds the current backend wheel before building the Compose services, so the container tests the checked-out source rather than a stale wheel in `dist/`.
 
-Rauthy's discovery issuer is `https://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation.
+Rauthy's discovery issuer is `http://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation. Issuer, browser PKCE, device authorization, and discovery traffic use real HTTP; the acceptance does not count HTTPS with certificate verification disabled as HTTP.
 
 The runner creates a random Compose project, free localhost ports, and disposable Rauthy users and clients from a temporary bootstrap directory. No manual Rauthy provisioning or email activation is needed. It uses replay mode and starts the gateway and APIs with the Rauthy discovery issuer and JWKS URI. Three accounts are provisioned: browser user, device user, and identity administrator. Credentials are generated per run and never printed.
 
-The runner drives the real browser authorization-code flow with PKCE/S256 and the real device-authorization flow in a browser, obtaining each user's access token from Rauthy. It checks token issuer, audience, signature algorithm, five-minute lifetime, and that both tokens can call the public signal API. It verifies user-owned snapshot creation/read, rejects the real ID token, and checks the second subject cannot read or confirm the browser subject's snapshot or trade-import preview. The actual identity-administrator token is also denied access to the browser user's subject-owned data.
+The runner drives the real browser authorization-code flow with PKCE/S256 and the real device-authorization flow in a browser, obtaining each user's access token from Rauthy. It checks token issuer, audience, signature algorithm, five-minute lifetime, and that both tokens can call the public signal API. It verifies each subject's separately valued snapshot, rejects the real ID token, and checks the second subject cannot read or confirm the browser subject's trade-import preview. The actual identity-administrator token is also denied access to the browser user's subject-owned preview.
+
+After ordinary Rauthy stop/start, the runner verifies that the same Rauthy container and same named `/app/data` volume are in use, then logs in again through both separate clients and verifies the original subjects and their isolated account data remain usable.
 
 The successful API requests verify access-token signatures through the existing Rauthy JWKS validator. Failure of either token path or any cross-subject/admin isolation check is an acceptance failure. The runner does not log credentials or tokens and does not bypass validation.
 
@@ -28,13 +30,13 @@ The browser client receives a five-minute access token (`access_token_lifetime: 
 
 The runner then calls the public API with the access token issued before disablement. It must still succeed while that JWT is unexpired because the API validates its signature, issuer, audience, and expiration locally; it does not query Rauthy for every request or implement online revocation. After the token's actual `exp` time, the same API call must return `401`. User disablement therefore prevents new authentication/renewal but does not instantly revoke already-issued access tokens; the residual acceptance window lasts until their expiry (up to five minutes from issuance).
 
-This is a disposable local acceptance fixture, not evidence from a production identity deployment. A real deployment's administrator and authorized browser/device credentials, network, and gateway must be used to repeat the same sequence before claiming production behavior.
+This is a disposable local acceptance fixture, not evidence from a production identity deployment. The isolated local Podman Compose run is sufficient acceptance; no separately deployed environment is required.
 
 ## 用户准入、邮箱变更与邮件捕获
 
 隔离 Rauthy 使用 `OPEN_USER_REG=false`，测试账号由一次性 bootstrap 创建并已启用、已验证邮箱，不会发送账户激活邮件。该 bootstrap 用于自动化验收，不等同于人工管理员在 Rauthy 管理界面创建用户；真实环境必须由管理员创建并审批账号，禁止开放自助注册。
 
-启动 runner 后，终端会显示本次随机端口的 Mailpit 地址。Mailpit 只在本地回收邮件，不会向真实邮箱投递；Compose 项目随机命名，退出时会删除本项目容器、网络、卷和本地构建镜像，并删除本次才拉取的 Mailpit 镜像（预先已有的 Mailpit 镜像会保留）。邮箱变更验收会修改一次性浏览器用户邮箱，再使用新邮箱登录；runner 比对变更前后的 `sub`，并以新 token 读取先前创建的账户快照。另一用户读取该快照仍须返回 `404`。系统按稳定的身份主体 ID 归属业务数据，不按邮箱转移数据。
+用户邮箱变更验收会修改一次性浏览器用户邮箱，再使用新邮箱登录；runner 比对变更前后的 `sub`，并以新 token 读取先前创建的账户快照。另一用户及身份管理员均不能读取或确认浏览器用户的交易导入预览。系统按稳定的身份主体 ID 归属业务数据，不按邮箱转移数据。
 
 runner 实际提交密码恢复请求，轮询 Mailpit API 取得该一次性用户的邮件正文，从本机 Rauthy 链接完成密码重设，再用新密码执行真实浏览器登录，并使用新 access token 读取原账户快照。恢复链接、恢复令牌、密码和 access token 均只在进程内存中处理，不输出到 runner 日志；测试只接受 issuer 主机为 localhost 的恢复链接。Mailpit 已启动或只收到邮件仍不构成恢复通过。
 
@@ -60,19 +62,7 @@ The runner performs the PKCE browser-login acceptance, then exercises a separate
 
 ## Redacted acceptance evidence
 
-A real Podman Compose run against Rauthy v0.37.2 completed in 505.87 seconds, including the build and natural device-code expiry. Sanitized runner output:
-
-```text
-Verified PKCE browser login, token claims, protected signal read, snapshot write/read.
-Device protocol: authorization_pending.
-Device protocol: slow_down; respecting updated poll interval.
-Device protocol: approved; RS256, default audience and five-minute token verified.
-Device protocol: user denial terminated without a token.
-Device protocol: waiting for natural expiry (300s).
-Device protocol: expiry terminated without a token.
-```
-
-The approved device token accessed the protected signal API, wrote and read an account snapshot, and passed the authenticated SSE acceptance through the public gateway. The client API read back `a500-api` as the default audience. The denial and expiry paths returned no usable token. The run used a per-run generated administrator password; the runner emitted no credentials, tokens, verification code, or password. Compose teardown emitted a rootless-network permission warning; a scoped post-run Podman audit found no matching containers, images, volumes, or networks.
+Previously recorded HTTPS-only evidence is historical and does not satisfy the current local HTTP acceptance.
 
 ## Cleanup and safety
 
