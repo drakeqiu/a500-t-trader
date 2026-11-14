@@ -278,7 +278,8 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
     environment = {
         "RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path / "bootstrap"),
-        "OIDC_ISSUER": "http://localhost:8081/auth/v1/",
+        "OIDC_ISSUER": "http://a500.test:8081/auth/v1/",
+        "RAUTHY_ADMIN_API_BASE_URL": "http://127.0.0.1:8081/auth/v1/",
     }
     LOCAL.prepare_rauthy_bootstrap(environment)
     updates: list[str] = []
@@ -314,8 +315,8 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
     LOCAL.set_client_audience(environment)
 
     assert updates == [
-        "http://localhost:8081/auth/v1/clients/a500-browser-client",
-        "http://localhost:8081/auth/v1/clients/a500-device-client",
+        "http://127.0.0.1:8081/auth/v1/clients/a500-browser-client",
+        "http://127.0.0.1:8081/auth/v1/clients/a500-device-client",
     ]
 
 
@@ -326,7 +327,8 @@ def test_rauthy_browser_origin_is_updated_and_verified(
 
     environment = {
         "RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path),
-        "OIDC_ISSUER": "http://localhost:8081/auth/v1/",
+        "OIDC_ISSUER": "http://a500.test:8081/auth/v1/",
+        "RAUTHY_ADMIN_API_BASE_URL": "http://127.0.0.1:8081/auth/v1/",
         "RAUTHY_BROWSER_ORIGIN": "http://192.168.1.10:8080",
     }
     (tmp_path / "client-update-api-key").write_text("key:secret")
@@ -351,8 +353,11 @@ def test_rauthy_browser_origin_is_updated_and_verified(
         def read(self) -> bytes:
             return json.dumps(self.payload).encode()
 
+    requests: list[str] = []
+
     class Opener:
         def open(self, request: Request, timeout: int) -> Response:
+            requests.append(request.full_url)
             if request.get_method() == "PUT":
                 assert isinstance(request.data, bytes)
                 configured.update(json.loads(request.data))
@@ -365,6 +370,11 @@ def test_rauthy_browser_origin_is_updated_and_verified(
 
     assert configured["redirect_uris"] == ["http://192.168.1.10:8080/"]
     assert configured["allowed_origins"] == ["http://192.168.1.10:8080"]
+    assert requests == [
+        "http://127.0.0.1:8081/auth/v1/clients/a500-browser-client",
+        "http://127.0.0.1:8081/auth/v1/clients/a500-browser-client",
+        "http://127.0.0.1:8081/auth/v1/clients/a500-browser-client",
+    ]
 
 
 def test_rauthy_bootstrap_creates_browser_and_device_clients(
@@ -424,8 +434,8 @@ def test_readiness_uses_configured_issuer_and_gateway(
     assert "http://localhost:18080" in requested
 
 
-def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
-    monkeypatch: pytest.MonkeyPatch,
+def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     lan_script = SCRIPT.with_name("start-lan-replay.py")
     lan_spec = importlib.util.spec_from_file_location("start_lan_replay", lan_script)
@@ -434,7 +444,11 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
     lan_spec.loader.exec_module(lan)
     events: list[str] = []
     commands: list[list[str]] = []
-    environment = {"GATEWAY_HOST_PORT": "8080", "COMPOSE_PROJECT_NAME": "custom"}
+    environment = {"COMPOSE_PROJECT_NAME": "custom"}
+    cert_file = tmp_path / "a500.test.pem"
+    cert_file.write_text("test certificate")
+    key_file = tmp_path / "a500.test-key.pem"
+    key_file.write_text("test private key")
 
     class Response:
         status = 200
@@ -446,7 +460,7 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
             pass
 
         def read(self) -> bytes:
-            return b'{"issuer":"http://192.168.1.10:8081/auth/v1/"}'
+            return b'{"issuer":"https://a500.test:8444/auth/v1/"}'
 
     lan.__dict__["LOCAL"] = {
         "local_environment": lambda: environment,
@@ -476,16 +490,37 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         lan.subprocess, "run", lambda command, **kwargs: commands.append(command)
     )
     monkeypatch.setattr(lan.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr("sys.argv", ["start-lan-replay.py", "192.168.1.10"])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "start-lan-replay.py",
+            "192.168.1.10",
+            "--hostname",
+            "a500.test",
+            "--tls-cert",
+            str(cert_file),
+            "--tls-key",
+            str(key_file),
+        ],
+    )
 
     assert lan.main() == 0
+    assert environment["RAUTHY_RP_ID"] == "a500.test"
+    assert environment["RAUTHY_RP_ORIGIN"] == "https://a500.test:8444"
+    assert environment["OIDC_ISSUER"] == "https://a500.test:8444/auth/v1/"
+    assert environment["RAUTHY_ADMIN_API_BASE_URL"] == "http://127.0.0.1:8081/auth/v1/"
+    assert environment["LAN_TLS"] == "1"
+    assert environment["TLS_CERT"] == str(cert_file.resolve())
+    assert environment["TLS_KEY"] == str(key_file.resolve())
+    assert environment["GATEWAY_HOST_PORT"] == "8443"
+    assert environment["RAUTHY_HOST"] == "127.0.0.1"
     assert events == [
-        "http://127.0.0.1:8081/auth/v1/.well-known/openid-configuration",
-        "http://127.0.0.1:8080/",
-        "http://127.0.0.1:8080/api/v1/signals",
-        "http://127.0.0.1:8080/api/v1/account-snapshot",
+        "https://localhost:8444/auth/v1/.well-known/openid-configuration",
+        "https://localhost:8443/",
+        "https://localhost:8443/api/v1/signals",
+        "https://localhost:8443/api/v1/account-snapshot",
         "audience",
-        "browser-origin:http://192.168.1.10:8080",
+        "browser-origin:https://a500.test:8443",
     ]
     assert commands
     assert commands[1][commands[1].index("--project-name") + 1] == "a500-lan"

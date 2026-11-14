@@ -47,20 +47,25 @@ python3 scripts/start-local.py down
 
 启动后按[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)准备回放数据；完整本地服务的回放命令见 `python3 scripts/start-local.py replay --help`。账户 API 仍需可用的 AmazingData 配置。
 
-可信局域网内访问时，使用本机的局域网 IPv4 地址启动独立项目：
+可信局域网内访问时，先确保客户端 DNS 或 hosts 将自选域名解析到本机局域网 IPv4。`--hostname` 必须是浏览器实际访问的 DNS 名称；Rauthy 不接受 IPv4 作为 WebAuthn RP ID。
+
+明文 HTTP 仅供不需要 WebAuthn 的受控测试；浏览器在 HTTP 下不提供 WebAuthn 所需的安全上下文，不能靠将 LAN IPv4 设置为 RP ID 解决。需要 WebAuthn 时，为网关和 Rauthy 同时启用 HTTPS。以下示例使用 `mkcert` 创建覆盖 `a500.test` 与 `localhost` 的证书；安装 `mkcert` 的本机 CA 到每台客户端浏览器信任的根证书库，并让客户端将 `a500.test` 解析到启动主机的 LAN IPv4。也可使用受客户端信任的组织 CA 证书。
 
 ```bash
-./scripts/start-lan-replay.py 192.168.1.10
-./scripts/start-lan-replay.py 192.168.1.10 ps
-./scripts/start-lan-replay.py 192.168.1.10 down
+mkcert -install
+mkcert -cert-file a500.test.pem -key-file a500.test-key.pem a500.test localhost
+./scripts/start-lan-replay.py 192.168.1.10 --hostname a500.test \
+  --tls-cert "$PWD/a500.test.pem" --tls-key "$PWD/a500.test-key.pem"
 ```
 
-将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Rauthy 端口；同步配置浏览器客户端允许来源和回调 URI。本段的默认凭据与网络约束仅适用于此本地开发 helper，不构成 Rauthy HTTP 候选的验收门槛。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
+客户端使用 `https://a500.test:8443` 访问应用，Rauthy 登录端点为 `https://a500.test:8444`。TLS 模式仍将 Rauthy 管理 API 限定在启动主机回环接口；证书和私钥通过只读挂载传入容器，私钥应限制读取权限且不得提交。若不提供 `--tls-cert`/`--tls-key`，脚本提供 HTTP 模式（应用 `http://a500.test:8080`、Rauthy `http://a500.test:8081`），不支持 WebAuthn 安全上下文。
+
+该脚本使用独立的 `a500-lan` 项目和数据卷；同步配置浏览器客户端允许来源和回调 URI。若 Compose 提示网络仍被容器占用，不要强制删除网络；先保留并检查该项目容器状态。
 
 LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-worker` 直接使用 `.env` 中的 `AD_*` 配置，不依赖盘中行情。启动器也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`。确认 AmazingData 条款允许持久化后，直接运行：
 
 ```bash
-./scripts/start-lan-replay.py 192.168.1.10
+./scripts/start-lan-replay.py 192.168.1.10 --hostname a500.test
 ```
 
 本地启动器默认开启持久化；如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。
