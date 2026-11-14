@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).parents[1] / "scripts" / "keycloak-resource-baseline.py"
 SPEC = importlib.util.spec_from_file_location("keycloak_resource_baseline", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -19,7 +21,9 @@ def test_percentile95_uses_nearest_rank() -> None:
     assert BASELINE._percentile95([1.0, 2.0, 3.0, 4.0, 5.0]) == 5.0
 
 
-def test_development_mode_or_unpinned_image_is_rejected(monkeypatch) -> None:
+def test_development_mode_or_unpinned_image_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         BASELINE,
         "_run",

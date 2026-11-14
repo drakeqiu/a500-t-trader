@@ -89,13 +89,6 @@ def _market_data_images(project: str) -> dict[str, str]:
     }
 
 
-def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
-    if discovery.get("issuer") != issuer or not isinstance(
-        discovery.get("jwks_uri"), str
-    ):
-        raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
-
-
 def _port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -120,7 +113,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
 
 
 def _browser_flow(gateway: str, issuer: str) -> None:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import Request, Response, sync_playwright
 
     username = input("Disposable Rauthy user email: ").strip()
     password = getpass.getpass("Disposable Rauthy user password: ")
@@ -133,13 +126,13 @@ def _browser_flow(gateway: str, issuer: str) -> None:
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        def request_seen(request) -> None:
+        def request_seen(request: Request) -> None:
             if request.url.startswith(gateway + "/api/"):
                 auth = request.headers.get("authorization", "")
                 if auth.startswith("Bearer "):
                     observed["token"] = auth[7:]
 
-        def response_seen(response) -> None:
+        def response_seen(response: Response) -> None:
             if (
                 urlsplit(response.url).path == "/api/v1/signals"
                 and response.request.method == "GET"
