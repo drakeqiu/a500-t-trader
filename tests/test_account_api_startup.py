@@ -65,5 +65,3 @@ def test_provider_startup_failure_is_not_suppressed(
 
     with pytest.raises(type(startup_error), match=str(startup_error)):
         account_api.create_market_data_service()
-
-
