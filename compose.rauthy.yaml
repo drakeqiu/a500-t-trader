@@ -10,6 +10,8 @@ services:
     depends_on:
       - mailpit
     image: ghcr.io/sebadob/rauthy:0.37.2
+    group_add:
+      - ${RAUTHY_BOOTSTRAP_GID:-1000}
     environment:
       LOCAL_TEST: ${RAUTHY_LOCAL_TEST:-true}
       LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-http}

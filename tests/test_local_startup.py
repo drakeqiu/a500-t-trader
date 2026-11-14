@@ -186,7 +186,7 @@ def test_rauthy_bootstrap_persists_secure_secrets(
     assert environment["RAUTHY_ENC_KEY_ACTIVE"] == key_id
     assert len(key_id) == 8
     assert len(base64.b64decode(key, validate=True)) == 32
-    assert bootstrap.stat().st_mode & 0o777 == 0o711
+    assert bootstrap.stat().st_mode & 0o777 == 0o710
     assert all(
         (bootstrap / name).stat().st_mode & 0o777 == 0o600
         for name in (
@@ -198,10 +198,11 @@ def test_rauthy_bootstrap_persists_secure_secrets(
             "client-update-api-key",
         )
     )
-    assert all(
-        (bootstrap / name).stat().st_mode & 0o777 == 0o644
-        for name in ("clients.json", "users.json", "api_keys.json")
-    )
+    assert (bootstrap / "clients.json").stat().st_mode & 0o777 == 0o644
+    assert (bootstrap / "users.json").stat().st_mode & 0o777 == 0o644
+    api_keys = bootstrap / "api_keys.json"
+    assert api_keys.stat().st_mode & 0o777 == 0o640
+    assert api_keys.stat().st_gid == __import__("os").getgid()
 
 
 def test_rauthy_bootstrap_api_key_meets_minimum_and_repairs_legacy_key(
