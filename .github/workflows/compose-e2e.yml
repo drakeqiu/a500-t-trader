@@ -101,6 +101,9 @@ jobs:
           chromium
 
       - name: Run Rauthy browser and device authorization E2E with mock market data
+        env:
+          UV_INDEX_URL: https://pypi.org/simple/
+          UV_DEFAULT_INDEX: https://pypi.org/simple/
         run: uv run --no-sync python scripts/compose_rauthy_browser_e2e.py
 
   compose-e2e:
