@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -186,7 +187,7 @@ def test_rauthy_bootstrap_persists_secure_secrets(
     assert environment["RAUTHY_ENC_KEY_ACTIVE"] == key_id
     assert len(key_id) == 8
     assert len(base64.b64decode(key, validate=True)) == 32
-    assert bootstrap.stat().st_mode & 0o777 == 0o711
+    assert bootstrap.stat().st_mode & 0o777 == 0o710
     assert all(
         (bootstrap / name).stat().st_mode & 0o777 == 0o600
         for name in (
@@ -198,10 +199,11 @@ def test_rauthy_bootstrap_persists_secure_secrets(
             "client-update-api-key",
         )
     )
-    assert all(
-        (bootstrap / name).stat().st_mode & 0o777 == 0o644
-        for name in ("clients.json", "users.json", "api_keys.json")
-    )
+    assert (bootstrap / "clients.json").stat().st_mode & 0o777 == 0o644
+    assert (bootstrap / "users.json").stat().st_mode & 0o777 == 0o644
+    api_keys = bootstrap / "api_keys.json"
+    assert api_keys.stat().st_mode & 0o777 == 0o640
+    assert api_keys.stat().st_gid == os.getgid()
 
 
 def test_rauthy_bootstrap_api_key_meets_minimum_and_repairs_legacy_key(
@@ -349,3 +351,54 @@ def test_readiness_uses_configured_issuer_and_gateway(
         in requested
     )
     assert "http://localhost:18080" in requested
+def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lan_script = SCRIPT.with_name("start-lan-replay.py")
+    lan_spec = importlib.util.spec_from_file_location("start_lan_replay", lan_script)
+    assert lan_spec is not None and lan_spec.loader is not None
+    lan = importlib.util.module_from_spec(lan_spec)
+    lan_spec.loader.exec_module(lan)
+    events: list[str] = []
+    environment = {"GATEWAY_HOST_PORT": "8080"}
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def read(self) -> bytes:
+            return b'{"issuer":"http://192.168.1.10:8081/auth/v1/"}'
+
+    lan.LOCAL = {
+        "local_environment": lambda: environment,
+        "check_configuration": lambda env: None,
+        "prepare_rauthy_bootstrap": lambda env: None,
+        "compose_command": lambda env: ["docker", "-p", "a500-local"],
+        "SERVICES": ("rauthy",),
+        "set_client_audience": lambda env: events.append("audience"),
+    }
+    monkeypatch.setattr(lan, "ROOT", SCRIPT.parents[1])
+    def open_url(url: str, timeout: int) -> Response:
+        events.append(str(url))
+        response = Response()
+        response.status = 401 if "/api/" in url else 200
+        return response
+    monkeypatch.setattr(lan, "urlopen", open_url)
+    monkeypatch.setattr(lan.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lan.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(lan.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("sys.argv", ["start-lan-replay.py", "192.168.1.10"])
+
+    assert lan.main() == 0
+    assert events == [
+        "http://127.0.0.1:8081/auth/v1/.well-known/openid-configuration",
+        "http://127.0.0.1:8080/",
+        "http://127.0.0.1:8080/api/v1/signals",
+        "http://127.0.0.1:8080/api/v1/account-snapshot",
+        "audience",
+    ]

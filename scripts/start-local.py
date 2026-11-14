@@ -106,8 +106,9 @@ def _persisted_secret(directory: Path, filename: str, length: int = 32) -> str:
 def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     """Provision first-run Rauthy clients and stable private secrets."""
     directory = Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
-    directory.mkdir(mode=0o711, parents=True, exist_ok=True)
-    directory.chmod(0o711)
+    directory.mkdir(mode=0o710, parents=True, exist_ok=True)
+    directory.chmod(0o710)
+    environment["RAUTHY_BOOTSTRAP_GID"] = str(os.getgid())
     environment.setdefault("RAUTHY_NODE_ID", "1")
     environment.setdefault("RAUTHY_NODES", "1 localhost:8100 localhost:8200")
     environment["RAUTHY_SECRET_RAFT"] = _persisted_secret(
@@ -209,7 +210,7 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
         ),
         encoding="utf-8",
     )
-    (directory / "api_keys.json").chmod(0o644)
+    (directory / "api_keys.json").chmod(0o640)
     (directory / "users.json").chmod(0o644)
 
 

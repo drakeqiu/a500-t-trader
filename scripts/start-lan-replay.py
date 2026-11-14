@@ -105,6 +105,7 @@ def main() -> int:
                     if time.monotonic() >= deadline:
                         raise ValueError(f"Gateway readiness timed out: {path}")
                     time.sleep(1)
+            LOCAL["set_client_audience"](env)
             print(f"Ready: {origin} (Rauthy: {issuer})")
             print(
                 "HTTP provides no confidentiality or integrity; use only with accepted risk."
