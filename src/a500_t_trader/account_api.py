@@ -5,16 +5,13 @@ from __future__ import annotations
 import uvicorn
 
 from .account_snapshot_api import create_app
-from .cli.runtime import ProviderStartupError, create_provider_from_env
+from .cli.runtime import create_provider_from_env
 from .market_data import MarketDataService
 
 
-def create_market_data_service() -> MarketDataService | None:
-    """Use configured market data while keeping provider failures isolated."""
-    try:
-        return MarketDataService(create_provider_from_env())
-    except ProviderStartupError:
-        return None
+def create_market_data_service() -> MarketDataService:
+    """Create configured market data and propagate provider startup failures."""
+    return MarketDataService(create_provider_from_env())
 
 
 app = create_app(market_data=create_market_data_service())

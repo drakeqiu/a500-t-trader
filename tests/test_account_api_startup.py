@@ -52,7 +52,7 @@ def test_account_api_starts_configured_provider_without_opt_in(
         ProviderStartupError("provider failed"),
     ],
 )
-def test_provider_startup_failure_does_not_disable_account_api(
+def test_provider_startup_failure_is_not_suppressed(
     monkeypatch: pytest.MonkeyPatch,
     startup_error: ProviderStartupError,
 ) -> None:
@@ -63,6 +63,7 @@ def test_provider_startup_failure_does_not_disable_account_api(
 
     monkeypatch.setattr(account_api, "create_provider_from_env", fail_startup)
 
-    assert account_api.create_market_data_service() is None
+    with pytest.raises(type(startup_error), match=str(startup_error)):
+        account_api.create_market_data_service()
 
 
