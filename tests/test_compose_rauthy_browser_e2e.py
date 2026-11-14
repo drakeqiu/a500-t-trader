@@ -17,25 +17,66 @@ from scripts.compose_rauthy_browser_e2e import (
 
 def token(header: dict[str, object], claims: dict[str, object]) -> str:
     def encode(value: dict[str, object]) -> str:
-        return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+        encoded = json.dumps(value).encode()
+        return base64.urlsafe_b64encode(encoded).rstrip(b"=").decode()
+
     return f"{encode(header)}.{encode(claims)}.signature"
 
 
 def test_accepts_required_access_token_contract() -> None:
     now = int(time.time())
     issuer = "https://localhost:18443/auth/v1/"
-    verify_access_token(token({"alg": "RS256"}, {"iss": issuer, "aud": ["a500-api"], "iat": now, "exp": now + 300}), issuer, now=now)
+    claims = {
+        "iss": issuer,
+        "aud": ["a500-api"],
+        "iat": now,
+        "exp": now + 300,
+    }
+    verify_access_token(token({"alg": "RS256"}, claims), issuer, now=now)
 
-
-@pytest.mark.parametrize("header,claims", [
-    ({"alg": "EdDSA"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "other", "iat": 100, "exp": 400}),
-    ({"alg": "RS256"}, {"iss": "https://localhost:18443/auth/v1/", "aud": "a500-api", "iat": 100, "exp": 401}),
-])
-def test_rejects_wrong_token_contract(header: dict[str, object], claims: dict[str, object]) -> None:
+@pytest.mark.parametrize(
+    "header,claims",
+    [
+        (
+            {"alg": "EdDSA"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "a500-api",
+                "iat": 100,
+                "exp": 400,
+            },
+        ),
+        (
+            {"alg": "RS256"},
+            {"iss": "https://wrong", "aud": "a500-api", "iat": 100, "exp": 400},
+        ),
+        (
+            {"alg": "RS256"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "other",
+                "iat": 100,
+                "exp": 400,
+            },
+        ),
+        (
+            {"alg": "RS256"},
+            {
+                "iss": "https://localhost:18443/auth/v1/",
+                "aud": "a500-api",
+                "iat": 100,
+                "exp": 401,
+            },
+        ),
+    ],
+)
+def test_rejects_wrong_token_contract(
+    header: dict[str, object], claims: dict[str, object]
+) -> None:
     with pytest.raises(AssertionError):
-        verify_access_token(token(header, claims), "https://localhost:18443/auth/v1/", now=200)
+        verify_access_token(
+            token(header, claims), "https://localhost:18443/auth/v1/", now=200
+        )
 
 
 def test_internal_jwks_keeps_compose_route_and_query() -> None:
