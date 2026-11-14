@@ -13,7 +13,7 @@ uv run python scripts/compose_rauthy_browser_e2e.py
 ```
 
 The runner rebuilds the current backend wheel before building the Compose services, so the container tests the checked-out source rather than a stale wheel in `dist/`.
-`scripts/start-local.py` checks the configured `OIDC_ISSUER` discovery document and the configured gateway port, so local overrides use the same readiness checks as their Compose endpoints.
+`scripts/start-local.py` checks the configured `OIDC_ISSUER` discovery document and the configured gateway port, so local overrides use the same readiness checks as their Compose endpoints. Before browser login, the Rauthy runner also waits for the account-snapshot route to answer through the public gateway, avoiding requests during account API startup.
 
 Rauthy's discovery issuer is `http://localhost:<rauthy-port>/auth/v1/`; the runner uses the issuer and JWKS URI returned by its discovery document, including that path, for gateway validation. Issuer, browser PKCE, device authorization, and discovery traffic use real HTTP; the acceptance does not count HTTPS with certificate verification disabled as HTTP.
 

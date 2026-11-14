@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 from urllib.error import HTTPError
@@ -599,6 +600,13 @@ def _compose_bootstrap_override(
                         },
                         "volumes": [f"{directory / 'bootstrap'}:/app/bootstrap:ro,U"],
                     },
+                    "account-api": {
+                        "command": ["python", "/app/account-api-mock-market.py"],
+                        "volumes": [
+                            f"{ROOT / 'scripts/fixtures/account-api-mock-market.py'}:"
+                            "/app/account-api-mock-market.py:ro"
+                        ],
+                    },
                 },
             }
         )
@@ -865,18 +873,26 @@ def _browser_flow_impl(
     holdings: int = 100,
     cash: str = "125.50",
     create_snapshot: bool = True,
+    _stage: list[str] | None = None,
 ) -> tuple[str, str | None]:
     from playwright.sync_api import sync_playwright
 
+    stage = _stage if _stage is not None else ["validating credentials"]
     if not username or not password:
         raise RuntimeError("Disposable user credentials are required")
-    with sync_playwright() as pw:
+    stage[0] = "launching browser"
+    with sync_playwright() as pw, ExitStack() as resources:
         browser = pw.chromium.launch(headless=True)
+        resources.callback(browser.close)
         context = browser.new_context(ignore_https_errors=True)
+        resources.callback(context.close)
         page = context.new_page()
+        stage[0] = "loading gateway login"
         page.goto(gateway + "/signals", wait_until="domcontentloaded")
+        stage[0] = "redirecting to Rauthy"
         page.get_by_role("button", name="安全连接", exact=True).first.click()
         page.wait_for_url(issuer + "**", timeout=120_000)
+        stage[0] = "entering username"
         username_field = page.locator(
             'input[autocomplete="username"], input[type="email"], '
             'input[name="login"], input[type="text"]'
@@ -884,9 +900,11 @@ def _browser_flow_impl(
         username_field.wait_for(state="visible", timeout=30_000)
         username_field.fill(username)
         page.locator("form").get_by_role("button", name="Login", exact=True).click()
+        stage[0] = "entering password"
         password_field = page.locator('input[type="password"]:visible')
         password_field.wait_for(state="visible", timeout=30_000)
         password_field.fill(password)
+        stage[0] = "exchanging authorization code"
         with page.expect_response(
             lambda response: (
                 "/oidc/token" in urlsplit(response.url).path
@@ -895,6 +913,7 @@ def _browser_flow_impl(
             timeout=60_000,
         ) as token_response:
             page.locator('button[type="submit"]:visible').click()
+        stage[0] = "returning to gateway"
         page.wait_for_url(gateway + "/**", timeout=120_000)
         token_body = token_response.value.json()
         browser_token = token_body.get("access_token")
@@ -907,6 +926,7 @@ def _browser_flow_impl(
             raise AssertionError(
                 "Browser OAuth response contained an invalid refresh token"
             )
+        stage[0] = "verifying token and gateway API access"
         page.wait_for_function(
             "() => document.body.innerText.includes('策略信号')", timeout=60_000
         )
@@ -921,10 +941,12 @@ def _browser_flow_impl(
             )
 
         if create_snapshot:
+            stage[0] = "opening account snapshot"
             page.get_by_role("link", name="资产管理", exact=True).click()
             page.get_by_role("button", name="创建快照").wait_for(timeout=30_000)
 
         if create_snapshot:
+            stage[0] = "saving account snapshot"
             page.get_by_role("button", name="创建快照").click()
             page.get_by_label("快照时间").fill(
                 time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -944,6 +966,7 @@ def _browser_flow_impl(
             ) as saved:
                 page.get_by_role("button", name="创建账户快照", exact=True).click()
             if saved.value.status not in (200, 201):
+                stage[0] = f"saving account snapshot (HTTP {saved.value.status})"
                 raise AssertionError(
                     f"Snapshot write returned HTTP {saved.value.status}"
                 )
@@ -967,8 +990,7 @@ def _browser_flow_impl(
                 raise AssertionError(
                     "Snapshot readback did not match browser-written business data"
                 )
-        context.close()
-        browser.close()
+        stage[0] = "closing browser"
         return browser_token, refresh_token
 
 
@@ -983,6 +1005,7 @@ def _browser_flow(
     cash: str = "125.50",
     create_snapshot: bool = True,
 ) -> tuple[str, str | None]:
+    stage = ["starting browser flow"]
     try:
         return _browser_flow_impl(
             gateway,
@@ -993,9 +1016,48 @@ def _browser_flow(
             holdings=holdings,
             cash=cash,
             create_snapshot=create_snapshot,
+            _stage=stage,
         )
-    except Exception:
-        raise AssertionError("Rauthy browser automation failed") from None
+    except Exception as exc:
+        prior_error = exc.__context__
+        prior_error_location = None
+        if prior_error is not None:
+            frame = prior_error.__traceback__
+            while frame is not None:
+                module = frame.tb_frame.f_globals.get("__name__", "")
+                if isinstance(module, str) and module.startswith("scripts."):
+                    prior_error_location = (
+                        f"{module}.{frame.tb_frame.f_code.co_name}:{frame.tb_lineno}"
+                    )
+                frame = frame.tb_next
+        prior_error_suffix = (
+            f"; prior {type(prior_error).__name__}"
+            + (
+                f" at {prior_error_location}"
+                if prior_error_location is not None
+                else ""
+            )
+            + " was raised"
+            if prior_error is not None
+            else ""
+        )
+        playwright_frame = None
+        browser_frame = None
+        frame = exc.__traceback__
+        while frame is not None:
+            module = frame.tb_frame.f_globals.get("__name__", "")
+            function = frame.tb_frame.f_code.co_name
+            if isinstance(module, str) and module.startswith("playwright."):
+                playwright_frame = f"{module}.{function}:{frame.tb_lineno}"
+            elif module == __name__ and function == "_browser_flow_impl":
+                browser_frame = f"{module}.{function}:{frame.tb_lineno}"
+            frame = frame.tb_next
+        location = browser_frame or playwright_frame
+        location_suffix = f" at {location}" if location is not None else ""
+        raise AssertionError(
+            f"Rauthy browser automation failed during {stage[0]} "
+            f"({type(exc).__name__}{prior_error_suffix}){location_suffix}"
+        ) from None
 
 
 
@@ -1236,6 +1298,78 @@ def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
     return volume_name
 
 
+def _safe_log_summary(service: str, line: str) -> str | None:
+    if service == "account-api" and "Uvicorn running on" in line:
+        return "account-api Uvicorn started"
+    if "connect() failed" in line:
+        if "account-api:8000" in line or "/api/v1/account-snapshot" in line:
+            return "gateway reported a snapshot upstream connection failure"
+        return f"{service} reported an upstream connection failure"
+    if "upstream timed out" in line:
+        return f"{service} reported an upstream timeout"
+    if "upstream prematurely closed" in line:
+        return f"{service} reported an upstream connection close"
+    if "no live upstreams" in line:
+        return f"{service} reported no live upstreams"
+    return None
+
+
+def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None:
+    for service in services:
+        container = f"{project}_{service}_1"
+        state = subprocess.run(
+            ["podman", "inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", container],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        print(f"Container {service} state: {state.stdout.strip() or 'unavailable'}")
+        logs = subprocess.run(
+            ["podman", "logs", "--tail", "100", container],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        summaries: set[str] = set()
+        for raw_line in (*logs.stdout.splitlines(), *logs.stderr.splitlines()):
+            line = raw_line.strip()
+            frame = re.search(r'^File "([^"]+)", line (\d+), in ([\w.< >]+)$', line)
+            if frame:
+                print(
+                    f"Container {service} traceback: "
+                    f"{Path(frame.group(1)).name}:{frame.group(2)} in {frame.group(3)}"
+                )
+                continue
+            error = re.match(r"^([A-Za-z_][A-Za-z_0-9]*(?:Error|Exception))(?::.*)?$", line)
+            if error:
+                print(f"Container {service} error type: {error.group(1)}")
+            summary = _safe_log_summary(service, line)
+            if summary is not None and summary not in summaries:
+                print(summary)
+                summaries.add(summary)
+
+
+def _wait_for_account_api(gateway: str, timeout_seconds: float = 180) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    endpoint = f"{gateway}/api/v1/account-snapshot"
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(endpoint, timeout=3):
+                return
+        except HTTPError as error:
+            if error.code in (401, 403):
+                error.close()
+                return
+            error.close()
+        except OSError:
+            pass
+        time.sleep(2)
+    raise RuntimeError("Account API did not become ready through the public gateway")
+
+
+
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     command = shlex.split(os.environ.get("PODMAN_COMPOSE", "podman compose"))
@@ -1270,7 +1404,6 @@ def main() -> None:
     env.update(
         {
             "GATEWAY_HOST_PORT": ports["gateway"],
-            "ACCOUNT_API_MARKET_DATA": "disabled",
             "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
             "POSTGRES_PORT": ports["postgres"],
             "RABBITMQ_BIND_HOST": "127.0.0.1",
@@ -1417,14 +1550,23 @@ def main() -> None:
                 print(logs.stdout, end="")
                 print(logs.stderr, end="")
             raise RuntimeError("Public gateway did not become ready")
+        try:
+            _wait_for_account_api(gateway)
+        except RuntimeError:
+            _safe_container_diagnostics(project, ("account-api", "gateway"))
+            raise
         print(f"Disposable Mailpit inbox: {mailpit}")
-        browser_token, browser_refresh_token = _browser_flow(
-            gateway,
-            issuer,
-            str(discovery["token_endpoint"]),
-            "browser@example.test",
-            user_password,
-        )
+        try:
+            browser_token, browser_refresh_token = _browser_flow(
+                gateway,
+                issuer,
+                str(discovery["token_endpoint"]),
+                "browser@example.test",
+                user_password,
+            )
+        except Exception:
+            _safe_container_diagnostics(project, ("account-api", "gateway"))
+            raise
         device_token, device_id_token = _device_grant(
             gateway, issuer, "device@example.test", user_password
         )

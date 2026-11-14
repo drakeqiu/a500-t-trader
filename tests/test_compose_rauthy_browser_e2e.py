@@ -9,20 +9,38 @@ import time
 from email.message import Message
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request
 
 import pytest
 
 from scripts.compose_rauthy_browser_e2e import (
+    _compose_bootstrap_override,
     _email_update_payload,
     _rauthy_settings,
     _run_device_browser_step,
+    _safe_container_diagnostics,
     _validate_discovery,
     _write_bootstrap,
     internal_jwks_uri,
     verify_access_token,
 )
 
+
+def test_compose_e2e_uses_synthetic_account_market_data(
+    tmp_path: Path,
+) -> None:
+    override = _compose_bootstrap_override(
+        tmp_path, "raft", "api", "http://localhost", "admin"
+    )
+
+    config = json.loads(override.read_text())
+    account_api = config["services"]["account-api"]
+
+    assert account_api["command"] == ["python", "/app/account-api-mock-market.py"]
+    assert account_api["volumes"] == [
+        f"{Path(__file__).resolve().parents[1]}/scripts/fixtures/account-api-mock-market.py:/app/account-api-mock-market.py:ro"
+    ]
 
 def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
     tmp_path: Path,
@@ -559,22 +577,83 @@ def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -
     assert error.value.__cause__ is None
 
 
-def test_browser_flow_errors_do_not_expose_playwright_diagnostics(
+def test_container_diagnostics_hide_log_messages(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    calls = iter(
+        (
+            subprocess.CompletedProcess([], 0, "exited 1\n", ""),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                'Traceback (most recent call last):\n  File "/app/private.py", line 9, in run\n'
+                "RuntimeError: password=secret-password\n"
+                "connect() failed while connecting to upstream secret-password\n",
+                "",
+            ),
+        )
+    )
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_args, **_kwargs: next(calls))
+
+    _safe_container_diagnostics("project", ("account-api",))
+
+    output = capsys.readouterr().out
+    assert "account-api state: exited 1" in output
+    assert "private.py:9 in run" in output
+    assert "RuntimeError" in output
+    assert "account-api reported an upstream connection failure" in output
+    assert "secret-password" not in output
+
+
+def test_account_api_readiness_waits_until_gateway_routes_to_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    statuses = iter((502, 401))
+    requested_urls: list[str] = []
+
+    def fake_urlopen(url: str, timeout: int) -> Any:
+        requested_urls.append(url)
+        raise HTTPError(url, next(statuses), "not ready", {}, None)
+
+    monkeypatch.setattr(runner, "urlopen", fake_urlopen)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    runner._wait_for_account_api("http://gateway")
+
+    assert requested_urls == [
+        "http://gateway/api/v1/account-snapshot",
+        "http://gateway/api/v1/account-snapshot",
+    ]
+
+
+def test_browser_flow_errors_report_stage_without_exposing_playwright_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
     diagnostic = "locator.fill failed with password=secret-password"
 
-    def fail_browser_action(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError(diagnostic)
+    def fail_browser_action(*_args: Any, **kwargs: Any) -> None:
+        kwargs["_stage"][0] = "submitting credentials"
+        try:
+            raise ValueError("nested page diagnostic with secret-password")
+        except ValueError as exc:
+            raise RuntimeError(diagnostic) from exc
 
     monkeypatch.setattr(runner, "_browser_flow_impl", fail_browser_action)
 
     with pytest.raises(AssertionError) as error:
         runner._browser_flow("gateway", "issuer", "token-endpoint", "user", "password")
 
-    assert str(error.value) == "Rauthy browser automation failed"
+    assert str(error.value) == (
+        "Rauthy browser automation failed during submitting credentials "
+        "(RuntimeError; prior ValueError was raised)"
+    )
     assert diagnostic not in str(error.value)
+    assert "secret-password" not in str(error.value)
     assert error.value.__cause__ is None
     assert error.value.__suppress_context__
