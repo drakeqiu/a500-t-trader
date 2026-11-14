@@ -20,7 +20,7 @@ python3 scripts/start-local.py
 
 启动器默认使用 Compose 项目 `a500-local`，也可用 `COMPOSE_PROJECT_NAME` 显式指定独立项目。它叠加 `compose.rauthy.yaml`、Web 公共定义及 HTTP 模式，构建并启动真实服务及 Rauthy，并等待 discovery、UI 和未认证 API 就绪；也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`，以支持历史行情任务。也可指定 `--timeout 300`。本地启动器默认开启历史行情持久化；启动前仍须确认 AmazingData 条款允许持久化，如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
 
-启动器在 `.rauthy-bootstrap/` 中以权限受限的文件生成并持久保存 Hiqlite 密钥、初始管理员密码及客户端更新 API key；该目录不可提交或公开。首次启动后的客户端 audience 由 Rauthy 客户端 API 设置并读回为 `a500-api`，不依赖不受 bootstrap schema 支持的 `default_aud` 字段。
+启动器在 `.rauthy-bootstrap/` 中以权限受限的文件生成并持久保存 Hiqlite 密钥、初始管理员密码及客户端更新 API key；该目录不可提交或公开。API key secret 使用至少 64 个字符的随机值（Rauthy v0.37.2 的最低要求），检测到较短的旧值时会自动轮换并同步 bootstrap 文件。首次启动后的客户端 audience 由 Rauthy 客户端 API 设置并读回为 `a500-api`，不依赖不受 bootstrap schema 支持的 `default_aud` 字段。
 
 打开 <http://localhost:8081> 进入 Rauthy 管理界面；启动器已 bootstrap 浏览器和设备客户端，但不会创建用户。管理员须创建并启用获准用户，再打开 <http://localhost:8080> 登录。不要将 `localhost` 替换为 `127.0.0.1`。
 

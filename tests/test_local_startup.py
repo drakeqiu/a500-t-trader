@@ -204,6 +204,28 @@ def test_rauthy_bootstrap_persists_secure_secrets(
     )
 
 
+def test_rauthy_bootstrap_api_key_meets_minimum_and_repairs_legacy_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
+    bootstrap = tmp_path / "bootstrap"
+    environment = {"RAUTHY_BOOTSTRAP_HOST_DIR": str(bootstrap)}
+
+    LOCAL.prepare_rauthy_bootstrap(environment)
+    key_path = bootstrap / "client-update-api-key"
+    key_name, key_secret = key_path.read_text().strip().split(":", 1)
+    assert len(key_secret) >= 64
+
+    key_path.write_text(f"{key_name}:legacy-short-secret\n")
+    LOCAL.prepare_rauthy_bootstrap(environment)
+    updated_name, updated_secret = key_path.read_text().strip().split(":", 1)
+    api_keys = json.loads((bootstrap / "api_keys.json").read_text())
+
+    assert updated_name == key_name
+    assert len(updated_secret) >= 64
+    assert api_keys[0]["secret"] == {"Plain": updated_secret}
+
+
 def test_rauthy_bootstrap_sets_client_audience_using_persisted_api_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

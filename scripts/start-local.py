@@ -144,9 +144,15 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
 
     api_key_file = directory / "client-update-api-key"
     if api_key_file.exists():
-        key_name, key_secret = api_key_file.read_text(encoding="utf-8").strip().split(":", 1)
+        key_name, key_secret = (
+            api_key_file.read_text(encoding="utf-8").strip().split(":", 1)
+        )
+        if len(key_secret) < 64:
+            key_secret = secrets.token_hex(32)
+            api_key_file.write_text(f"{key_name}:{key_secret}\n", encoding="utf-8")
+            api_key_file.chmod(0o600)
     else:
-        key_name, key_secret = "a500-client-update", secrets.token_urlsafe(32)
+        key_name, key_secret = "a500-client-update", secrets.token_hex(32)
         api_key_file.write_text(f"{key_name}:{key_secret}\n", encoding="utf-8")
         api_key_file.chmod(0o600)
 
