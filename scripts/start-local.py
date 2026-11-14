@@ -88,6 +88,10 @@ def local_environment() -> dict[str, str]:
         "RAUTHY_RP_ORIGIN",
         f"http://localhost:{environment['RAUTHY_HOST_PORT']}",
     )
+    environment.setdefault(
+        "RAUTHY_BROWSER_ORIGIN",
+        f"http://localhost:{environment.get('GATEWAY_HOST_PORT', '8080')}",
+    )
     environment.setdefault("HISTORY_PERSISTENCE_PERMITTED", "true")
     configure_local_build_environment(environment)
     return environment
@@ -108,7 +112,6 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     directory = Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
     directory.mkdir(mode=0o710, parents=True, exist_ok=True)
     directory.chmod(0o710)
-    environment["RAUTHY_BOOTSTRAP_GID"] = str(os.getgid())
     environment.setdefault("RAUTHY_NODE_ID", "1")
     environment.setdefault("RAUTHY_NODES", "1 localhost:8100 localhost:8200")
     environment["RAUTHY_SECRET_RAFT"] = _persisted_secret(
@@ -210,7 +213,7 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
         ),
         encoding="utf-8",
     )
-    (directory / "api_keys.json").chmod(0o640)
+    (directory / "api_keys.json").chmod(0o600)
     (directory / "users.json").chmod(0o644)
 
 
@@ -274,6 +277,72 @@ def set_client_audience(environment: dict[str, str]) -> None:
             configured = json.load(response)
         if configured.get("default_aud") != ["a500-api"]:
             raise RuntimeError("Rauthy did not persist the configured client audience")
+
+
+def set_browser_origin(environment: dict[str, str]) -> None:
+    """Set and verify the browser client's LAN redirect URI and allowed origin."""
+    from urllib.request import ProxyHandler, Request, build_opener
+
+    issuer = environment["OIDC_ISSUER"].rstrip("/")
+    key_name, key_secret = (
+        Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
+        .joinpath("client-update-api-key")
+        .read_text(encoding="utf-8")
+        .strip()
+        .split(":", 1)
+    )
+    origin = environment["RAUTHY_BROWSER_ORIGIN"].rstrip("/")
+    redirect_uri = f"{origin}/"
+    endpoint = f"{issuer}/clients/a500-browser-client"
+    opener = build_opener(ProxyHandler({}))
+    headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
+    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        client = json.load(response)
+    fields = (
+        "name",
+        "confidential",
+        "post_logout_redirect_uris",
+        "enabled",
+        "flows_enabled",
+        "access_token_alg",
+        "id_token_alg",
+        "auth_code_lifetime",
+        "access_token_lifetime",
+        "scopes",
+        "default_scopes",
+        "default_aud",
+        "challenges",
+        "force_mfa",
+        "client_uri",
+        "contacts",
+        "backchannel_logout_uri",
+        "restrict_group_prefix",
+        "claims",
+        "claims_at_root",
+        "allowed_resources",
+        "scim",
+    )
+    update = {field: client.get(field) for field in fields}
+    update["redirect_uris"] = [redirect_uri]
+    update["allowed_origins"] = [origin]
+    request = Request(
+        endpoint,
+        data=json.dumps(update).encode(),
+        headers={**headers, "Content-Type": "application/json"},
+        method="PUT",
+    )
+    with opener.open(request, timeout=10) as response:
+        if response.status not in (200, 204):
+            raise RuntimeError(
+                f"Rauthy browser origin update returned HTTP {response.status}"
+            )
+    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        configured = json.load(response)
+    if (
+        configured.get("redirect_uris") != [redirect_uri]
+        or configured.get("allowed_origins") != [origin]
+    ):
+        raise RuntimeError("Rauthy did not persist the configured browser origin")
 
 def compose_command(environment: dict[str, str]) -> list[str]:
     configured = environment.get("COMPOSE_COMMAND") or environment.get("PODMAN_COMPOSE")
@@ -435,6 +504,7 @@ def main() -> int:
             issuer = environment["OIDC_ISSUER"]
             wait_ready(arguments.timeout, gateway_port, issuer)
             set_client_audience(environment)
+            set_browser_origin(environment)
             print(f"Ready: http://localhost:{gateway_port} (Rauthy: {issuer})")
             print(
                 "No user is created by default. Use the Rauthy admin UI to provision one."

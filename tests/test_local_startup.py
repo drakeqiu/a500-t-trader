@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -163,6 +162,15 @@ def test_local_environment_defaults_mailpit_and_rauthy_port(
     assert environment["RAUTHY_LOCAL_TEST"] == "false"
 
 
+def test_rauthy_rootless_container_reads_bootstrap_as_mapped_host_user() -> None:
+    compose = (SCRIPT.parents[1] / "compose.rauthy.yaml").read_text()
+    rauthy = compose.split("  rauthy:\n", 1)[1].split("\n  volumes:", 1)[0]
+
+    assert '    user: "0:0"' in rauthy
+    assert "group_add:" not in rauthy
+    assert "RAUTHY_BOOTSTRAP_GID" not in rauthy
+
+
 def test_rauthy_bootstrap_persists_secure_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -202,8 +210,7 @@ def test_rauthy_bootstrap_persists_secure_secrets(
     assert (bootstrap / "clients.json").stat().st_mode & 0o777 == 0o644
     assert (bootstrap / "users.json").stat().st_mode & 0o777 == 0o644
     api_keys = bootstrap / "api_keys.json"
-    assert api_keys.stat().st_mode & 0o777 == 0o640
-    assert api_keys.stat().st_gid == os.getgid()
+    assert api_keys.stat().st_mode & 0o777 == 0o600
 
 
 def test_rauthy_bootstrap_api_key_meets_minimum_and_repairs_legacy_key(
@@ -290,6 +297,53 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
         "http://localhost:8081/auth/v1/clients/a500-browser-client",
         "http://localhost:8081/auth/v1/clients/a500-device-client",
     ]
+
+
+def test_rauthy_browser_origin_is_updated_and_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from urllib.request import Request
+
+    environment = {
+        "RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path),
+        "OIDC_ISSUER": "http://localhost:8081/auth/v1/",
+        "RAUTHY_BROWSER_ORIGIN": "http://192.168.1.10:8080",
+    }
+    (tmp_path / "client-update-api-key").write_text("key:secret")
+    configured = {
+        "name": "browser",
+        "redirect_uris": ["http://old-host:8080/"],
+        "allowed_origins": ["http://old-host:8080"],
+    }
+
+    class Response:
+        status = 200
+
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode()
+
+    class Opener:
+        def open(self, request: Request, timeout: int) -> Response:
+            if request.get_method() == "PUT":
+                configured.update(json.loads(request.data or b"{}"))
+                return Response({})
+            return Response(configured.copy())
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+
+    LOCAL.set_browser_origin(environment)
+
+    assert configured["redirect_uris"] == ["http://192.168.1.10:8080/"]
+    assert configured["allowed_origins"] == ["http://192.168.1.10:8080"]
 
 def test_rauthy_bootstrap_creates_browser_and_device_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -381,8 +435,10 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         "compose_command": lambda env: ["docker", "-p", "a500-local"],
         "SERVICES": ("rauthy",),
         "set_client_audience": lambda env: events.append("audience"),
+        "set_browser_origin": lambda env: events.append(
+            f"browser-origin:{env['RAUTHY_BROWSER_ORIGIN']}"
+        ),
     }
-    monkeypatch.setattr(lan, "ROOT", SCRIPT.parents[1])
     def open_url(url: str, timeout: int) -> Response:
         events.append(str(url))
         response = Response()
@@ -401,4 +457,5 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         "http://127.0.0.1:8080/api/v1/signals",
         "http://127.0.0.1:8080/api/v1/account-snapshot",
         "audience",
+        "browser-origin:http://192.168.1.10:8080",
     ]

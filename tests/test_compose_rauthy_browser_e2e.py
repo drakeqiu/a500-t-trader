@@ -557,4 +557,24 @@ def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -
     assert verification_uri not in str(error.value)
     assert password not in str(error.value)
     assert error.value.__cause__ is None
+
+
+def test_browser_flow_errors_do_not_expose_playwright_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    diagnostic = "locator.fill failed with password=secret-password"
+
+    def fail_browser_action(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError(diagnostic)
+
+    monkeypatch.setattr(runner, "_browser_flow_impl", fail_browser_action)
+
+    with pytest.raises(AssertionError) as error:
+        runner._browser_flow("gateway", "issuer", "token-endpoint", "user", "password")
+
+    assert str(error.value) == "Rauthy browser automation failed"
+    assert diagnostic not in str(error.value)
+    assert error.value.__cause__ is None
     assert error.value.__suppress_context__

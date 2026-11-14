@@ -855,7 +855,7 @@ def _assert_token_rejected(gateway: str, id_token: str) -> None:
         )
 
 
-def _browser_flow(
+def _browser_flow_impl(
     gateway: str,
     issuer: str,
     token_endpoint: str,
@@ -970,6 +970,34 @@ def _browser_flow(
         context.close()
         browser.close()
         return browser_token, refresh_token
+
+
+def _browser_flow(
+    gateway: str,
+    issuer: str,
+    token_endpoint: str,
+    username: str,
+    password: str,
+    *,
+    holdings: int = 100,
+    cash: str = "125.50",
+    create_snapshot: bool = True,
+) -> tuple[str, str | None]:
+    try:
+        return _browser_flow_impl(
+            gateway,
+            issuer,
+            token_endpoint,
+            username,
+            password,
+            holdings=holdings,
+            cash=cash,
+            create_snapshot=create_snapshot,
+        )
+    except Exception:
+        raise AssertionError("Rauthy browser automation failed") from None
+
+
 
 
 def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> None:

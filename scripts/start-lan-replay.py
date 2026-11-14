@@ -106,6 +106,7 @@ def main() -> int:
                         raise ValueError(f"Gateway readiness timed out: {path}")
                     time.sleep(1)
             LOCAL["set_client_audience"](env)
+            LOCAL["set_browser_origin"](env)
             print(f"Ready: {origin} (Rauthy: {issuer})")
             print(
                 "HTTP provides no confidentiality or integrity; use only with accepted risk."
