@@ -269,6 +269,7 @@ def test_rauthy_bootstrap_sets_client_audience_using_persisted_api_key(
     ]
     assert api_keys[0]["secret"]["Plain"]
 
+
 def test_rauthy_audience_is_updated_and_verified_for_both_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -284,6 +285,7 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
 
     class Response:
         status = 200
+
         def __init__(self, payload: dict[str, object]) -> None:
             self.payload = payload
 
@@ -300,9 +302,7 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
         def open(self, request: Request, timeout: int) -> Response:
             if request.get_method() == "PUT":
                 updates.append(request.full_url)
-                assert json.loads(request.data or b"{}")["default_aud"] == [
-                    "a500-api"
-                ]
+                assert json.loads(request.data or b"{}")["default_aud"] == ["a500-api"]
                 return Response({})
             if request.data is None:
                 return Response({"id": "client", "default_aud": ["a500-api"]})
@@ -364,6 +364,7 @@ def test_rauthy_browser_origin_is_updated_and_verified(
     assert configured["redirect_uris"] == ["http://192.168.1.10:8080/"]
     assert configured["allowed_origins"] == ["http://192.168.1.10:8080"]
 
+
 def test_rauthy_bootstrap_creates_browser_and_device_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -381,9 +382,7 @@ def test_rauthy_bootstrap_creates_browser_and_device_clients(
     assert browser["auth_code_lifetime"] == device["auth_code_lifetime"] == 60
     assert "default_aud" not in browser
     assert "default_aud" not in device
-    assert device["flows_enabled"] == [
-        "urn:ietf:params:oauth:grant-type:device_code"
-    ]
+    assert device["flows_enabled"] == ["urn:ietf:params:oauth:grant-type:device_code"]
 
 
 def test_readiness_uses_configured_issuer_and_gateway(
@@ -405,9 +404,7 @@ def test_readiness_uses_configured_issuer_and_gateway(
 
     def fake_urlopen(url: str, timeout: int) -> Response:
         requested.append(url)
-        if url.endswith("/api/v1/signals") or url.endswith(
-            "/api/v1/account-snapshot"
-        ):
+        if url.endswith("/api/v1/signals") or url.endswith("/api/v1/account-snapshot"):
             raise LOCAL.HTTPError(url, 401, "Unauthorized", {}, None)
         return Response()
 
@@ -420,10 +417,11 @@ def test_readiness_uses_configured_issuer_and_gateway(
     )
 
     assert (
-        "http://localhost:18443/auth/v1/.well-known/openid-configuration"
-        in requested
+        "http://localhost:18443/auth/v1/.well-known/openid-configuration" in requested
     )
     assert "http://localhost:18080" in requested
+
+
 def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -435,6 +433,7 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
     events: list[str] = []
     commands: list[list[str]] = []
     environment = {"GATEWAY_HOST_PORT": "8080", "COMPOSE_PROJECT_NAME": "custom"}
+
     class Response:
         status = 200
 
@@ -452,7 +451,10 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         "check_configuration": lambda env: None,
         "prepare_rauthy_bootstrap": lambda env: None,
         "compose_command": lambda env: [
-            "docker", "compose", "--project-name", env["COMPOSE_PROJECT_NAME"]
+            "docker",
+            "compose",
+            "--project-name",
+            env["COMPOSE_PROJECT_NAME"],
         ],
         "SERVICES": ("rauthy",),
         "set_client_audience": lambda env: events.append("audience"),
@@ -460,11 +462,13 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
             f"browser-origin:{env['RAUTHY_BROWSER_ORIGIN']}"
         ),
     }
+
     def open_url(url: str, timeout: int) -> Response:
         events.append(str(url))
         response = Response()
         response.status = 401 if "/api/" in url else 200
         return response
+
     monkeypatch.setattr(lan, "urlopen", open_url)
     monkeypatch.setattr(
         lan.subprocess, "run", lambda command, **kwargs: commands.append(command)

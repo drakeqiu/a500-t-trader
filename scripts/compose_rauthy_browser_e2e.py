@@ -731,9 +731,7 @@ def _write_bootstrap(
             ),
         )
     ]
-    client_access = [
-        {"group": "Clients", "access_rights": ["read", "update"]}
-    ]
+    client_access = [{"group": "Clients", "access_rights": ["read", "update"]}]
     if username is None and not include_user_key:
         client_access = [
             {"group": "Clients", "access_rights": ["read", "create", "update"]},
@@ -1060,8 +1058,6 @@ def _browser_flow(
         ) from None
 
 
-
-
 def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> None:
     opener = build_opener(
         ProxyHandler({}),
@@ -1249,15 +1245,18 @@ def _cleanup_run(
         raise RuntimeError("Test-created pinned images survived cleanup")
 
 
-
 def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
     result = subprocess.run(
         [
             "podman",
-            "inspect",
+            "ps",
+            "--all",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--filter",
+            "label=com.docker.compose.service=rauthy",
             "--format",
-            "{{.Id}}",
-            f"{project}_rauthy_1",
+            "{{.ID}}",
         ],
         cwd=ROOT,
         env=env,
@@ -1266,9 +1265,12 @@ def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
         text=True,
         timeout=30,
     )
-    container_id = result.stdout.strip()
-    if not container_id:
-        raise RuntimeError("Rauthy container is missing during persistence check")
+    container_ids = result.stdout.splitlines()
+    if len(container_ids) != 1:
+        raise RuntimeError(
+            "Expected exactly one Rauthy container during persistence check"
+        )
+    container_id = container_ids[0]
     inspected = subprocess.run(
         [
             "podman",
@@ -1377,7 +1379,6 @@ def _wait_for_account_api(gateway: str, timeout_seconds: float = 180) -> None:
             pass
         time.sleep(2)
     raise RuntimeError("Account API did not become ready through the public gateway")
-
 
 
 def main() -> None:
@@ -1742,9 +1743,9 @@ def main() -> None:
         browser_snapshot_status, _, browser_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", persisted_token
         )
-        persisted_device_subject = _decode(
-            persisted_device_token.split(".")[1]
-        ).get("sub")
+        persisted_device_subject = _decode(persisted_device_token.split(".")[1]).get(
+            "sub"
+        )
         device_cash = (
             device_snapshot.get("available_cash")
             if isinstance(device_snapshot, dict)

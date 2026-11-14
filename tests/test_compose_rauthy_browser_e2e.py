@@ -17,6 +17,7 @@ import pytest
 from scripts.compose_rauthy_browser_e2e import (
     _compose_bootstrap_override,
     _email_update_payload,
+    _rauthy_data_volume,
     _rauthy_settings,
     _run_device_browser_step,
     _safe_container_diagnostics,
@@ -25,6 +26,34 @@ from scripts.compose_rauthy_browser_e2e import (
     internal_jwks_uri,
     verify_access_token,
 )
+
+
+def test_rauthy_data_volume_finds_compose_container_by_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str], **_kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        stdout = (
+            "container-id\n"
+            if command[1] == "ps"
+            else json.dumps(
+                [{"Destination": "/app/data", "Name": "project_rauthy-data"}]
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    assert _rauthy_data_volume({}, "project") == "project_rauthy-data"
+    assert "label=com.docker.compose.project=project" in commands[0]
+    assert "label=com.docker.compose.service=rauthy" in commands[0]
+    assert commands[1][-1] == "container-id"
 
 
 def test_compose_e2e_uses_synthetic_account_market_data(
@@ -41,6 +70,7 @@ def test_compose_e2e_uses_synthetic_account_market_data(
     assert account_api["volumes"] == [
         f"{Path(__file__).resolve().parents[1]}/scripts/fixtures/account-api-mock-market.py:/app/account-api-mock-market.py:ro"
     ]
+
 
 def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
     tmp_path: Path,
@@ -165,14 +195,18 @@ def test_internal_jwks_keeps_compose_route_and_query() -> None:
 
 
 def test_internal_jwks_routes_public_http_identity_host_to_compose_service() -> None:
-    assert internal_jwks_uri(
-        "http://identity.example.test:8081/auth/v1/oidc/certs?tenant=a500"
-    ) == "http://rauthy:8080/auth/v1/oidc/certs?tenant=a500"
+    assert (
+        internal_jwks_uri(
+            "http://identity.example.test:8081/auth/v1/oidc/certs?tenant=a500"
+        )
+        == "http://rauthy:8080/auth/v1/oidc/certs?tenant=a500"
+    )
 
 
 def test_internal_jwks_rejects_invalid_public_endpoint() -> None:
     with pytest.raises(ValueError):
         internal_jwks_uri("file:///etc/passwd")
+
 
 def test_rauthy_public_issuer_settings_match_http_discovery() -> None:
     settings = _rauthy_settings("18443")
@@ -465,9 +499,7 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
         ]
     )
     monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        runner, "_device_public_api", lambda *_args, **_kwargs: None
-    )
+    monkeypatch.setattr(runner, "_device_public_api", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
@@ -478,11 +510,10 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
     monkeypatch.setattr(
         runner,
         "_oauth_post",
-        lambda _opener, url, _data: (200, next(starts))
-        if url.endswith("/device")
-        else next(polls),
+        lambda _opener, url, _data: (
+            (200, next(starts)) if url.endswith("/device") else next(polls)
+        ),
     )
-
     assert runner._device_grant(
         "http://localhost:18080", "http://localhost:8081/auth/v1/", "user", "pass"
     ) == ("fresh-access", "fresh-id")
@@ -588,7 +619,7 @@ def test_container_diagnostics_hide_log_messages(
             subprocess.CompletedProcess(
                 [],
                 0,
-                'Traceback (most recent call last):\n'
+                "Traceback (most recent call last):\n"
                 '  File "/app/private.py", line 9, in run\n'
                 "RuntimeError: password=secret-password\n"
                 "connect() failed while connecting to upstream secret-password\n",

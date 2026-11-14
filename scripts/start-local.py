@@ -124,9 +124,7 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     environment["RAUTHY_SECRET_RAFT"] = _persisted_secret(
         directory, "rauthy-secret-raft"
     )
-    environment["RAUTHY_SECRET_API"] = _persisted_secret(
-        directory, "rauthy-secret-api"
-    )
+    environment["RAUTHY_SECRET_API"] = _persisted_secret(directory, "rauthy-secret-api")
     enc_key_file = directory / "rauthy-enc-key"
     enc_key_id_file = directory / "rauthy-enc-key-id"
     if enc_key_file.exists() and enc_key_id_file.exists():
@@ -211,12 +209,16 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     (directory / "users.json").write_text("[]", encoding="utf-8")
     (directory / "api_keys.json").write_text(
         json.dumps(
-            [{
-                "name": key_name,
-                "secret": {"Plain": key_secret},
-                "exp": int(time.time()) + 31536000,
-                "access": [{"group": "Clients", "access_rights": ["read", "update"]}],
-            }]
+            [
+                {
+                    "name": key_name,
+                    "secret": {"Plain": key_secret},
+                    "exp": int(time.time()) + 31536000,
+                    "access": [
+                        {"group": "Clients", "access_rights": ["read", "update"]}
+                    ],
+                }
+            ]
         ),
         encoding="utf-8",
     )
@@ -345,11 +347,11 @@ def set_browser_origin(environment: dict[str, str]) -> None:
             )
     with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
         configured = json.load(response)
-    if (
-        configured.get("redirect_uris") != [redirect_uri]
-        or configured.get("allowed_origins") != [origin]
-    ):
+    if configured.get("redirect_uris") != [redirect_uri] or configured.get(
+        "allowed_origins"
+    ) != [origin]:
         raise RuntimeError("Rauthy did not persist the configured browser origin")
+
 
 def compose_command(environment: dict[str, str]) -> list[str]:
     configured = environment.get("COMPOSE_COMMAND") or environment.get("PODMAN_COMPOSE")
@@ -398,7 +400,6 @@ def check_configuration(environment: dict[str, str]) -> None:
         "AD_PASSWORD",
         "AD_HOST",
         "AD_PORT",
-
         "POSTGRES_PASSWORD",
     )
     missing = [name for name in required if not environment.get(name)]
@@ -461,7 +462,7 @@ def wait_ready(
                             continue
             except HTTPError as error:
                 status = error.code
-            except (OSError, URLError, ValueError):
+            except OSError, URLError, ValueError:
                 continue
             if status == expected:
                 del pending[name]
