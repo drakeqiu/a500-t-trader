@@ -16,18 +16,18 @@ Rauthy's discovery issuer is `https://localhost:<rauthy-port>/auth/v1/`; the run
 
 The runner creates a random Compose project and free localhost ports, uses replay mode, starts the existing gateway and APIs, and prints the local Rauthy Admin UI URL. In a browser, accept the self-signed local certificate warning and use Rauthy's official v0.37.2 local-test admin instructions. Create a public client with these exact values:
 
-| Setting | Value |
-| --- | --- |
-| Client ID | `a500-browser-client` |
-| Client type | Public, no secret |
-| Redirect URI | `http://localhost:<printed-gateway-port>/` |
-| Allowed origin | `http://localhost:<printed-gateway-port>` |
-| Grant | Authorization Code |
-| PKCE | Required, S256 |
-| Signing algorithm | RS256 (not the EdDSA default) |
-| Default audience | `a500-api` |
-| Access-token lifetime | 300 seconds |
-| Scope | `openid` |
+| Setting               | Value                                      |
+| --------------------- | ------------------------------------------ |
+| Client ID             | `a500-browser-client`                      |
+| Client type           | Public, no secret                          |
+| Redirect URI          | `http://localhost:<printed-gateway-port>/` |
+| Allowed origin        | `http://localhost:<printed-gateway-port>`  |
+| Grant                 | Authorization Code                         |
+| PKCE                  | Required, S256                             |
+| Signing algorithm     | RS256 (not the EdDSA default)              |
+| Default audience      | `a500-api`                                 |
+| Access-token lifetime | 300 seconds                                |
+| Scope                 | `openid`                                   |
 
 Create an enabled disposable user. Do not reuse real credentials. Enter the account only at the hidden prompt. The runner performs real browser login, observes the access token on an authenticated request through the gateway, checks issuer, audience, RS256, and exact five-minute lifetime; then checks protected signal read and account snapshot create/read using the same public gateway and business APIs. The API's successful responses verify the token signature through its existing Rauthy JWKS validator. The runner neither logs credentials/token nor bypasses validation.
 
