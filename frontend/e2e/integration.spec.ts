@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 // Business REST/SSE calls use deterministic in-memory API mocks and fixture identity.
-// This suite exercises browser workflows, not live Keycloak or market-provider access.
+// This suite exercises browser workflows, not live Rauthy or market-provider access.
 const fixture = `http://127.0.0.1:${process.env.E2E_FIXTURE_PORT || "38100"}`;
 
 async function connect(page: Page, subject: string, heading = "策略信号") {

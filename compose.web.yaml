@@ -1,4 +1,4 @@
-# Full application: combine with compose.yaml; Keycloak is optional.
+# Full application: combine with compose.yaml and one configured OIDC provider.
 services:
   frontend:
     build:

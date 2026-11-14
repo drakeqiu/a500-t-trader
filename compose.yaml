@@ -234,7 +234,7 @@ services:
     restart: unless-stopped
 
   replay:
-    image: a500-market-data-consumer:local
+    image: ${MARKET_DATA_REPLAY_IMAGE:-a500-market-data-consumer:local}
     build:
       context: .
       dockerfile: Dockerfile

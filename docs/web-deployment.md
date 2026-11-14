@@ -1,31 +1,30 @@
 # 统一 Web 入口部署与运维
 
-本文从仓库根目录操作。完整应用使用一个 Nginx gateway 提供 UI 和同源 `/api/v1/`，前端与 Python API 不发布宿主机端口。身份提供方（IdP）是独立服务。行情采集器不由 Compose 启动，也可只运行[独立行情消费者](single-host-market-data-compose.md)。本地集成和实际部署使用不同的 IdP，不能将开发 Keycloak 当作生产身份服务。
+本文从仓库根目录操作。完整应用使用一个 Nginx gateway 提供 UI 和同源 `/api/v1/`，前端与 Python API 不发布宿主机端口。身份提供方（IdP）是独立服务。行情采集器不由 Compose 启动，也可只运行[独立行情消费者](single-host-market-data-compose.md)。本地真实集成由 `compose.rauthy.yaml` 提供 Rauthy；实际部署可使用外部兼容 OIDC IdP。
 
 ## 前置条件
 
 - Linux 主机、可工作的 Docker Engine 和 Compose 插件，能拉取基础镜像并访问构建依赖；下面命令使用 `docker compose`。rootless Podman 可使用 `podman-compose`，但网络和卷权限需按其环境处理。
 - 本地完整启动脚本在构建服务镜像前运行 `uv build --wheel`；直接运行 Compose 构建时，先在仓库根目录执行 `uv build --wheel`。镜像内使用 `uv pip install` 安装项目 wheel 和依赖；PyPI/镜像源仍需可访问，供应商依赖 wheel 则从 `wheels/` 提供。不再使用 uv 镜像缓存。
-- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 和历史任务 worker 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成则使用下述开发 Keycloak。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
+- 可用的 AmazingData 查询账号、密码、主机和端口，以及从账户 API 和历史任务 worker 容器到该服务的网络。准备独立 OIDC IdP、获准用户及支持 Authorization Code + PKCE 的浏览器客户端；本地集成使用下述 Rauthy。TGW 实时模式还需要外部采集器向 RabbitMQ 发布规范化行情；它的 SDK、许可和网络须自行验证。
 - 凭据通过受保护的环境变量或未提交、限制访问的 `.env` 提供，不写入镜像或仓库。下例以交互式 shell 输入敏感值，避免直接写入命令历史；不要在共享终端输出环境变量或令牌。
 
-## 本地集成：真实服务和开发 Keycloak
+## 本地集成：真实服务和 Rauthy
 
-本地集成启动器和 Compose 服务使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 配置行情服务；可放在未提交的 `.env` 中。启动本地集成：
+本地集成启动器和 Compose 服务使用 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 配置行情服务；这些连接信息从启动器所在项目根目录的 `.env` 读取，并优先于同名进程环境变量。其他配置仍由进程环境变量覆盖 `.env`。可将行情配置放在未提交的 `.env` 中。启动本地集成：
 
 ```bash
-read -r -p 'Keycloak admin username: ' KEYCLOAK_ADMIN_USERNAME
-read -r -s -p 'Keycloak admin password: ' KEYCLOAK_ADMIN_PASSWORD; printf '\n'
-export KEYCLOAK_ADMIN_USERNAME KEYCLOAK_ADMIN_PASSWORD
 export MARKET_DATA_MODE=tgw
 python3 scripts/start-local.py
 ```
 
-启动器固定 Compose 项目 `a500-local`，构建并启动基础服务、Keycloak、Web 公共定义及 HTTP 模式，并等待 discovery、UI 和未认证 API 就绪；也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`，以支持历史行情任务。也可指定 `--timeout 300`。本地启动器默认开启历史行情持久化；启动前仍须确认 AmazingData 条款允许持久化，如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
+启动器默认使用 Compose 项目 `a500-local`，也可用 `COMPOSE_PROJECT_NAME` 显式指定独立项目。它叠加 `compose.rauthy.yaml`、Web 公共定义及 HTTP 模式，构建并启动真实服务及 Rauthy，并等待 discovery、UI 和未认证 API 就绪；也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`，以支持历史行情任务。也可指定 `--timeout 300`。本地启动器默认开启历史行情持久化；启动前仍须确认 AmazingData 条款允许持久化，如需关闭，可在 `.env` 或环境变量中设置 `HISTORY_PERSISTENCE_PERMITTED=false`。`tgw` 不启动采集器，没有行情时信号可能不可用。回放操作见[单机行情消费者部署](single-host-market-data-compose.md#历史回放模式)；启动器内的 replay 参数见仓库根目录 `scripts/start-local.py replay --help`。
 
-在同一台机器访问 <http://localhost:8081>，使用刚设置的管理员登录，在 `a500` Realm 中创建并启用用户、设置密码；没有默认用户，自助注册关闭。打开 <http://localhost:8080>，通过 Keycloak 登录。客户端须精确允许浏览器来源和根路径回调 URI；不要将 `localhost` 替换为 `127.0.0.1`。
+启动器在 `.rauthy-bootstrap/` 中以权限受限的文件生成并持久保存 Hiqlite 密钥、初始管理员密码及客户端更新 API key；该目录不可提交或公开。API key secret 使用至少 64 个字符的随机值（Rauthy v0.37.2 的最低要求），检测到较短的旧值时会自动轮换并同步 bootstrap 文件。首次启动后的客户端 audience 由 Rauthy 客户端 API 设置并读回为 `a500-api`，不依赖不受 bootstrap schema 支持的 `default_aud` 字段。
 
-本地 issuer 是 `http://localhost:8081/realms/a500`，浏览器必须能访问它；API 容器从 `http://keycloak:8080/realms/a500/protocol/openid-connect/certs` 获取公钥。前者必须与令牌 `iss` 一致，不能替换为容器内部名称。局域网启动方式见本地[回放与局域网访问](#本地回放与局域网访问)。
+打开 <http://localhost:8081> 进入 Rauthy 管理界面；启动器已 bootstrap 浏览器和设备客户端，但不会创建用户。管理员须创建并启用获准用户，再打开 <http://localhost:8080> 登录。不要将 `localhost` 替换为 `127.0.0.1`。
+
+本地 issuer 是 `http://localhost:8081/auth/v1/`，浏览器必须能访问它；API 从容器网络 Rauthy JWKS 获取公钥。issuer 必须与令牌 `iss` 一致。局域网启动方式见本地[回放与局域网访问](#本地回放与局域网访问)。
 
 ```bash
 python3 scripts/start-local.py ps
@@ -33,7 +32,7 @@ python3 scripts/start-local.py logs
 python3 scripts/start-local.py down
 ```
 
-这些命令需要保留同一配置和管理员环境；`down` 不删除持久化卷。启动器仅提供本地 HTTP/Keycloak 拓扑；HTTPS、外部 IdP 和自定义域名使用下面的 Compose 命令。
+这些命令需要保留同一配置和管理员环境；`down` 不删除持久化卷。启动器提供本地 HTTP/Rauthy 拓扑；HTTPS、外部 IdP 和自定义域名使用下面的 Compose 命令。
 
 ### 本地回放与局域网访问
 
@@ -56,7 +55,7 @@ python3 scripts/start-local.py down
 ./scripts/start-lan-replay.py 192.168.1.10 down
 ```
 
-将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Keycloak 端口；同步配置浏览器客户端允许来源和回调 URI。HTTP 与默认凭据仅适合受防火墙保护的可信局域网，禁止暴露到公网；RabbitMQ 不应暴露给不受信网络。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
+将示例地址替换为本机实际地址，客户端访问 `http://该IP:8080`。该脚本使用独立的 `a500-lan` 项目和数据卷，并开放 Web 与 Rauthy 端口；同步配置浏览器客户端允许来源和回调 URI。本段的默认凭据与网络约束仅适用于此本地开发 helper，不构成 Rauthy HTTP 候选的验收门槛。`down` 不删除持久化卷；切勿用 `down -v` 作为日常停止方式。
 
 LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-worker` 直接使用 `.env` 中的 `AD_*` 配置，不依赖盘中行情。启动器也会启动 `jobs-api`、`jobs-worker` 和 `history-dispatcher`。确认 AmazingData 条款允许持久化后，直接运行：
 
@@ -70,7 +69,7 @@ LAN 回放模式只将实时行情链路设为 `replay`；历史任务由 `jobs-
 
 ### 配置身份和外部服务
 
-由 IdP 管理员配置支持 Authorization Code 和 PKCE S256 的 public client，提供获准用户，使 access token 包含 API 所需 audience，并精确允许 UI 来源及根路径回调 URI。issuer 的 discovery 地址及其返回的端点必须可由用户浏览器访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全相同，audience 必须与 access token 的 `aud` 匹配。API 验证签名、issuer、audience 和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
+由 IdP 管理员配置支持 Authorization Code + PKCE S256 的 public client 和独立设备授权 public client，提供获准用户；两种流程签发的 access token 都须包含 API 所需 audience。issuer 的 discovery 地址及授权／令牌端点必须由实际浏览器和设备客户端访问；API 容器必须能访问 JWKS URI。issuer 必须与令牌的 `iss` 完全一致。API 验证签名、issuer、audience、令牌用途和有效期，账户数据按已验证的主体隔离；应用不代管用户密码或签发令牌。
 
 以下域名和账户参数须替换成实际环境值。输入的密码不显示；也可由部署环境安全注入这些变量。
 
@@ -87,13 +86,13 @@ read -r -p 'AmazingData port: ' AD_PORT
 export AD_USERNAME AD_PASSWORD AD_HOST AD_PORT
 ```
 
-`OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。生产不叠加 `compose.keycloak.yaml`；独立 IdP 的 TLS、用户、允许来源和网络由其管理员维护。
+`OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。本地使用 Rauthy；外部部署可使用兼容 OIDC IdP。HTTP 明文传输可能导致凭据、授权码、会话或令牌被监听、篡改、窃取并造成账号接管。不得将 HTTP 描述为提供 HTTPS 保护。
 
 ### 选择 HTTP 或 HTTPS
 
 每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
 
-HTTP 只适用于可信网络或由外部设施终止 TLS、且该设施到本机的链路受保护的场景；不可信网络必须使用 HTTPS。默认回环地址不能从其他主机访问。若确需远程访问，显式设置如 `GATEWAY_HOST=0.0.0.0`，并配置主机防火墙、网络访问控制、DNS 和 IdP 允许来源。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口，必须限制对可信生产者的访问并妥善管理凭据，不要暴露到不受信网络。
+HTTP 默认回环绑定不能从其他主机访问；按实际浏览器、设备客户端和后端的访问路径设置绑定地址、身份 issuer、网关及 DNS/hosts。该候选允许实际路径使用 HTTP，不要求配置 TLS、受控 LAN/VPN 或限制公网访问。HTTP 不提供传输机密性或完整性，攻击者可能监听或篡改登录与令牌流量、窃取凭据和令牌并接管账号；HTTPS 能降低这些风险，但不是候选验收条件。RabbitMQ 原有端口默认发布在宿主机 5672，独立于 Web 入口。
 
 HTTP 示例：
 
@@ -114,6 +113,14 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 ```
 
 在客户端打开 `https://实际域名:8443`（若覆盖端口则使用实际端口）；证书须覆盖该域名。回环绑定适合本机浏览器，使用对应本机 DNS/hosts 和证书名称。HTTP 模式则打开实际 `http://主机:端口`。登录时跳转至独立 IdP。切换模式前，使用旧模式的文件组合执行 `down`，再以新模式启动；不要同时启动两个入口。更新 UI 来源时同步更新 IdP 的允许来源和回调 URI。
+
+### Rauthy HTTP 候选验收
+
+仓库的 `scripts/compose_rauthy_browser_e2e.py` 使用隔离 Compose 项目验收临时 Rauthy、API、gateway、本地真实浏览器和设备授权流程。它足以验证本机隔离候选，无需单独部署真实生产主机、独立环境或部署方真实身份 URL。候选隔离表示不接管现行环境，不是网络访问限制。
+
+验收仍须完成真实浏览器 PKCE S256、独立设备授权流程，并使用两者取得的真实 access token 经 gateway 调用 Bearer API；确认签名、issuer、audience、令牌用途及有效期校验有效，并验证两个主体只能访问各自账户数据。浏览器因安全上下文或浏览器限制无法完成登录时，须如实记录为未通过。
+
+同一隔离候选使用独立持久卷完成验收后，执行普通停止／启动（不删除卷），重新用原用户登录并确认客户端／身份配置及重启前的账户测试数据仍在、主体保持一致。不得用 `down -v`；测试清理只能移除本轮创建的资源，不能删除其他项目卷。记录实际 URL、服务版本、流程/API/隔离/重启结果及清理动作；证据不得包含密码、授权码、令牌或密钥。所有验收同时明确记录 HTTP 的明文拦截、篡改、凭据／令牌盗窃及账号接管风险。取消或未完成的范围不是通过证据。
 
 ### 访问与直接调用
 
@@ -209,5 +216,5 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml dow
 - 配置或构建失败：确认模式、必填 OIDC/AmazingData 变量、wheel、镜像与依赖源可用；检查端口冲突。HTTPS 启动失败检查证书链、私钥匹配、挂载路径和读取权限。
 - 登录失败：确认浏览器能访问 issuer/discovery、设备端点，IdP 的 Web origins 精确匹配 UI 的协议、主机和端口，用户已启用并获授权；变更公开构建配置后重建前端。
 - API 返回 401：使用 access token 而非 ID token，检查过期、签名、issuer、audience 和容器到 JWKS 的连接。账户 API 启动失败检查 AmazingData 凭据和网络；信号不可用检查 Redis、calculator、行情模式与外部采集器。`ps` 健康状态及服务日志有助于定位，但不要公开凭据和令牌。
-- `down` 停止并移除容器和网络，不删除命名卷。`postgres-data` 保存账户及历史任务数据库，`signal-data` 保存 Redis AOF，`rabbitmq-data` 保存 broker 数据；本地 Keycloak 的 `keycloak-data` 保存身份数据。`down -v` 会删除这些卷并造成数据丢失，不要用于日常停止或配置更新。上线前制定受限访问的备份和恢复流程；数据卷不是高可用或备份。
+- `down` 停止并移除容器和网络，不删除命名卷。`postgres-data` 保存账户及历史任务数据库，`signal-data` 保存 Redis AOF，`rabbitmq-data` 保存 broker 数据；本地 Rauthy 的 `rauthy-data` 保存身份数据。`down -v` 会删除这些卷并造成数据丢失，不要用于日常停止或配置更新。上线前制定受限访问的备份和恢复流程；数据卷不是高可用或备份。
 - 重新启动可用原文件组合执行 `up -d`；配置或镜像需要变更时使用 `up -d --build`。仅需消费者时不要启动 Web 或 IdP，按[行情消费者指南](single-host-market-data-compose.md)操作。

@@ -77,10 +77,7 @@ GitHub Actions 将 Python/文档检查与前端检查并行运行；前端 job �
 格式检查、Vitest 单元测试和 Playwright E2E 测试。推送新提交会取消同一分支或
 拉取请求中已过期的 CI 运行。CI 使用 `uv sync --locked` 和 Bun 锁文件安装依赖。
 
-Compose E2E 将 RabbitMQ 行情验收和 Keycloak 设备授权验收放在独立 runner 上并行执行，
-不缩减验收覆盖。两者都成功后，汇总检查 `Market data and Keycloak E2E` 才通过；
-任一失败、取消或跳过都不会放行。Compose E2E 显式使用官方 APT/PyPI 源，避免脚本继承
-本地开发的镜像默认值；两个 job 复用 uv 下载缓存。
+当前仓库没有活动工作流运行 Rauthy 浏览器/API 验收。可使用 `scripts/compose_rauthy_browser_e2e.py` 手动执行本地隔离流程；本地验收不代表部署证据。取消或未完成的验收不是通过证据。
 
 ## 自动合并拉取请求
 
@@ -90,8 +87,7 @@ Compose E2E 将 RabbitMQ 行情验收和 Keycloak 设备授权验收放在独立
 
 自动合并仅管理来自本仓库分支的非草稿拉取请求；fork PR 只添加标签，不自动合并。
 工作流只读取 GitHub 元数据，不检出或执行 PR 代码。每次事件都以当前 PR 状态为准，
-并要求同一 HEAD 的 Python/文档检查、前端检查和测试、Market data and Keycloak
-E2E 三项检查全部成功，才请求 GitHub 启用压缩提交自动合并（squash）。
+并要求同一 HEAD 的活动检查全部成功，才请求 GitHub 启用压缩提交自动合并（squash）。
 失败、取消、跳过、缺失或仍在运行的检查都会阻止启用；检查完成后通过
 `workflow_run` 再次评估，不再占用 runner 长时间轮询。
 

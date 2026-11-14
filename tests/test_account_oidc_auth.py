@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -31,20 +33,67 @@ def _token(
     issuer: str = ISSUER,
     audience: str = SHARED_AUDIENCE,
     expires_at: datetime | None = None,
+    roles: list[str] | None = None,
 ) -> str:
     now = datetime.now(UTC)
+    claims: dict[str, Any] = {
+        "sub": subject,
+        "iss": issuer,
+        "aud": audience,
+        "iat": now,
+        "exp": expires_at or now + timedelta(minutes=5),
+    }
+    if roles is not None:
+        claims["roles"] = roles
     return jwt.encode(
-        {
-            "sub": subject,
-            "iss": issuer,
-            "aud": audience,
-            "iat": now,
-            "exp": expires_at or now + timedelta(minutes=5),
-        },
+        claims,
         private_key,
         algorithm="RS256",
         headers={"kid": "test-key"},
     )
+
+
+def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
+    postgres_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    alice = {"Authorization": f"Bearer {_token(private_key, subject='alice')}"}
+    admin = {
+        "Authorization": (
+            f"Bearer {_token(private_key, subject='idp-admin', roles=['admin'])}"
+        )
+    }
+    snapshot = {
+        "as_of": "2026-11-04T09:30:00+08:00",
+        "holdings": {"510300": 100},
+        "protected_floor": {"510300": 20},
+        "sellable": {"510300": 80},
+        "cost_basis": {"510300": "3.8500"},
+        "available_cash": "125.50",
+    }
+    with _client(postgres_url, monkeypatch, public_key) as client:
+        created = client.put(
+            "/v1/account-snapshot",
+            json=snapshot,
+            headers={**alice, "If-None-Match": "*"},
+        )
+        assert created.status_code == 201
+
+        # The IdP admin subject is distinct and cannot use Alice's ETag to
+        # update her snapshot; identity-management roles do not change ownership.
+        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
+        admin_write = client.put(
+            "/v1/account-snapshot",
+            json={**snapshot, "holdings": {"510300": 999}},
+            headers={**admin, "If-Match": created.headers["ETag"]},
+        )
+        assert admin_write.status_code == 412
+        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
+        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
+            "510300": 100
+        }
 
 
 @pytest.fixture
@@ -81,6 +130,24 @@ def test_account_api_accepts_signed_shared_audience_token(
     assert response.status_code == 404
 
 
+def test_oidc_issuer_preserves_trailing_slash(
+    monkeypatch: pytest.MonkeyPatch,
+    signing_keys: tuple[Any, Any],
+) -> None:
+    private_key, public_key = signing_keys
+    monkeypatch.setattr(
+        account_api,
+        "PyJWKClient",
+        lambda jwks_uri: StaticJwks(jwks_uri, public_key),
+    )
+    issuer = f"{ISSUER}/auth/v1/"
+    authenticator = OIDCAuthenticator(issuer, SHARED_AUDIENCE, "https://jwks.test")
+
+    assert authenticator(_token(private_key, issuer=issuer)) == "alice"
+    with pytest.raises(jwt.InvalidTokenError):
+        authenticator(_token(private_key, issuer=issuer.rstrip("/")))
+
+
 def test_account_snapshot_ownership_uses_verified_subject(
     postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -107,6 +174,23 @@ def test_account_snapshot_ownership_uses_verified_subject(
         assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
         alice_snapshot = client.get("/v1/account-snapshot", headers=alice).json()
         assert alice_snapshot["holdings"] == {"510300": 100}
+        bob_snapshot = {
+            **snapshot,
+            "holdings": {"510300": 900},
+            "available_cash": "999.00",
+        }
+        bob_created = client.put(
+            "/v1/account-snapshot",
+            json=bob_snapshot,
+            headers={**bob, "If-None-Match": "*"},
+        )
+        assert bob_created.status_code == 201
+        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
+            "510300": 100
+        }
+        assert client.get("/v1/account-snapshot", headers=bob).json()["holdings"] == {
+            "510300": 900
+        }
 
 
 @pytest.mark.parametrize(
@@ -213,3 +297,60 @@ def test_account_api_documentation_requires_valid_bearer_credentials(
         assert authenticated.status_code == 200
         if path == "/openapi.json":
             assert authenticated.json()["info"]["title"] == "A500 account snapshot API"
+
+
+def test_account_api_starts_without_optional_market_data_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", SHARED_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
+    for name in ("AD_USERNAME", "AD_PASSWORD", "AD_HOST", "AD_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        account_api,
+        "create_app",
+        lambda *, market_data: type(
+            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+        )(),
+    )
+    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    assert module.app.state.market_data is None
+
+
+def test_account_api_preserves_dotenv_market_data_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".env").write_text(
+        "AD_USERNAME=dotenv-user\nAD_PASSWORD=dotenv-secret\n"
+        "AD_HOST=market.example\nAD_PORT=9876\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("OIDC_AUDIENCE", SHARED_AUDIENCE)
+    monkeypatch.setenv("OIDC_JWKS_URI", "https://jwks.test")
+    for name in ("AD_USERNAME", "AD_PASSWORD", "AD_HOST", "AD_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    import a500_t_trader.cli.runtime as runtime
+
+    calls: list[tuple[str, str, str, int]] = []
+
+    class Provider:
+        def __init__(self, username: str, password: str, host: str, port: int) -> None:
+            calls.append((username, password, host, port))
+
+    monkeypatch.setattr(runtime, "AmazingDataProvider", Provider)
+    monkeypatch.setattr(
+        account_api,
+        "create_app",
+        lambda *, market_data: type(
+            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+        )(),
+    )
+    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    assert module.app.state.market_data is not None
+    assert calls == [("dotenv-user", "dotenv-secret", "market.example", 9876)]
+    assert "dotenv-secret" not in repr(module.app.state.market_data)

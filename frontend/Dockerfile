@@ -5,7 +5,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY next.config.ts tsconfig.json ./
 COPY src/ ./src/
-ARG NEXT_PUBLIC_OIDC_ISSUER=http://localhost:8081/realms/a500
+ARG NEXT_PUBLIC_OIDC_ISSUER=http://localhost:8081/auth/v1/
 ARG NEXT_PUBLIC_OIDC_CLIENT_ID=a500-browser-client
 ENV NEXT_PUBLIC_OIDC_ISSUER=$NEXT_PUBLIC_OIDC_ISSUER \
     NEXT_PUBLIC_OIDC_CLIENT_ID=$NEXT_PUBLIC_OIDC_CLIENT_ID \

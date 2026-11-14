@@ -1,0 +1,45 @@
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      - "127.0.0.1:${MAILPIT_HOST_PORT:-8025}:8025"
+    expose:
+      - "1025"
+
+  rauthy:
+    depends_on:
+      - mailpit
+    image: ghcr.io/sebadob/rauthy:0.37.2
+    user: "0:0"
+    environment:
+      LOCAL_TEST: ${RAUTHY_LOCAL_TEST:-true}
+      LISTEN_SCHEME: ${RAUTHY_LISTEN_SCHEME:-http}
+      PUB_URL: ${RAUTHY_PUB_URL:?RAUTHY_PUB_URL is required}
+      HQL_DATA_DIR: /app/data
+      RP_ID: ${RAUTHY_RP_ID:-localhost}
+      RP_ORIGIN: ${RAUTHY_RP_ORIGIN:?RAUTHY_RP_ORIGIN is required}
+      SMTP_URL: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS_MODE: danger-insecure
+      SMTP_FROM: noreply@localhost
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      OPEN_USER_REG: "false"
+      HQL_NODE_ID: ${RAUTHY_NODE_ID:-}
+      HQL_NODES: ${RAUTHY_NODES:-}
+      HQL_SECRET_RAFT: ${RAUTHY_SECRET_RAFT:-}
+      HQL_SECRET_API: ${RAUTHY_SECRET_API:-}
+      ENC_KEYS: ${RAUTHY_ENC_KEYS:-}
+      BOOTSTRAP_ADMIN_PASSWORD_PLAIN: ${RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN:?RAUTHY_BOOTSTRAP_ADMIN_PASSWORD_PLAIN is required}
+      ENC_KEY_ACTIVE: ${RAUTHY_ENC_KEY_ACTIVE:-}
+      BOOTSTRAP_DIR: /app/bootstrap
+    ports:
+      - "${RAUTHY_HOST:-127.0.0.1}:${RAUTHY_HOST_PORT:?RAUTHY_HOST_PORT is required}:8080"
+    volumes:
+      - ${RAUTHY_BOOTSTRAP_HOST_DIR:?RAUTHY_BOOTSTRAP_HOST_DIR is required}:/app/bootstrap:ro
+      - rauthy-data:/app/data
+    expose:
+      - "8080"
+
+volumes:
+  rauthy-data:
