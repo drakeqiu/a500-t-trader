@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +59,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--tls-cert",
-        help="PEM certificate covering --hostname and localhost, trusted by client browsers",
+        help=(
+            "PEM certificate covering --hostname and localhost, "
+            "trusted by client browsers"
+        ),
     )
     parser.add_argument("--tls-key", help="matching PEM private key")
     parser.add_argument("--timeout", type=int, default=300)
@@ -140,6 +143,7 @@ def main() -> int:
                 env=env,
                 check=True,
             )
+            deadline = time.monotonic() + args.timeout
             discovery_url = (
                 "https://localhost:8444/auth/v1/.well-known/openid-configuration"
                 if tls_enabled
@@ -150,7 +154,9 @@ def main() -> int:
                     with urlopen(discovery_url, timeout=2) as response:
                         if json.load(response).get("issuer") == env["OIDC_ISSUER"]:
                             break
-                except (OSError, URLError, ValueError):
+                except OSError:
+                    pass
+                except ValueError:
                     pass
                 if time.monotonic() >= deadline:
                     raise ValueError("Rauthy readiness timed out; inspect logs")

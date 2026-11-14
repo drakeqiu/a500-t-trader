@@ -435,7 +435,7 @@ def test_readiness_uses_configured_issuer_and_gateway(
 
 
 def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     lan_script = SCRIPT.with_name("start-lan-replay.py")
     lan_spec = importlib.util.spec_from_file_location("start_lan_replay", lan_script)
@@ -524,3 +524,25 @@ def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
     ]
     assert commands
     assert commands[1][commands[1].index("--project-name") + 1] == "a500-lan"
+
+    def unavailable_url(url: str, timeout: int) -> Response:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(lan, "urlopen", unavailable_url)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "start-lan-replay.py",
+            "192.168.1.10",
+            "--hostname",
+            "a500.test",
+            "--tls-cert",
+            str(cert_file),
+            "--tls-key",
+            str(key_file),
+            "--timeout",
+            "0",
+        ],
+    )
+    assert lan.main() == 1
+    assert "Rauthy readiness timed out" in capsys.readouterr().err
