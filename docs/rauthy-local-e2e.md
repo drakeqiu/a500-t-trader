@@ -65,13 +65,13 @@ The runner performs the PKCE browser-login acceptance, then exercises a separate
 
 **结论：GO，允许开始 #232 迁移实施；这不是切换已完成、生产部署已验收或旧数据可清理的授权。** 当前有效的剩余核心门槛均有通过证据；失败、缺证、未执行：无。该结论供 #231 集成负责人记录处理，本文件变更不关闭 issue。
 
-| 有效门槛 | 状态与证据 |
-|---|---|
-| 浏览器 PKCE 与真实业务 API | **通过**：[#223](https://github.com/drakeqiu/a500-t-trader/issues/223) 记录真实浏览器登录和业务 API 访问；[#228 最终运行](https://github.com/drakeqiu/a500-t-trader/issues/228#issuecomment-6852074539) 重新验证 HTTP 候选下真实浏览器 token 调用 API。 |
-| 独立设备授权及 pending/slow_down/拒绝/过期 | **通过**：[#224](https://github.com/drakeqiu/a500-t-trader/issues/224) 记录真实设备协议边界及 API；#228 又验证 HTTP 候选设备 token API 路径。 |
-| JWT 拒绝边界、token 用途、主体与管理员隔离 | **通过**：[#225](https://github.com/drakeqiu/a500-t-trader/issues/225) 记录签名/issuer/audience/ID token 拒绝及跨主体隔离；#228 验证 issuer/JWKS 路径、token subject、跨用户及管理主体隔离。 |
-| 用户准入、邮箱变更、密码、可选 localhost Passkey | **通过**：[#226](https://github.com/drakeqiu/a500-t-trader/issues/226) 保留已完成证据；Passkey 使用 localhost 虚拟 WebAuthn，不证明远程 HTTP WebAuthn 可用。Mailpit 恢复仅为历史能力证据，不是当前门槛。 |
-| 停用、续期拒绝及到期边界 | **通过**：[#227](https://github.com/drakeqiu/a500-t-trader/issues/227) 记录停用后新登录/refresh 被拒、旧令牌到期前仍能访问且到期后拒绝。API 本地 JWT 校验意味着最多 5 分钟残余窗口，不提供即时撤权。 |
+| 有效门槛                                                   | 状态与证据                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 浏览器 PKCE 与真实业务 API                                 | **通过**：[#223](https://github.com/drakeqiu/a500-t-trader/issues/223) 记录真实浏览器登录和业务 API 访问；[#228 最终运行](https://github.com/drakeqiu/a500-t-trader/issues/228#issuecomment-6852074539) 重新验证 HTTP 候选下真实浏览器 token 调用 API。                                            |
+| 独立设备授权及 pending/slow_down/拒绝/过期                 | **通过**：[#224](https://github.com/drakeqiu/a500-t-trader/issues/224) 记录真实设备协议边界及 API；#228 又验证 HTTP 候选设备 token API 路径。                                                                                                                                                      |
+| JWT 拒绝边界、token 用途、主体与管理员隔离                 | **通过**：[#225](https://github.com/drakeqiu/a500-t-trader/issues/225) 记录签名/issuer/audience/ID token 拒绝及跨主体隔离；#228 验证 issuer/JWKS 路径、token subject、跨用户及管理主体隔离。                                                                                                       |
+| 用户准入、邮箱变更、密码、可选 localhost Passkey           | **通过**：[#226](https://github.com/drakeqiu/a500-t-trader/issues/226) 保留已完成证据；Passkey 使用 localhost 虚拟 WebAuthn，不证明远程 HTTP WebAuthn 可用。Mailpit 恢复仅为历史能力证据，不是当前门槛。                                                                                           |
+| 停用、续期拒绝及到期边界                                   | **通过**：[#227](https://github.com/drakeqiu/a500-t-trader/issues/227) 记录停用后新登录/refresh 被拒、旧令牌到期前仍能访问且到期后拒绝。API 本地 JWT 校验意味着最多 5 分钟残余窗口，不提供即时撤权。                                                                                               |
 | HTTP 候选真实浏览器/设备 API、issuer/JWKS 与普通重启持久化 | **通过**：[#228 最终运行](https://github.com/drakeqiu/a500-t-trader/issues/228#issuecomment-6852074539) 报告本机隔离 Rauthy/Compose HTTP 候选完整 runner exit 0、25 个聚焦 pytest 通过，两个真实客户端均访问 API，身份和配置在同一独立持久卷正常重启后仍可用；候选资源已清理，未触及既有业务数据。 |
 
 [#222](https://github.com/drakeqiu/a500-t-trader/issues/222) 是 Keycloak 本地验收历史基线，不作为 Rauthy 通过证据；Rauthy 能力以 #223–#228 的具体运行记录为准。

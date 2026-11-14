@@ -88,7 +88,6 @@ export AD_USERNAME AD_PASSWORD AD_HOST AD_PORT
 
 `OIDC_CLIENT_ID` 默认 `a500-browser-client`，并非客户端密钥。issuer 和 client ID 在前端镜像**构建时**固化；改变任一值后必须重新构建并重建前端容器。公开配置不能放入秘密。本地使用 Rauthy；外部部署可使用兼容 OIDC IdP。HTTP 明文传输可能导致凭据、授权码、会话或令牌被监听、篡改、窃取并造成账号接管。不得将 HTTP 描述为提供 HTTPS 保护。
 
-
 ### 选择 HTTP 或 HTTPS
 
 每次只选择一个模式文件：`compose.web.yaml` 仅定义公共服务，本身不发布入口；额外叠加 `compose.web-http.yaml` **或** `compose.web-https.yaml`。HTTP 默认 `127.0.0.1:8080`，HTTPS 默认 `127.0.0.1:8443`。两种模式均可用 `GATEWAY_HOST` 和 `GATEWAY_HOST_PORT` 覆盖地址、端口；HTTPS 不额外开放 HTTP。例子中的 Compose 命令后续均须使用同一组文件和相同环境变量。
@@ -122,7 +121,6 @@ docker compose -f compose.yaml -f compose.web.yaml -f compose.web-https.yaml ps
 验收仍须完成真实浏览器 PKCE S256、独立设备授权流程，并使用两者取得的真实 access token 经 gateway 调用 Bearer API；确认签名、issuer、audience、令牌用途及有效期校验有效，并验证两个主体只能访问各自账户数据。浏览器因安全上下文或浏览器限制无法完成登录时，须如实记录为未通过。
 
 同一隔离候选使用独立持久卷完成验收后，执行普通停止／启动（不删除卷），重新用原用户登录并确认客户端／身份配置及重启前的账户测试数据仍在、主体保持一致。不得用 `down -v`；测试清理只能移除本轮创建的资源，不能删除其他项目卷。记录实际 URL、服务版本、流程/API/隔离/重启结果及清理动作；证据不得包含密码、授权码、令牌或密钥。所有验收同时明确记录 HTTP 的明文拦截、篡改、凭据／令牌盗窃及账号接管风险。取消或未完成的范围不是通过证据。
-
 
 ### 访问与直接调用
 
