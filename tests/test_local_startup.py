@@ -287,7 +287,7 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
         def __init__(self, payload: dict[str, object]) -> None:
             self.payload = payload
 
-        def __enter__(self) -> "Response":
+        def __enter__(self) -> Response:
             return self
 
         def __exit__(self, *args: object) -> None:

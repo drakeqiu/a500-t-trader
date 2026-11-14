@@ -109,7 +109,8 @@ def main() -> int:
             LOCAL["set_browser_origin"](env)
             print(f"Ready: {origin} (Rauthy: {issuer})")
             print(
-                "HTTP provides no confidentiality or integrity; use only with accepted risk."
+                "HTTP provides no confidentiality or integrity; use only with "
+                "accepted risk."
             )
         elif args.action == "replay":
             subprocess.run(

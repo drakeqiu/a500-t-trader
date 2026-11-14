@@ -84,7 +84,9 @@ def local_environment() -> dict[str, str]:
     environment.setdefault("OIDC_JWKS_URI", "http://rauthy:8080/auth/v1/oidc/certs")
     environment.setdefault("OIDC_CLIENT_ID", "a500-browser-client")
     environment.setdefault("MAILPIT_HOST_PORT", "8025")
-    environment.setdefault("RAUTHY_PUB_URL", f"localhost:{environment['RAUTHY_HOST_PORT']}")
+    environment.setdefault(
+        "RAUTHY_PUB_URL", f"localhost:{environment['RAUTHY_HOST_PORT']}"
+    )
     environment.setdefault("RAUTHY_LISTEN_SCHEME", "http")
     environment.setdefault("RAUTHY_LOCAL_TEST", "false")
     environment.setdefault("RAUTHY_BOOTSTRAP_HOST_DIR", str(ROOT / ".rauthy-bootstrap"))
@@ -512,7 +514,8 @@ def main() -> int:
             set_browser_origin(environment)
             print(f"Ready: http://localhost:{gateway_port} (Rauthy: {issuer})")
             print(
-                "No user is created by default. Use the Rauthy admin UI to provision one."
+                "No user is created by default. Use the Rauthy admin UI to "
+                "provision one."
             )
             print("Market mode: " + environment["MARKET_DATA_MODE"])
         elif arguments.action == "stop-frontend":

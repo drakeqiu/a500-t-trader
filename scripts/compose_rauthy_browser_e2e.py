@@ -1293,7 +1293,8 @@ def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
     expected_volume = f"{project}_rauthy-data"
     if volume_name != expected_volume:
         raise RuntimeError(
-            f"Rauthy data directory uses {volume_name!r}, expected named volume {expected_volume!r}"
+            f"Rauthy data directory uses {volume_name!r}, expected named volume "
+            f"{expected_volume!r}"
         )
     return volume_name
 
@@ -1318,7 +1319,13 @@ def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None
     for service in services:
         container = f"{project}_{service}_1"
         state = subprocess.run(
-            ["podman", "inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", container],
+            [
+                "podman",
+                "inspect",
+                "--format",
+                "{{.State.Status}} {{.State.ExitCode}}",
+                container,
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -1342,7 +1349,10 @@ def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None
                     f"{Path(frame.group(1)).name}:{frame.group(2)} in {frame.group(3)}"
                 )
                 continue
-            error = re.match(r"^([A-Za-z_][A-Za-z_0-9]*(?:Error|Exception))(?::.*)?$", line)
+            error = re.match(
+                r"^([A-Za-z_][A-Za-z_0-9]*(?:Error|Exception))(?::.*)?$",
+                line,
+            )
             if error:
                 print(f"Container {service} error type: {error.group(1)}")
             summary = _safe_log_summary(service, line)
@@ -1453,7 +1463,7 @@ def main() -> None:
             check=True,
             timeout=900,
         )
-        api_image = f"localhost/{project}_account-api:latest"
+        api_image = f"docker.io/library/{project}-account-api:latest"
         for service in ("signal-api", "jobs-api"):
             subprocess.run(
                 [
@@ -1461,7 +1471,7 @@ def main() -> None:
                     "image",
                     "tag",
                     api_image,
-                    f"localhost/{project}_{service}:latest",
+                    f"docker.io/library/{project}-{service}:latest",
                 ],
                 cwd=ROOT,
                 env=env,
@@ -1538,7 +1548,13 @@ def main() -> None:
             print("Project container status at gateway readiness failure:")
             print(diagnostics.stdout, end="")
             print(diagnostics.stderr, end="")
-            for service in ("rauthy", "gateway", "frontend", "signal-api", "account-api"):
+            for service in (
+                "rauthy",
+                "gateway",
+                "frontend",
+                "signal-api",
+                "account-api",
+            ):
                 logs = subprocess.run(
                     ["podman", "logs", "--tail", "100", f"{project}_{service}_1"],
                     check=False,
@@ -1613,27 +1629,37 @@ def main() -> None:
             or len({browser_subject, device_browser_subject, admin_subject}) != 3
             or device_browser_subject != device_subject
         ):
-            raise AssertionError("Rauthy clients did not preserve distinct user subjects")
+            raise AssertionError(
+                "Rauthy clients did not preserve distinct user subjects"
+            )
         browser_snapshot_status, _, browser_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", browser_token
         )
         device_snapshot_status, _, device_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", device_token
         )
+        browser_cash = (
+            browser_snapshot.get("available_cash")
+            if isinstance(browser_snapshot, dict)
+            else None
+        )
+        device_cash = (
+            device_snapshot.get("available_cash")
+            if isinstance(device_snapshot, dict)
+            else None
+        )
         if (
             browser_snapshot_status != 200
             or not isinstance(browser_snapshot, dict)
-            or browser_snapshot.get("available_cash") != "125.50"
+            or browser_cash != "125.50"
             or device_snapshot_status != 200
             or not isinstance(device_snapshot, dict)
-            or device_snapshot.get("available_cash") != "126.50"
+            or device_cash != "126.50"
         ):
             raise AssertionError(
                 "Browser and device users did not retain isolated snapshot data: "
-                f"browser HTTP {browser_snapshot_status}, cash "
-                f"{browser_snapshot.get('available_cash') if isinstance(browser_snapshot, dict) else None!r}; "
-                f"device HTTP {device_snapshot_status}, cash "
-                f"{device_snapshot.get('available_cash') if isinstance(device_snapshot, dict) else None!r}"
+                f"browser HTTP {browser_snapshot_status}, cash {browser_cash!r}; "
+                f"device HTTP {device_snapshot_status}, cash {device_cash!r}"
             )
         original_subject = _decode(browser_token.split(".")[1]).get("sub")
         changed_email = "browser-renamed@example.test"
@@ -1683,7 +1709,9 @@ def main() -> None:
         )
         restarted_volume = _rauthy_data_volume(env, project)
         if restarted_volume != original_volume:
-            raise AssertionError("Ordinary Rauthy restart did not reuse its original named data volume")
+            raise AssertionError(
+                "Ordinary Rauthy restart did not reuse its original named data volume"
+            )
         discovery = _wait_discovery(issuer)
         persisted_token, _ = _browser_flow(
             gateway,
@@ -1714,26 +1742,39 @@ def main() -> None:
         browser_snapshot_status, _, browser_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", persisted_token
         )
+        persisted_device_subject = _decode(
+            persisted_device_token.split(".")[1]
+        ).get("sub")
+        device_cash = (
+            device_snapshot.get("available_cash")
+            if isinstance(device_snapshot, dict)
+            else None
+        )
+        browser_cash = (
+            browser_snapshot.get("available_cash")
+            if isinstance(browser_snapshot, dict)
+            else None
+        )
         if (
-            _decode(persisted_device_token.split(".")[1]).get("sub")
-            != device_subject
+            persisted_device_subject != device_subject
             or device_subject == original_subject
             or device_snapshot_status != 200
             or not isinstance(device_snapshot, dict)
-            or device_snapshot.get("available_cash") != "126.50"
+            or device_cash != "126.50"
             or browser_snapshot_status != 200
             or not isinstance(browser_snapshot, dict)
-            or browser_snapshot.get("available_cash") != "125.50"
+            or browser_cash != "125.50"
         ):
             raise AssertionError(
                 "Independent device client/user configuration or subject isolation "
                 "did not survive restart: "
-                f"device_subject_matches={_decode(persisted_device_token.split('.')[1]).get('sub') == device_subject}, "
+                f"device_subject_matches="
+                f"{persisted_device_subject == device_subject}, "
                 f"subjects_are_distinct={device_subject != original_subject}, "
                 f"device_snapshot_http={device_snapshot_status}, "
-                f"device_cash={device_snapshot.get('available_cash') if isinstance(device_snapshot, dict) else None!r}, "
+                f"device_cash={device_cash!r}, "
                 f"browser_snapshot_http={browser_snapshot_status}, "
-                f"browser_cash={browser_snapshot.get('available_cash') if isinstance(browser_snapshot, dict) else None!r}"
+                f"browser_cash={browser_cash!r}"
             )
         _assert_token_rejected(gateway, persisted_device_id_token)
         if (
@@ -1842,7 +1883,8 @@ def main() -> None:
         admin_token = fresh_admin_token
         if _public_api_request(gateway, preview_path, admin_token)[0] != 404:
             raise AssertionError(
-                "Rauthy identity administrator could read the browser user's trade-import preview"
+                "Rauthy identity administrator could read the browser user's "
+                "trade-import preview"
             )
         if (
             _public_api_request(
@@ -1851,7 +1893,8 @@ def main() -> None:
             != 404
         ):
             raise AssertionError(
-                "Rauthy identity administrator could confirm the browser user's trade-import preview"
+                "Rauthy identity administrator could confirm the browser user's "
+                "trade-import preview"
             )
         browser_token, browser_refresh_token = _browser_flow(
             gateway,
@@ -1862,7 +1905,9 @@ def main() -> None:
             create_snapshot=False,
         )
         if _decode(browser_token.split(".")[1]).get("sub") != original_subject:
-            raise AssertionError("Fresh browser login changed the authenticated subject")
+            raise AssertionError(
+                "Fresh browser login changed the authenticated subject"
+            )
         if not browser_refresh_token:
             raise AssertionError(
                 "Rauthy did not issue the recovered user's browser refresh credential"

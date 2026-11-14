@@ -588,7 +588,8 @@ def test_container_diagnostics_hide_log_messages(
             subprocess.CompletedProcess(
                 [],
                 0,
-                'Traceback (most recent call last):\n  File "/app/private.py", line 9, in run\n'
+                'Traceback (most recent call last):\n'
+                '  File "/app/private.py", line 9, in run\n'
                 "RuntimeError: password=secret-password\n"
                 "connect() failed while connecting to upstream secret-password\n",
                 "",
