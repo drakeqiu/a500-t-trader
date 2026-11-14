@@ -31,8 +31,6 @@ from scripts.compose_rauthy_browser_e2e import (
 def test_rauthy_data_volume_finds_compose_container_by_labels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from scripts import compose_rauthy_browser_e2e as runner
-
     commands: list[list[str]] = []
 
     def fake_run(
@@ -48,7 +46,7 @@ def test_rauthy_data_volume_finds_compose_container_by_labels(
         )
         return subprocess.CompletedProcess(command, 0, stdout, "")
 
-    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert _rauthy_data_volume({}, "project") == "project_rauthy-data"
     assert "label=com.docker.compose.project=project" in commands[0]
@@ -501,7 +499,7 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
     monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "_device_public_api", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
-    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
@@ -611,8 +609,6 @@ def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -
 def test_container_diagnostics_hide_log_messages(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from scripts import compose_rauthy_browser_e2e as runner
-
     calls = iter(
         (
             subprocess.CompletedProcess([], 0, "exited 1\n", ""),
@@ -627,7 +623,7 @@ def test_container_diagnostics_hide_log_messages(
             ),
         )
     )
-    monkeypatch.setattr(runner.subprocess, "run", lambda *_args, **_kwargs: next(calls))
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: next(calls))
 
     _safe_container_diagnostics("project", ("account-api",))
 
@@ -649,10 +645,10 @@ def test_account_api_readiness_waits_until_gateway_routes_to_api(
 
     def fake_urlopen(url: str, timeout: int) -> Any:
         requested_urls.append(url)
-        raise HTTPError(url, next(statuses), "not ready", {}, None)
+        raise HTTPError(url, next(statuses), "not ready", Message(), None)
 
     monkeypatch.setattr(runner, "urlopen", fake_urlopen)
-    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     runner._wait_for_account_api("http://gateway")
 

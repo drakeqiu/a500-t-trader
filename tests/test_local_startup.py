@@ -302,7 +302,8 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
         def open(self, request: Request, timeout: int) -> Response:
             if request.get_method() == "PUT":
                 updates.append(request.full_url)
-                assert json.loads(request.data or b"{}")["default_aud"] == ["a500-api"]
+                assert isinstance(request.data, bytes)
+                assert json.loads(request.data)["default_aud"] == ["a500-api"]
                 return Response({})
             if request.data is None:
                 return Response({"id": "client", "default_aud": ["a500-api"]})
@@ -353,9 +354,10 @@ def test_rauthy_browser_origin_is_updated_and_verified(
     class Opener:
         def open(self, request: Request, timeout: int) -> Response:
             if request.get_method() == "PUT":
-                configured.update(json.loads(request.data or b"{}"))
+                assert isinstance(request.data, bytes)
+                configured.update(json.loads(request.data))
                 return Response({})
-            return Response(configured.copy())
+            return Response(dict(configured))
 
     monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
 
@@ -446,7 +448,7 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         def read(self) -> bytes:
             return b'{"issuer":"http://192.168.1.10:8081/auth/v1/"}'
 
-    lan.LOCAL = {
+    lan.__dict__["LOCAL"] = {
         "local_environment": lambda: environment,
         "check_configuration": lambda env: None,
         "prepare_rauthy_bootstrap": lambda env: None,

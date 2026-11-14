@@ -417,7 +417,10 @@ def _device_grant(
     if not isinstance(fresh_code, str):
         raise AssertionError("Malformed post-expiry device authorization response")
     decision(fresh, True)
-    time.sleep(float(fresh.get("interval", 5)))
+    fresh_interval = fresh.get("interval", 5)
+    if not isinstance(fresh_interval, (int, float)):
+        raise AssertionError("Malformed post-expiry device authorization interval")
+    time.sleep(float(fresh_interval))
     status, response = poll(fresh_code)
     if status != 200 or not isinstance(response.get("access_token"), str):
         raise AssertionError(
@@ -1293,7 +1296,7 @@ def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
     )
     volume_name = data_mount.get("Name") if isinstance(data_mount, dict) else None
     expected_volume = f"{project}_rauthy-data"
-    if volume_name != expected_volume:
+    if not isinstance(volume_name, str) or volume_name != expected_volume:
         raise RuntimeError(
             f"Rauthy data directory uses {volume_name!r}, expected named volume "
             f"{expected_volume!r}"
