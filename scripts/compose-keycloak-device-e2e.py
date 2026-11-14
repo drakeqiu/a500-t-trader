@@ -166,7 +166,10 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
                 parsed = urlsplit(request.url)
                 if parsed.path.endswith("/protocol/openid-connect/auth"):
                     authorization_requests.append(parse_qs(parsed.query))
-                elif parsed.path.endswith("/protocol/openid-connect/token") and request.method == "POST":
+                elif (
+                    parsed.path.endswith("/protocol/openid-connect/token")
+                    and request.method == "POST"
+                ):
                     token_forms.append(parse_qs(request.post_data or ""))
 
             def capture_token(response: Any) -> None:
@@ -216,7 +219,7 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
 
 
 def _check_browser_snapshot_api(gateway_url: str, token: str) -> None:
-    """Prove the browser-issued access token can read and write a snapshot via gateway."""
+    """Prove browser-issued access can read and write a snapshot via the gateway."""
     url = f"{gateway_url.rstrip('/')}/api/v1/account-snapshot"
     request = Request(url, headers={"Authorization": f"Bearer {token}"})
     with urlopen(request, timeout=10, context=TLS_CONTEXT) as response:

@@ -43,8 +43,14 @@ def _stats(raw: str) -> list[dict[str, float]]:
         memory = str(row.get("MemUsage", row.get("MemUsageBytes", "")))
         if "/" in memory:
             memory = memory.split("/", 1)[0].strip()
-        cpu = str(row.get("CPU", row.get("CPUPercentage", ""))).strip().removesuffix("%")
-        result.append({"memory_bytes": float(_bytes(memory)), "cpu_percent": float(cpu)})
+        cpu = (
+            str(row.get("CPU", row.get("CPUPercentage", "")))
+            .strip()
+            .removesuffix("%")
+        )
+        result.append(
+            {"memory_bytes": float(_bytes(memory)), "cpu_percent": float(cpu)}
+        )
     if not result:
         raise ValueError("container stats returned no rows")
     return result
@@ -58,8 +64,11 @@ def _compose(args: argparse.Namespace) -> list[str]:
 
 
 def _run(command: list[str], *, timeout: int = 600) -> subprocess.CompletedProcess[str]:
-    # Compose output may contain environment values; never forward it to the report/terminal.
-    return subprocess.run(command, text=True, capture_output=True, check=True, timeout=timeout)
+    # Compose output may contain environment values; never forward it to the report
+    # or terminal.
+    return subprocess.run(
+        command, text=True, capture_output=True, check=True, timeout=timeout
+    )
 
 
 def _ready(url: str, timeout: int = 180) -> None:
@@ -85,7 +94,9 @@ def _container_ids(compose: list[str], services: list[str]) -> list[str]:
 
 def _sample(compose: list[str], services: list[str], elapsed: float) -> dict[str, Any]:
     ids = _container_ids(compose, services)
-    result = _run(["podman", "stats", "--no-stream", "--format", "json", *ids], timeout=30)
+    result = _run(
+        ["podman", "stats", "--no-stream", "--format", "json", *ids], timeout=30
+    )
     rows = _stats(result.stdout)
     return {
         "elapsed_seconds": round(elapsed, 3),
@@ -95,7 +106,9 @@ def _sample(compose: list[str], services: list[str], elapsed: float) -> dict[str
     }
 
 
-def _collect(compose: list[str], services: list[str], seconds: int) -> list[dict[str, Any]]:
+def _collect(
+    compose: list[str], services: list[str], seconds: int
+) -> list[dict[str, Any]]:
     samples = []
     started = time.monotonic()
     while time.monotonic() - started < seconds:
@@ -105,7 +118,9 @@ def _collect(compose: list[str], services: list[str], seconds: int) -> list[dict
     return samples
 
 
-def _collect_until_stopped(compose: list[str], services: list[str], stop: Any, output: list[dict[str, Any]]) -> None:
+def _collect_until_stopped(
+    compose: list[str], services: list[str], stop: Any, output: list[dict[str, Any]]
+) -> None:
     started = time.monotonic()
     while not stop.is_set():
         elapsed = time.monotonic() - started
@@ -115,7 +130,13 @@ def _collect_until_stopped(compose: list[str], services: list[str], stop: Any, o
 
 def _deployment_mode(compose: list[str], files: list[str], service: str) -> str:
     result = _run(
-        [*compose, *sum((["-f", path] for path in files), []), "config", "--format", "json"],
+        [
+            *compose,
+            *sum((["-f", path] for path in files), []),
+            "config",
+            "--format",
+            "json",
+        ],
         timeout=30,
     )
     config = json.loads(result.stdout)
@@ -131,18 +152,28 @@ def _deployment_mode(compose: list[str], files: list[str], service: str) -> str:
     return image
 
 
-def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, number: int) -> dict[str, Any]:
+def _run_round(
+    compose: list[str], files: list[str], args: argparse.Namespace, number: int
+) -> dict[str, Any]:
     definition = [*compose, *sum((["-f", path] for path in files), [])]
     try:
         started = time.monotonic()
         _run([*definition, "up", "-d", "--no-build"], timeout=600)
         _ready(args.readiness_url)
         startup = time.monotonic() - started
-        print(f"Round {number}: ready in {startup:.2f}s. Complete browser and device-flow warmup; press Enter when settled.", flush=True)
+        print(
+            f"Round {number}: ready in {startup:.2f}s. Complete browser and "
+            "device-flow warmup; press Enter when settled.",
+            flush=True,
+        )
         input()
         print(f"Round {number}: collecting 600 seconds of idle samples.", flush=True)
         idle = _collect(compose, args.sample_service, 600)
-        print("Press Enter to start the authorization-load sampler; immediately run browser and independent-device logins, with at most two concurrent.", flush=True)
+        print(
+            "Press Enter to start the authorization-load sampler; immediately run "
+            "browser and independent-device logins, with at most two concurrent.",
+            flush=True,
+        )
         input()
         from threading import Event, Thread
         stop = Event()
@@ -158,16 +189,29 @@ def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, n
 
         sampler = Thread(target=sample_load, daemon=True)
         sampler.start()
-        print("Authorization load is being sampled. Run both logins, then press Enter.", flush=True)
+        print(
+            "Authorization load is being sampled. Run both logins, then press Enter.",
+            flush=True,
+        )
         input()
         stop.set()
         sampler.join()
         if sampler_errors:
-            raise RuntimeError("authorization-load sampler failed") from sampler_errors[0]
-        print("Enter observed browser and device login durations in seconds, comma-separated (no credentials/tokens).", flush=True)
-        login_times = [float(value.strip()) for value in input().split(",") if value.strip()]
+            raise RuntimeError("authorization-load sampler failed") from sampler_errors[
+                0
+            ]
+        print(
+            "Enter observed browser and device login durations in seconds, "
+            "comma-separated (no credentials/tokens).",
+            flush=True,
+        )
+        login_times = [
+            float(value.strip()) for value in input().split(",") if value.strip()
+        ]
         if not login_times or not load:
-            raise ValueError("login durations and authorization-load samples are required")
+            raise ValueError(
+                "login durations and authorization-load samples are required"
+            )
         idle_memory = [sample["memory_bytes"] for sample in idle]
         return {
             "round": number,
@@ -177,8 +221,12 @@ def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, n
             "login_seconds": login_times,
             "summary": {
                 "idle_memory_p95_bytes": int(_percentile95(idle_memory)),
-                "authorization_sampled_peak_memory_bytes": max(sample["memory_bytes"] for sample in load),
-                "authorization_mean_cpu_percent_sum": round(statistics.mean(sample["cpu_percent_sum"] for sample in load), 4),
+                "authorization_sampled_peak_memory_bytes": max(
+                    sample["memory_bytes"] for sample in load
+                ),
+                "authorization_mean_cpu_percent_sum": round(
+                    statistics.mean(sample["cpu_percent_sum"] for sample in load), 4
+                ),
                 "startup_seconds": round(startup, 3),
                 "login_p95_seconds": round(_percentile95(login_times), 3),
             },
@@ -192,42 +240,70 @@ def _run_round(compose: list[str], files: list[str], args: argparse.Namespace, n
             check=False,
         )
         if cleanup.returncode:
-            raise RuntimeError("scoped Compose cleanup failed; inspect the unique baseline project")
+            raise RuntimeError(
+                "scoped Compose cleanup failed; inspect the unique baseline project"
+            )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Collect three sanitized Keycloak resource rounds")
+    parser = argparse.ArgumentParser(
+        description="Collect three sanitized Keycloak resource rounds"
+    )
     parser.add_argument("--compose-file", action="append", required=True)
     parser.add_argument("--identity-service", required=True)
-    parser.add_argument("--sample-service", action="append", required=True,
-                        help="Identity service and each dedicated dependency; repeat for each service")
+    parser.add_argument(
+        "--sample-service",
+        action="append",
+        required=True,
+        help="Identity service and each dedicated dependency; repeat for each service",
+    )
     parser.add_argument("--readiness-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--compose-command", default=os.environ.get("PODMAN_COMPOSE", "podman-compose"))
+    parser.add_argument(
+        "--compose-command",
+        default=os.environ.get("PODMAN_COMPOSE", "podman-compose"),
+    )
     args = parser.parse_args()
     args.project = f"a500-kc-baseline-{os.urandom(6).hex()}"
     try:
         if args.output.exists():
-            raise FileExistsError("output file already exists; choose a new evidence path")
+            raise FileExistsError(
+                "output file already exists; choose a new evidence path"
+            )
         files = [str(Path(path).resolve()) for path in args.compose_file]
         if any(not Path(path).is_file() for path in files):
             raise FileNotFoundError("a Compose file does not exist")
         compose = _compose(args)
         image = _deployment_mode(compose, files, args.identity_service)
-        print("Use identical host, deployment topology, user, clients, and hash parameters across comparison runs.", flush=True)
-        topology = input("Describe included services and dedicated dependencies: ").strip()
-        hash_parameters = input("Record password-hash algorithm and parameters (not secrets): ").strip()
+        print(
+            "Use identical host, deployment topology, user, clients, and hash "
+            "parameters across comparison runs.",
+            flush=True,
+        )
+        topology = input(
+            "Describe included services and dedicated dependencies: "
+        ).strip()
+        hash_parameters = input(
+            "Record password-hash algorithm and parameters (not secrets): "
+        ).strip()
         external_costs = input("List excluded external costs, e.g. SMTP: ").strip()
         rounds = [_run_round(compose, files, args, number) for number in range(1, 4)]
         report = {
-            "method": "podman stats JSON sampled once per second; idle=600s after operator warmup; authorization sampling runs concurrently with browser and independent-device authorization; sampled peak is not a cgroup peak counter",
+            "method": (
+                "podman stats JSON sampled once per second; idle=600s after operator "
+                "warmup; authorization sampling runs concurrently with browser and "
+                "independent-device authorization; sampled peak is not a cgroup "
+                "peak counter"
+            ),
             "topology": topology,
             "identity_image": image,
             "included_services": args.sample_service,
             "password_hash_parameters": hash_parameters,
             "excluded_external_costs": external_costs,
             "rounds": rounds,
-            "measurement_status": "observed; review raw sanitized per-round samples before comparison",
+            "measurement_status": (
+                "observed; review raw sanitized per-round samples before comparison"
+            ),
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x", encoding="utf-8") as evidence:
@@ -236,7 +312,11 @@ def main() -> int:
         print(f"Sanitized evidence written to {args.output}")
         return 0
     except Exception as error:
-        print(f"Baseline collection failed: {type(error).__name__}; resources in the unique project were cleanup-attempted.", file=sys.stderr)
+        print(
+            f"Baseline collection failed: {type(error).__name__}; resources in the "
+            "unique project were cleanup-attempted.",
+            file=sys.stderr,
+        )
         return 1
 
 

@@ -23,7 +23,16 @@ def test_development_mode_or_unpinned_image_is_rejected(monkeypatch) -> None:
     monkeypatch.setattr(
         BASELINE,
         "_run",
-        lambda *_args, **_kwargs: type("Result", (), {"stdout": '{"services":{"idp":{"image":"example/keycloak:latest","command":"start-dev"}}}'})(),
+        lambda *_args, **_kwargs: type(
+            "Result",
+            (),
+            {
+                "stdout": (
+                    '{"services":{"idp":{"image":"example/keycloak:latest",'
+                    '"command":"start-dev"}}}'
+                )
+            },
+        )(),
     )
     try:
         BASELINE._deployment_mode([], [], "idp")
