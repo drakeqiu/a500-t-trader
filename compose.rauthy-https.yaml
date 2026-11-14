@@ -1,0 +1,12 @@
+# Add this file only when using HTTPS for LAN browser authentication.
+services:
+  rauthy:
+    environment:
+      LISTEN_SCHEME: http_https
+      TLS_CERT: /app/tls/tls.crt
+      TLS_KEY: /app/tls/tls.key
+    ports:
+      - "${RAUTHY_TLS_HOST:-0.0.0.0}:${RAUTHY_TLS_HOST_PORT:-8444}:8443"
+    volumes:
+      - ${TLS_CERT:?TLS_CERT is required}:/app/tls/tls.crt:ro
+      - ${TLS_KEY:?TLS_KEY is required}:/app/tls/tls.key:ro

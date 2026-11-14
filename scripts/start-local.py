@@ -230,7 +230,9 @@ def set_client_audience(environment: dict[str, str]) -> None:
     """Set and verify Rauthy's supported default audience field for both clients."""
     from urllib.request import ProxyHandler, Request, build_opener
 
-    issuer = environment["OIDC_ISSUER"].rstrip("/")
+    issuer = environment.get(
+        "RAUTHY_ADMIN_API_BASE_URL", environment["OIDC_ISSUER"]
+    ).rstrip("/")
     key_name, key_secret = (
         Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
         .joinpath("client-update-api-key")
@@ -292,7 +294,9 @@ def set_browser_origin(environment: dict[str, str]) -> None:
     """Set and verify the browser client's LAN redirect URI and allowed origin."""
     from urllib.request import ProxyHandler, Request, build_opener
 
-    issuer = environment["OIDC_ISSUER"].rstrip("/")
+    issuer = environment.get(
+        "RAUTHY_ADMIN_API_BASE_URL", environment["OIDC_ISSUER"]
+    ).rstrip("/")
     key_name, key_secret = (
         Path(environment["RAUTHY_BOOTSTRAP_HOST_DIR"])
         .joinpath("client-update-api-key")
@@ -390,7 +394,19 @@ def compose_command(environment: dict[str, str]) -> list[str]:
         "-f",
         str(ROOT / "compose.web.yaml"),
         "-f",
-        str(ROOT / "compose.web-http.yaml"),
+        str(
+            ROOT
+            / (
+                "compose.web-https.yaml"
+                if environment.get("LAN_TLS") == "1"
+                else "compose.web-http.yaml"
+            )
+        ),
+        *(
+            ["-f", str(ROOT / "compose.rauthy-https.yaml")]
+            if environment.get("LAN_TLS") == "1"
+            else []
+        ),
     ]
 
 
