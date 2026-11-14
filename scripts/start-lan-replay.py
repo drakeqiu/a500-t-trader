@@ -55,9 +55,9 @@ def main() -> int:
             OIDC_JWKS_URI="http://rauthy:8080/auth/v1/oidc/certs",
             RABBITMQ_BIND_HOST="127.0.0.1",
         )
+        env["COMPOSE_PROJECT_NAME"] = "a500-lan"
         LOCAL["prepare_rauthy_bootstrap"](env)
         command = LOCAL["compose_command"](env)
-        command[command.index("a500-local")] = "a500-lan"
         if args.action == "up":
             subprocess.run(
                 ["uv", "build", "--wheel"],

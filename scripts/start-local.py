@@ -47,7 +47,7 @@ def configure_local_build_environment(environment: dict[str, str]) -> dict[str, 
 
 def local_environment() -> dict[str, str]:
     """Read literal dotenv values, never execute the user's configuration file."""
-    environment: dict[str, str] = {}
+    dotenv_environment: dict[str, str] = {}
     dotenv = ROOT / ".env"
     if dotenv.exists():
         for number, line in enumerate(dotenv.read_text().splitlines(), 1):
@@ -66,8 +66,13 @@ def local_environment() -> dict[str, str]:
                 raise ValueError(f".env line {number}: invalid quoting") from None
             if len(tokens) > 1:
                 raise ValueError(f".env line {number}: quote values containing spaces")
-            environment[key] = tokens[0] if tokens else ""
+            dotenv_environment[key] = tokens[0] if tokens else ""
+    environment = dict(dotenv_environment)
     environment.update(os.environ)
+    # The project's trading account is configured in .env, not shell exports.
+    for name in ("AD_USERNAME", "AD_PASSWORD", "AD_HOST", "AD_PORT"):
+        if name in dotenv_environment:
+            environment[name] = dotenv_environment[name]
     environment["POSTGRES_PASSWORD"] = (
         environment.get("POSTGRES_PASSWORD") or "changeme"
     )

@@ -23,7 +23,7 @@ def test_startup_services_include_history_worker_and_dispatcher() -> None:
     assert services.index("jobs-api") < services.index("gateway")
 
 
-def test_local_environment_keeps_provider_configuration_ad_only(
+def test_local_environment_prefers_dotenv_provider_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -32,14 +32,26 @@ def test_local_environment_keeps_provider_configuration_ad_only(
         encoding="utf-8",
     )
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
-    for name in ("USERNAME", "PASSWORD", "HOST", "PORT"):
-        monkeypatch.delenv(f"AD_{name}", raising=False)
-        monkeypatch.delenv(f"AMAZINGDATA_{name}", raising=False)
+    for name, value in {
+        "AD_USERNAME": "ambient-user",
+        "AD_PASSWORD": "ambient-password",
+        "AD_HOST": "ambient.example",
+        "AD_PORT": "1234",
+        "OIDC_AUDIENCE": "ambient-audience",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("AMAZINGDATA_USERNAME", raising=False)
+    monkeypatch.delenv("AMAZINGDATA_PASSWORD", raising=False)
+    monkeypatch.delenv("AMAZINGDATA_HOST", raising=False)
+    monkeypatch.delenv("AMAZINGDATA_PORT", raising=False)
 
     environment = LOCAL.local_environment()
 
     assert environment["AD_USERNAME"] == "trader"
+    assert environment["AD_PASSWORD"] == "secret"
+    assert environment["AD_HOST"] == "market.example"
     assert environment["AD_PORT"] == "9876"
+    assert environment["OIDC_AUDIENCE"] == "ambient-audience"
     assert not any(name.startswith("AMAZINGDATA_") for name in environment)
 
 
@@ -96,6 +108,13 @@ def test_local_environment_defaults_empty_build_mirrors(
 def test_local_environment_defaults_to_single_rauthy_issuer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    for name in (
+        "RAUTHY_HOST_PORT",
+        "OIDC_ISSUER",
+        "OIDC_JWKS_URI",
+        "OIDC_CLIENT_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
 
     environment = LOCAL.local_environment()
@@ -414,8 +433,8 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
     lan = importlib.util.module_from_spec(lan_spec)
     lan_spec.loader.exec_module(lan)
     events: list[str] = []
-    environment = {"GATEWAY_HOST_PORT": "8080"}
-
+    commands: list[list[str]] = []
+    environment = {"GATEWAY_HOST_PORT": "8080", "COMPOSE_PROJECT_NAME": "custom"}
     class Response:
         status = 200
 
@@ -432,7 +451,9 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         "local_environment": lambda: environment,
         "check_configuration": lambda env: None,
         "prepare_rauthy_bootstrap": lambda env: None,
-        "compose_command": lambda env: ["docker", "-p", "a500-local"],
+        "compose_command": lambda env: [
+            "docker", "compose", "--project-name", env["COMPOSE_PROJECT_NAME"]
+        ],
         "SERVICES": ("rauthy",),
         "set_client_audience": lambda env: events.append("audience"),
         "set_browser_origin": lambda env: events.append(
@@ -445,8 +466,9 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         response.status = 401 if "/api/" in url else 200
         return response
     monkeypatch.setattr(lan, "urlopen", open_url)
-    monkeypatch.setattr(lan.subprocess, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(lan.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(
+        lan.subprocess, "run", lambda command, **kwargs: commands.append(command)
+    )
     monkeypatch.setattr(lan.time, "sleep", lambda seconds: None)
     monkeypatch.setattr("sys.argv", ["start-lan-replay.py", "192.168.1.10"])
 
@@ -459,3 +481,5 @@ def test_lan_up_sets_audience_after_discovery_and_gateway_readiness(
         "audience",
         "browser-origin:http://192.168.1.10:8080",
     ]
+    assert commands
+    assert commands[1][commands[1].index("--project-name") + 1] == "a500-lan"
