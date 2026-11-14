@@ -27,8 +27,16 @@ def _bytes(value: str) -> int:
     if not match:
         raise ValueError("unrecognized container memory value")
     amount, unit = match.groups()
-    scale = {"B": 1, "kB": 1000, "KB": 1000, "MB": 1000**2, "GB": 1000**3,
-             "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
+    scale = {
+        "B": 1,
+        "kB": 1000,
+        "KB": 1000,
+        "MB": 1000**2,
+        "GB": 1000**3,
+        "KiB": 1024,
+        "MiB": 1024**2,
+        "GiB": 1024**3,
+    }
     if unit not in scale:
         raise ValueError("unrecognized container memory unit")
     return int(float(amount) * scale[unit])
@@ -44,9 +52,7 @@ def _stats(raw: str) -> list[dict[str, float]]:
         if "/" in memory:
             memory = memory.split("/", 1)[0].strip()
         cpu = (
-            str(row.get("CPU", row.get("CPUPercentage", "")))
-            .strip()
-            .removesuffix("%")
+            str(row.get("CPU", row.get("CPUPercentage", ""))).strip().removesuffix("%")
         )
         result.append(
             {"memory_bytes": float(_bytes(memory)), "cpu_percent": float(cpu)}
@@ -77,7 +83,7 @@ def _ready(url: str, timeout: int = 180) -> None:
         try:
             with urllib.request.urlopen(url, timeout=3):
                 return
-        except (OSError, urllib.error.URLError):
+        except OSError, urllib.error.URLError:
             time.sleep(1)
     raise TimeoutError("identity readiness endpoint did not become available")
 
@@ -176,6 +182,7 @@ def _run_round(
         )
         input()
         from threading import Event, Thread
+
         stop = Event()
         load: list[dict[str, Any]] = []
         sampler_errors: list[BaseException] = []

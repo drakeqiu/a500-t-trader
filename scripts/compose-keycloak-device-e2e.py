@@ -79,7 +79,7 @@ def _wait_for_keycloak(base_url: str) -> None:
             status, _ = _request(url)
             if status == 200:
                 return
-        except (TimeoutError, URLError, OSError):
+        except TimeoutError, URLError, OSError:
             pass
         time.sleep(1)
     raise RuntimeError("临时 Keycloak 未在 180 秒内就绪")
@@ -198,14 +198,16 @@ def _check_browser_login(gateway_url: str, username: str, password: str) -> str:
                 state="visible", timeout=90000
             )
             code_requests = [
-                request for request in authorization_requests
+                request
+                for request in authorization_requests
                 if request.get("response_type") == ["code"]
                 and request.get("client_id") == ["a500-browser-client"]
                 and request.get("code_challenge_method") == ["S256"]
                 and bool(request.get("code_challenge", [""])[0])
             ]
             pkce_token_forms = [
-                form for form in token_forms
+                form
+                for form in token_forms
                 if form.get("grant_type") == ["authorization_code"]
                 and bool(form.get("code_verifier", [""])[0])
             ]
@@ -259,7 +261,6 @@ def _check_browser_snapshot_api(gateway_url: str, token: str) -> None:
         updated = json.loads(response.read())
     if updated.get("available_cash") != "126.50":
         raise AssertionError("浏览器令牌写入后的账户快照未能读取")
-
 
 
 def _device_authorize(base_url: str, username: str, password: str) -> str:
@@ -567,7 +568,7 @@ def _check_binding(
 def _check_no_plaintext(port: int) -> None:
     try:
         status, _ = _request(f"http://localhost:{port}/api/v1/signals")
-    except (OSError, URLError):
+    except OSError, URLError:
         return
     if status in (200, 401):
         raise AssertionError("HTTPS 入口接受了明文 API 请求")

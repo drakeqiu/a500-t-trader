@@ -34,6 +34,7 @@ def test_accepts_required_access_token_contract() -> None:
     }
     verify_access_token(token({"alg": "RS256"}, claims), issuer, now=now)
 
+
 @pytest.mark.parametrize(
     "header,claims",
     [
@@ -80,7 +81,10 @@ def test_rejects_wrong_token_contract(
 
 
 def test_internal_jwks_keeps_compose_route_and_query() -> None:
-    assert internal_jwks_uri("https://localhost:18443/auth/v1/oidc/certs?k=v") == "http://rauthy:8080/auth/v1/oidc/certs?k=v"
+    assert (
+        internal_jwks_uri("https://localhost:18443/auth/v1/oidc/certs?k=v")
+        == "http://rauthy:8080/auth/v1/oidc/certs?k=v"
+    )
 
 
 def test_rejects_remote_or_http_jwks() -> None:
@@ -100,19 +104,24 @@ def test_rauthy_public_issuer_settings_match_discovery() -> None:
         "RAUTHY_LISTEN_SCHEME": "https",
         "RAUTHY_PUB_URL": "localhost:18443",
     }
-    _validate_discovery(expected_issuer, {
-        "issuer": expected_issuer,
-        "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
-    })
+    _validate_discovery(
+        expected_issuer,
+        {
+            "issuer": expected_issuer,
+            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+        },
+    )
 
 
 def test_rejects_discovery_with_mismatched_issuer() -> None:
     with pytest.raises(RuntimeError, match="issuer/JWKS mismatch"):
-        _validate_discovery("https://localhost:18443/auth/v1/", {
-            "issuer": "https://wrong:18443/auth/v1/",
-            "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
-        })
-
+        _validate_discovery(
+            "https://localhost:18443/auth/v1/",
+            {
+                "issuer": "https://wrong:18443/auth/v1/",
+                "jwks_uri": "https://localhost:18443/auth/v1/oidc/certs",
+            },
+        )
 
 
 def test_market_data_image_tags_are_project_scoped() -> None:

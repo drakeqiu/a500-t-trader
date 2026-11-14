@@ -1,4 +1,5 @@
 """Run isolated Rauthy browser login and protected-API acceptance flow."""
+
 from __future__ import annotations
 
 import argparse
@@ -56,10 +57,11 @@ def verify_access_token(token: str, issuer: str, *, now: int | None = None) -> N
         or iat > current + 30
     ):
         raise AssertionError("Expected five-minute access token")
+
+
 def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
-    if (
-        discovery.get("issuer") != issuer
-        or not isinstance(discovery.get("jwks_uri"), str)
+    if discovery.get("issuer") != issuer or not isinstance(
+        discovery.get("jwks_uri"), str
     ):
         raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
 
@@ -88,9 +90,8 @@ def _market_data_images(project: str) -> dict[str, str]:
 
 
 def _validate_discovery(issuer: str, discovery: dict[str, object]) -> None:
-    if (
-        discovery.get("issuer") != issuer
-        or not isinstance(discovery.get("jwks_uri"), str)
+    if discovery.get("issuer") != issuer or not isinstance(
+        discovery.get("jwks_uri"), str
     ):
         raise RuntimeError("Rauthy discovery issuer/JWKS mismatch")
 
@@ -113,7 +114,7 @@ def _wait_discovery(issuer: str) -> dict[str, object]:
             ) as response:
                 result = json.load(response)
             _validate_discovery(issuer, result)
-        except (OSError, TimeoutError, json.JSONDecodeError):
+        except OSError, TimeoutError, json.JSONDecodeError:
             time.sleep(2)
     raise RuntimeError("Rauthy discovery did not become ready")
 
@@ -266,9 +267,7 @@ def main() -> None:
     for file in files:
         prefix.extend(("-f", str(ROOT / file)))
     try:
-        subprocess.run(
-            [*prefix, "build"], cwd=ROOT, env=env, check=True, timeout=900
-        )
+        subprocess.run([*prefix, "build"], cwd=ROOT, env=env, check=True, timeout=900)
         subprocess.run(
             [*prefix, "up", "-d", "rauthy"],
             cwd=ROOT,
