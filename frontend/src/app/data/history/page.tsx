@@ -440,17 +440,23 @@ function HistoryPage() {
               ) : (
                 <div className="history-job-list">
                   {jobs.map((job) => {
-                    const progress =
+                    const hasProgress =
+                      Number.isInteger(job.total_chunks) &&
                       job.total_chunks > 0 &&
+                      Number.isInteger(job.completed_chunks) &&
                       job.completed_chunks >= 0 &&
-                      job.completed_chunks <= job.total_chunks
-                        ? job.status === "succeeded"
-                          ? 100
-                          : Math.min(
-                              99,
-                              Math.floor((job.completed_chunks / job.total_chunks) * 100),
-                            )
-                        : null;
+                      job.completed_chunks <= job.total_chunks &&
+                      (job.status !== "succeeded" || job.completed_chunks === job.total_chunks) &&
+                      !(
+                        terminal.has(job.status) &&
+                        job.status !== "succeeded" &&
+                        job.completed_chunks === job.total_chunks
+                      );
+                    const progress = hasProgress
+                      ? job.status === "succeeded" && job.completed_chunks === job.total_chunks
+                        ? 100
+                        : Math.min(99, Math.floor((job.completed_chunks / job.total_chunks) * 100))
+                      : null;
                     return (
                       <article className="history-job" key={job.id}>
                         <div className="history-job-head">
@@ -476,29 +482,34 @@ function HistoryPage() {
                             </dd>
                           </div>
                         </dl>
-                        {!terminal.has(job.status) && (
-                          <div className="history-progress" aria-live="polite">
-                            {progress !== null && job.status === "running" ? (
-                              <>
-                                <div className="history-progress-label">
-                                  <span>{stageLabels[job.stage] ?? "任务正在处理"}</span>
-                                  <span>{progress}%</span>
-                                </div>
-                                <progress
-                                  max={100}
-                                  value={progress}
-                                  aria-label={`任务进度 ${progress}%`}
-                                />
-                              </>
-                            ) : (
+                        <div className="history-progress" aria-live="polite">
+                          {progress !== null &&
+                          (job.status === "running" || terminal.has(job.status)) ? (
+                            <>
+                              <div className="history-progress-label">
+                                <span>
+                                  {job.status === "running"
+                                    ? (stageLabels[job.stage] ?? "任务正在处理")
+                                    : statusLabels[job.status]}
+                                </span>
+                                <span>{progress}%</span>
+                              </div>
+                              <progress
+                                max={100}
+                                value={progress}
+                                aria-label={`任务进度 ${progress}%`}
+                              />
+                            </>
+                          ) : (
+                            !terminal.has(job.status) && (
                               <p>
                                 {job.cancel_requested
                                   ? "取消请求已送达，等待后端停止当前工作。"
                                   : "正在等待后端处理；当前没有可用的精确百分比。"}
                               </p>
-                            )}
-                          </div>
-                        )}
+                            )
+                          )}
+                        </div>
                         {jobErrors[job.id] && (
                           <div className="history-error" role="alert">
                             <p>状态查询失败：{jobErrors[job.id]}</p>

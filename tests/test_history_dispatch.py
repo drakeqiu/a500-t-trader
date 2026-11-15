@@ -116,6 +116,11 @@ def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) 
 def test_publisher_backfills_legacy_queued_jobs(postgres_url: str) -> None:
     repository = JobRepository(postgres_url)
     with psycopg.connect(postgres_url) as db:
+        db.execute("DELETE FROM daily_history_job_migrations")
+        db.execute(
+            "ALTER TABLE daily_history_jobs "
+            "DROP CONSTRAINT daily_history_jobs_quarter_chunks"
+        )
         inserted = db.execute(
             """INSERT INTO daily_history_jobs
             (id, subject, symbol, start_date, end_date, status, total_chunks)
@@ -124,6 +129,7 @@ def test_publisher_backfills_legacy_queued_jobs(postgres_url: str) -> None:
         ).fetchone()
     assert inserted is not None
     job_id = inserted[0]
+    repository = JobRepository(postgres_url)
 
     class RecordingPublisher:
         def __init__(self) -> None:

@@ -598,3 +598,41 @@ test("loads account history in a fresh browser with no saved task IDs", async ({
     await context.close();
   }
 });
+test("shows checkpoint progress for a running quarterly history task", async ({ page }) => {
+  await page.goto("/");
+  await connect(page, "history-owner");
+  await page.getByRole("link", { name: "历史行情" }).click();
+  await expect(page.getByRole("heading", { name: "历史行情", exact: true })).toBeVisible();
+
+  const running = {
+    type: "daily_history",
+    id: "00000000-0000-4000-8000-000000000002",
+    symbol: "SH.510500",
+    start_date: "2023-02-15",
+    end_date: "2024-05-10",
+    status: "running",
+    stage: "querying",
+    cancel_requested: false,
+    total_chunks: 6,
+    completed_chunks: 2,
+    created_at: "2025-01-03T00:00:00+00:00",
+    updated_at: "2025-01-03T00:00:00+00:00",
+    finished_at: null,
+    error: null,
+  };
+  await page.route("**/api/v1/jobs", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    expect(route.request().method()).toBe("POST");
+    await route.fulfill({ status: 202, json: running });
+  });
+  await page.getByLabel("证券代码").fill("SH.510500");
+  await page.getByLabel("开始日期").fill("2023-02-15");
+  await page.getByLabel("结束日期").fill("2024-05-10");
+  await page.getByRole("button", { name: "创建任务" }).click();
+  await expect(page.getByText("2 / 6")).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "任务进度 33%" })).toBeVisible();
+  await expect(page.getByText("33%", { exact: true })).toBeVisible();
+});

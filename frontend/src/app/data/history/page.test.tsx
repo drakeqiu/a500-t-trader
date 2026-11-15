@@ -111,7 +111,79 @@ describe("history task page", () => {
     );
   });
 
-  it("keeps succeeded jobs in the task list without fetching or showing task-bound bars", async () => {
+  it("shows terminal progress from confirmed chunks without marking failures or cancellations complete", async () => {
+    const terminalJobs = [
+      { status: "failed" as const, completed_chunks: 2, total_chunks: 4, percent: 50 },
+      { status: "cancelled" as const, completed_chunks: 3, total_chunks: 4, percent: 75 },
+    ];
+    for (const [index, task] of terminalJobs.entries()) {
+      const terminalJob = {
+        ...job,
+        id: `terminal-${index}`,
+        status: task.status,
+        completed_chunks: task.completed_chunks,
+        total_chunks: task.total_chunks,
+      };
+      client.listHistoryJobs.mockResolvedValue([terminalJob]);
+      client.getHistoryJob.mockResolvedValueOnce(terminalJob);
+      const { unmount } = render(<HistoryPage />);
+      expect(
+        await screen.findByRole("progressbar", {
+          name: `任务进度 ${task.percent}%`,
+        }),
+      ).toBeTruthy();
+      expect(screen.getByText(`${task.percent}%`)).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("does not report exact progress when chunk counts are inconsistent", async () => {
+    const inconsistent = {
+      ...job,
+      status: "running" as const,
+      total_chunks: 4,
+      completed_chunks: 5,
+    };
+    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.getHistoryJob.mockResolvedValue(inconsistent);
+    render(<HistoryPage />);
+    expect(await screen.findByText("5 / 4")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("does not report exact progress for a succeeded job with incomplete chunks", async () => {
+    const inconsistent = {
+      ...job,
+      status: "succeeded" as const,
+      total_chunks: 4,
+      completed_chunks: 1,
+    };
+    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.getHistoryJob.mockResolvedValue(inconsistent);
+    render(<HistoryPage />);
+    expect(await screen.findByText("已完成")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText("25%")).toBeNull();
+  });
+
+  it("does not show task completion when a cancellation follows the last checkpoint", async () => {
+    const cancelled = {
+      ...job,
+      status: "cancelled" as const,
+      total_chunks: 4,
+      completed_chunks: 4,
+    };
+    client.listHistoryJobs.mockResolvedValue([cancelled]);
+    client.getHistoryJob.mockResolvedValue(cancelled);
+    render(<HistoryPage />);
+    expect(await screen.findByText("4 / 4")).toBeTruthy();
+    expect((await screen.findAllByText("已取消")).length).toBe(1);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.queryByText("99%")).toBeNull();
+  });
+
+  it("shows succeeded jobs as complete without exposing task-bound bars", async () => {
     const succeeded = {
       ...job,
       status: "succeeded" as const,
@@ -121,7 +193,9 @@ describe("history task page", () => {
     client.listHistoryJobs.mockResolvedValue([succeeded]);
     client.getHistoryJob.mockResolvedValue(succeeded);
     render(<HistoryPage />);
-    expect(await screen.findByText("已完成")).toBeTruthy();
+    expect((await screen.findAllByText("已完成")).length).toBe(2);
+    expect(screen.getByRole("progressbar", { name: "任务进度 100%" })).toBeTruthy();
+    expect(screen.getByText("100%")).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新状态" })).toBeTruthy();
     expect(screen.queryByText("查看结果")).toBeNull();
     expect(screen.queryByText("行情结果")).toBeNull();

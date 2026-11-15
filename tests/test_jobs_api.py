@@ -120,6 +120,84 @@ def test_submission_persists_queued_job_with_pending_outbox(
     assert persisted == ("queued", None)
 
 
+def test_job_uses_clipped_calendar_quarters_for_creation_and_worker_progress(
+    postgres_url: str,
+) -> None:
+    ranges: list[tuple[date, date]] = []
+    progress_at_query: list[int] = []
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    headers = {"Authorization": "Bearer alice"}
+    repository = JobRepository(postgres_url)
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            ranges.append((start_date, end_date))
+            if len(ranges) == 2:
+                current = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+                progress_at_query.append(current["completed_chunks"])
+            return ()
+
+    with TestClient(app) as client:
+        job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-02-15",
+                "end_date": "2024-05-10",
+            },
+        ).json()
+        assert job["total_chunks"] == 6
+        assert job["completed_chunks"] == 0
+        assert process_one(repository, lambda: Provider())
+        status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+
+    assert ranges == [
+        (date(2023, 2, 15), date(2023, 3, 31)),
+        (date(2023, 4, 1), date(2023, 6, 30)),
+        (date(2023, 7, 1), date(2023, 9, 30)),
+        (date(2023, 10, 1), date(2023, 12, 31)),
+        (date(2024, 1, 1), date(2024, 3, 31)),
+        (date(2024, 4, 1), date(2024, 5, 10)),
+    ]
+    assert progress_at_query == [1]
+    assert status["status"] == "succeeded"
+    assert status["completed_chunks"] == status["total_chunks"] == 6
+
+
+def test_single_quarter_job_requests_only_its_clipped_dates(postgres_url: str) -> None:
+    ranges: list[tuple[date, date]] = []
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            ranges.append((start_date, end_date))
+            return ()
+
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    headers = {"Authorization": "Bearer alice"}
+    with TestClient(app) as client:
+        job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-05-10",
+                "end_date": "2023-06-15",
+            },
+        ).json()
+        assert job["total_chunks"] == 1
+        assert process_one(JobRepository(postgres_url), lambda: Provider())
+        status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+
+    assert ranges == [(date(2023, 5, 10), date(2023, 6, 15))]
+    assert status["status"] == "succeeded"
+    assert status["completed_chunks"] == status["total_chunks"] == 1
 
 
 def test_job_splits_adjacent_quarter_boundary_dates(
@@ -270,7 +348,68 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
         (date(2023, 10, 2), Decimal("4")),
     ]
 
+def test_legacy_annual_checkpoint_migrates_before_quarterly_resume(
+    postgres_url: str,
+) -> None:
+    ranges: list[tuple[date, date]] = []
+    JobRepository(postgres_url)
+    with psycopg.connect(postgres_url) as db:
         db.execute("DELETE FROM daily_history_job_migrations")
+        db.execute(
+            "ALTER TABLE daily_history_jobs "
+            "DROP CONSTRAINT daily_history_jobs_quarter_chunks"
+        )
+        inserted = db.execute(
+            """INSERT INTO daily_history_jobs
+            (id, subject, symbol, start_date, end_date, status,
+                total_chunks, completed_chunks, lease_token, lease_until)
+            VALUES (gen_random_uuid(), 'alice', '563360', '2023-01-01',
+                '2024-12-31', 'running', 2, 1, gen_random_uuid(),
+                now() + interval '1 hour') RETURNING id"""
+        ).fetchone()
+    assert inserted is not None
+    job_id = inserted[0]
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            ranges.append((start_date, end_date))
+            return ()
+
+    migrated_repository = JobRepository(postgres_url)
+    with psycopg.connect(postgres_url) as db:
+        checkpoint = db.execute(
+            "SELECT total_chunks, completed_chunks, lease_token, lease_until "
+            "FROM daily_history_jobs WHERE id=%s",
+            (job_id,),
+        ).fetchone()
+    assert checkpoint == (8, 4, None, None)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        with psycopg.connect(postgres_url) as db:
+            db.execute(
+                """INSERT INTO daily_history_jobs
+                (id, subject, symbol, start_date, end_date, status, total_chunks)
+                VALUES (gen_random_uuid(), 'old-api', '563360', '2023-01-01',
+                    '2024-12-31', 'queued', 2)"""
+            )
+    assert process_one(migrated_repository, lambda: Provider())
+    with psycopg.connect(postgres_url) as db:
+        completed = db.execute(
+            "SELECT status, total_chunks, completed_chunks "
+            "FROM daily_history_jobs WHERE id=%s",
+            (job_id,),
+        ).fetchone()
+
+    assert completed == ("succeeded", 8, 8)
+    assert ranges == [
+        (date(2024, 1, 1), date(2024, 3, 31)),
+        (date(2024, 4, 1), date(2024, 6, 30)),
+        (date(2024, 7, 1), date(2024, 9, 30)),
+        (date(2024, 10, 1), date(2024, 12, 31)),
+    ]
+
+
 def test_job_publishes_shared_history_without_result_endpoint(
     postgres_url: str,
 ) -> None:
@@ -306,7 +445,7 @@ def test_job_publishes_shared_history_without_result_endpoint(
         assert process_one(JobRepository(postgres_url), lambda: Provider())
         status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
         assert status["status"] == "succeeded"
-        assert status["completed_chunks"] == status["total_chunks"] == 2
+        assert status["completed_chunks"] == status["total_chunks"] == 8
         assert not {"symbol", "start_date", "end_date"} & status.keys()
         assert not any("result" in key or "bar" in key for key in status)
         assert (
@@ -384,7 +523,7 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         assert process_one(JobRepository(postgres_url), lambda: provider)
         failed = client.get(f"/v1/jobs/{first['id']}", headers=headers).json()
         assert failed["status"] == "failed"
-        assert failed["completed_chunks"] == 1
+        assert failed["completed_chunks"] == 4
         assert "secret" not in failed["error"]
         assert (
             client.get(f"/v1/jobs/{first['id']}/results", headers=headers).status_code
@@ -432,7 +571,7 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         ).fetchone()
     assert staged_row is not None
     assert staged_row[0] == 0
-    assert provider.calls == [2023, 2024, 2024]
+    assert provider.calls == [2023] * 4 + [2024] + [2024] * 4
 
 
 def test_running_job_reports_query_stage_and_cooperative_cancellation(
