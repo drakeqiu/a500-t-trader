@@ -271,7 +271,7 @@ def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
     )
     app = create_app(postgres_url, lambda token: token)
     with TestClient(app) as client:
-        params = {
+        params: dict[str, str | int] = {
             "symbol": "SH.510300",
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
