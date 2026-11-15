@@ -246,7 +246,13 @@ export function getDailyHistory(
   },
   signal?: AbortSignal,
 ) {
-  const params = new URLSearchParams(input);
+  const params = new URLSearchParams({
+    symbol: input.symbol,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    limit: String(input.limit),
+    offset: String(input.offset),
+  });
   return api<DailyHistoryPage>(`/v1/history/daily?${params}`, token, { signal });
 }
 

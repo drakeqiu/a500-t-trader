@@ -57,8 +57,7 @@ function requestMessageFor(error: unknown, action: "create" | "cancel" | "delete
   if (error instanceof DOMException && error.name === "TimeoutError") {
     if (action === "create")
       return "提交响应超时，后端可能已创建任务，但未返回任务编号；请勿盲目重复提交。";
-    if (action === "delete")
-      return "删除请求超时，无法确认任务记录是否已删除；请刷新列表确认。";
+    if (action === "delete") return "删除请求超时，无法确认任务记录是否已删除；请刷新列表确认。";
     return "取消请求超时，无法确认后端是否已收到；请刷新任务状态后再决定是否重试。";
   }
   if (action === "delete" && error instanceof ApiError && error.status === 409)
@@ -135,11 +134,7 @@ function HistoryPage() {
   const loadJobs = useCallback(
     async (signal: AbortSignal, offset = 0, append = false) => {
       if (!token) return;
-      const page = await listHistoryJobs(
-        token,
-        { limit: 30, offset },
-        requestSignal(signal),
-      );
+      const page = await listHistoryJobs(token, { limit: 30, offset }, requestSignal(signal));
       setJobs((current) =>
         append
           ? [...current, ...page.jobs.filter((job) => !current.some((item) => item.id === job.id))]
@@ -473,7 +468,9 @@ function HistoryPage() {
                       该日期范围尚未完整覆盖。当前只读取已有数据，不会自动补拉行情。
                     </p>
                   ) : historyPage.total === 0 ? (
-                    <p className="history-muted">日期范围已完整覆盖，但没有已观察到的交易日数据。</p>
+                    <p className="history-muted">
+                      日期范围已完整覆盖，但没有已观察到的交易日数据。
+                    </p>
                   ) : (
                     <>
                       <div className="history-query-summary">
@@ -619,7 +616,9 @@ function HistoryPage() {
               </p>
             )}
             <details className="history-jobs">
-              <summary>任务记录 · 已加载 {jobs.length} / {jobsTotal} 项</summary>
+              <summary>
+                任务记录 · 已加载 {jobs.length} / {jobsTotal} 项
+              </summary>
               <section className="history-job-content" aria-labelledby="history-jobs-title">
                 <div className="history-section-heading">
                   <div>
@@ -627,7 +626,9 @@ function HistoryPage() {
                     <p>任务按账户保存；刷新或加载更多可查看全部历史记录。</p>
                   </div>
                   <div className="history-job-actions">
-                    <span>{jobs.length} / {jobsTotal} 项</span>
+                    <span>
+                      {jobs.length} / {jobsTotal} 项
+                    </span>
                     <button
                       className="trade-import-secondary"
                       disabled={busy || loadingJobs}
@@ -637,88 +638,134 @@ function HistoryPage() {
                     </button>
                   </div>
                 </div>
-              {jobs.length === 0 ? (
-                <div className="history-empty">
-                  <h3>{loadingJobs ? "正在加载任务记录" : "暂无历史任务"}</h3>
-                  <p>提交任务后，状态和结果会显示在此处。</p>
-                </div>
-              ) : (
-                <div className="history-job-list">
-                  {jobs.map((job) => {
-                    const hasProgress =
-                      Number.isInteger(job.total_chunks) &&
-                      job.total_chunks > 0 &&
-                      Number.isInteger(job.completed_chunks) &&
-                      job.completed_chunks >= 0 &&
-                      job.completed_chunks <= job.total_chunks &&
-                      (job.status !== "succeeded" || job.completed_chunks === job.total_chunks) &&
-                      !(
-                        terminal.has(job.status) &&
-                        job.status !== "succeeded" &&
-                        job.completed_chunks === job.total_chunks
-                      );
-                    const progress = hasProgress
-                      ? job.status === "succeeded" && job.completed_chunks === job.total_chunks
-                        ? 100
-                        : Math.min(99, Math.floor((job.completed_chunks / job.total_chunks) * 100))
-                      : null;
-                    return (
-                      <article className="history-job" key={job.id}>
-                        <div className="history-job-head">
-                          <span className={`history-status is-${job.status}`}>
-                            {statusLabels[job.status]}
-                          </span>
-                        </div>
-                        <dl className="history-job-meta">
-                          <div>
-                            <dt>任务编号</dt>
-                            <dd>
-                              <code>{job.id}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>阶段</dt>
-                            <dd>{stageLabels[job.stage] ?? job.stage}</dd>
-                          </div>
-                          <div>
-                            <dt>分片</dt>
-                            <dd>
-                              {job.completed_chunks} / {job.total_chunks}
-                            </dd>
-                          </div>
-                        </dl>
-                        <div className="history-progress" aria-live="polite">
-                          {progress !== null &&
-                          (job.status === "running" || terminal.has(job.status)) ? (
-                            <>
-                              <div className="history-progress-label">
-                                <span>
-                                  {job.status === "running"
-                                    ? (stageLabels[job.stage] ?? "任务正在处理")
-                                    : statusLabels[job.status]}
-                                </span>
-                                <span>{progress}%</span>
-                              </div>
-                              <progress
-                                max={100}
-                                value={progress}
-                                aria-label={`任务进度 ${progress}%`}
-                              />
-                            </>
-                          ) : (
-                            !terminal.has(job.status) && (
-                              <p>
-                                {job.cancel_requested
-                                  ? "取消请求已送达，等待后端停止当前工作。"
-                                  : "正在等待后端处理；当前没有可用的精确百分比。"}
-                              </p>
+                {jobs.length === 0 ? (
+                  <div className="history-empty">
+                    <h3>{loadingJobs ? "正在加载任务记录" : "暂无历史任务"}</h3>
+                    <p>提交任务后，状态和结果会显示在此处。</p>
+                  </div>
+                ) : (
+                  <div className="history-job-list">
+                    {jobs.map((job) => {
+                      const hasProgress =
+                        Number.isInteger(job.total_chunks) &&
+                        job.total_chunks > 0 &&
+                        Number.isInteger(job.completed_chunks) &&
+                        job.completed_chunks >= 0 &&
+                        job.completed_chunks <= job.total_chunks &&
+                        (job.status !== "succeeded" || job.completed_chunks === job.total_chunks) &&
+                        !(
+                          terminal.has(job.status) &&
+                          job.status !== "succeeded" &&
+                          job.completed_chunks === job.total_chunks
+                        );
+                      const progress = hasProgress
+                        ? job.status === "succeeded" && job.completed_chunks === job.total_chunks
+                          ? 100
+                          : Math.min(
+                              99,
+                              Math.floor((job.completed_chunks / job.total_chunks) * 100),
                             )
+                        : null;
+                      return (
+                        <article className="history-job" key={job.id}>
+                          <div className="history-job-head">
+                            <span className={`history-status is-${job.status}`}>
+                              {statusLabels[job.status]}
+                            </span>
+                          </div>
+                          <dl className="history-job-meta">
+                            <div>
+                              <dt>任务编号</dt>
+                              <dd>
+                                <code>{job.id}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>阶段</dt>
+                              <dd>{stageLabels[job.stage] ?? job.stage}</dd>
+                            </div>
+                            <div>
+                              <dt>分片</dt>
+                              <dd>
+                                {job.completed_chunks} / {job.total_chunks}
+                              </dd>
+                            </div>
+                          </dl>
+                          <div className="history-progress" aria-live="polite">
+                            {progress !== null &&
+                            (job.status === "running" || terminal.has(job.status)) ? (
+                              <>
+                                <div className="history-progress-label">
+                                  <span>
+                                    {job.status === "running"
+                                      ? (stageLabels[job.stage] ?? "任务正在处理")
+                                      : statusLabels[job.status]}
+                                  </span>
+                                  <span>{progress}%</span>
+                                </div>
+                                <progress
+                                  max={100}
+                                  value={progress}
+                                  aria-label={`任务进度 ${progress}%`}
+                                />
+                              </>
+                            ) : (
+                              !terminal.has(job.status) && (
+                                <p>
+                                  {job.cancel_requested
+                                    ? "取消请求已送达，等待后端停止当前工作。"
+                                    : "正在等待后端处理；当前没有可用的精确百分比。"}
+                                </p>
+                              )
+                            )}
+                          </div>
+                          {jobErrors[job.id] && (
+                            <div className="history-error" role="alert">
+                              <p>状态查询失败：{jobErrors[job.id]}</p>
+                              <p>以下为最近一次成功读取的后端状态，并非最新状态。</p>
+                              <button
+                                className="trade-import-secondary"
+                                disabled={busy}
+                                onClick={() => refreshTask(job.id)}
+                              >
+                                刷新状态
+                              </button>
+                            </div>
                           )}
-                        </div>
-                        {jobErrors[job.id] && (
-                          <div className="history-error" role="alert">
-                            <p>状态查询失败：{jobErrors[job.id]}</p>
-                            <p>以下为最近一次成功读取的后端状态，并非最新状态。</p>
+                          {job.status === "failed" && (
+                            <p className="history-error" role="alert">
+                              失败原因：{job.error || "后端未提供失败详情。"}
+                            </p>
+                          )}
+                          {job.status === "cancelled" && (
+                            <p className="history-muted">任务已取消，未读取结果。</p>
+                          )}
+                          {!terminal.has(job.status) &&
+                            job.updated_at &&
+                            now - Date.parse(job.updated_at) > 60_000 && (
+                              <p className="history-muted">
+                                后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。
+                              </p>
+                            )}
+                          <div className="history-job-actions">
+                            {!terminal.has(job.status) && (
+                              <button
+                                className="trade-import-secondary"
+                                disabled={busy}
+                                onClick={() => cancel(job)}
+                              >
+                                {job.cancel_requested ? "正在取消…" : "请求取消"}
+                              </button>
+                            )}
+                            {terminal.has(job.status) && (
+                              <button
+                                className="history-remove"
+                                disabled={busy}
+                                onClick={() => remove(job)}
+                              >
+                                删除任务记录
+                              </button>
+                            )}
                             <button
                               className="trade-import-secondary"
                               disabled={busy}
@@ -727,63 +774,20 @@ function HistoryPage() {
                               刷新状态
                             </button>
                           </div>
-                        )}
-                        {job.status === "failed" && (
-                          <p className="history-error" role="alert">
-                            失败原因：{job.error || "后端未提供失败详情。"}
-                          </p>
-                        )}
-                        {job.status === "cancelled" && (
-                          <p className="history-muted">任务已取消，未读取结果。</p>
-                        )}
-                        {!terminal.has(job.status) &&
-                          job.updated_at &&
-                          now - Date.parse(job.updated_at) > 60_000 && (
-                            <p className="history-muted">
-                              后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。
-                            </p>
-                          )}
-                        <div className="history-job-actions">
-                          {!terminal.has(job.status) && (
-                            <button
-                              className="trade-import-secondary"
-                              disabled={busy}
-                              onClick={() => cancel(job)}
-                            >
-                              {job.cancel_requested ? "正在取消…" : "请求取消"}
-                            </button>
-                          )}
-                          {terminal.has(job.status) && (
-                            <button
-                              className="history-remove"
-                              disabled={busy}
-                              onClick={() => remove(job)}
-                            >
-                              删除任务记录
-                            </button>
-                          )}
-                          <button
-                            className="trade-import-secondary"
-                            disabled={busy}
-                            onClick={() => refreshTask(job.id)}
-                          >
-                            刷新状态
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-              {jobsHasMore && (
-                <button
-                  className="trade-import-secondary history-load-more"
-                  disabled={busy || loadingMoreJobs}
-                  onClick={loadMoreJobs}
-                >
-                  {loadingMoreJobs ? "正在加载…" : "加载更多任务"}
-                </button>
-              )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+                {jobsHasMore && (
+                  <button
+                    className="trade-import-secondary history-load-more"
+                    disabled={busy || loadingMoreJobs}
+                    onClick={loadMoreJobs}
+                  >
+                    {loadingMoreJobs ? "正在加载…" : "加载更多任务"}
+                  </button>
+                )}
               </section>
             </details>
           </>

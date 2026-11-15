@@ -40,6 +40,7 @@ const dailyPage: DailyHistoryPage = {
   start_date: "2026-01-01",
   end_date: "2026-01-03",
   covered: true,
+  has_more: false,
   bars: [
     {
       date: "2026-01-02",
@@ -346,14 +347,14 @@ describe("history task page", () => {
     fireEvent.click(screen.getByText(/任务记录/, { selector: "summary" }));
     fireEvent.click(await screen.findByRole("button", { name: "删除任务记录" }));
 
-    await waitFor(() => expect(client.deleteHistoryJob).toHaveBeenCalledWith(
-      "memory-token",
-      succeeded.id,
-      expect.any(AbortSignal),
-    ));
-    expect(confirmation).toHaveBeenCalledWith(
-      expect.stringContaining("共享历史行情不会被删除"),
+    await waitFor(() =>
+      expect(client.deleteHistoryJob).toHaveBeenCalledWith(
+        "memory-token",
+        succeeded.id,
+        expect.any(AbortSignal),
+      ),
     );
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining("共享历史行情不会被删除"));
     await waitFor(() => expect(screen.queryByText(succeeded.id)).toBeNull());
     expect(screen.getByText("任务记录已删除，共享历史行情保留。")).toBeTruthy();
   });
