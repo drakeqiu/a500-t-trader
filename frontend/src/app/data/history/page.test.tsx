@@ -52,7 +52,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-
 describe("history task page", () => {
   it("loads recent jobs from the account in a browser with no saved job IDs", async () => {
     client.listHistoryJobs.mockResolvedValue([job]);
@@ -105,10 +104,7 @@ describe("history task page", () => {
     render(<HistoryPage />);
     expect(await screen.findByText("失败")).toBeTruthy();
     expect(screen.getByText("失败原因：供应商连接超时")).toBeTruthy();
-    expect(client.listHistoryJobs).toHaveBeenCalledWith(
-      "memory-token",
-      expect.any(AbortSignal),
-    );
+    expect(client.listHistoryJobs).toHaveBeenCalledWith("memory-token", expect.any(AbortSignal));
   });
 
   it("shows terminal progress from confirmed chunks without marking failures or cancellations complete", async () => {

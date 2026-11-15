@@ -545,9 +545,7 @@ test("creates a history task without treating acceptance as completion", async (
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText("等待执行")).toBeVisible();
   await expect(page.getByText("提交成功不代表行情已拉取完成。")).toBeVisible();
-  await expect(
-    page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。"),
-  ).toBeVisible();
+  await expect(page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。")).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新状态" })).toBeVisible();
   await expect(page.getByRole("button", { name: "请求取消" })).toBeVisible();
   await expect(page.getByText("查看结果")).toHaveCount(0);

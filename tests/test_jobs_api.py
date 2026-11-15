@@ -43,6 +43,7 @@ def test_jobs_are_private_and_completed_dates_required(postgres_url: str) -> Non
         payload["end_date"] = today.isoformat()
         assert client.post("/v1/jobs", json=payload, headers=alice).status_code == 422
 
+
 def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
     postgres_url: str,
 ) -> None:
@@ -70,8 +71,6 @@ def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
         alice_first["id"],
     ]
     assert [job["id"] for job in bob_jobs.json()] == [bob_job["id"]]
-
-
 
 
 def test_submission_requires_persistence_permission(postgres_url: str) -> None:
@@ -314,9 +313,7 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
                 )
                 db.execute("DROP FUNCTION IF EXISTS fail_test_quarter_checkpoint()")
 
-        interrupted = client.get(
-            f"/v1/jobs/{job['id']}", headers=headers
-        ).json()
+        interrupted = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
         assert interrupted["status"] == "running"
         assert interrupted["completed_chunks"] == 1
         with psycopg.connect(postgres_url) as db:
@@ -347,6 +344,7 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
         (date(2023, 7, 2), Decimal("3")),
         (date(2023, 10, 2), Decimal("4")),
     ]
+
 
 def test_legacy_annual_checkpoint_migrates_before_quarterly_resume(
     postgres_url: str,

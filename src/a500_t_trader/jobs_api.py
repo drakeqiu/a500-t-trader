@@ -63,7 +63,6 @@ def create_app(
         subject = _authenticated_subject(auth, authorization)
         return respond(store.list_for_subject(subject))
 
-
     @app.post("/v1/jobs")
     def submit(
         request: DailyHistoryRequest, authorization: str | None = Header(default=None)

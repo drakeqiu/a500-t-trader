@@ -97,7 +97,6 @@ _COLUMNS = (
 _RECENT_JOB_LIMIT = 30
 
 
-
 class JobRepository:
     """PostgreSQL task store; all public reads and mutations are subject-scoped."""
 
@@ -257,7 +256,6 @@ class JobRepository:
             assert job is not None
             jobs.append(job)
         return jobs
-
 
     def get(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
