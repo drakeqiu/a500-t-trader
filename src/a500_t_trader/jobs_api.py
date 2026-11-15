@@ -9,7 +9,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -18,6 +18,7 @@ from .account_snapshot_api import (
     OIDCAuthenticator,
     _authenticated_subject,
 )
+from .backtest import BacktestRepository
 from .database import database_url
 from .jobs import JobRepository
 from .market_data import normalize_symbol
@@ -38,7 +39,9 @@ def create_app(
     *,
     persistence_permitted: bool | None = None,
 ) -> FastAPI:
-    store = JobRepository(database_url(database))
+    database_dsn = database_url(database)
+    store = JobRepository(database_dsn)
+    daily_history = BacktestRepository(database_dsn)
     auth = authenticator or OIDCAuthenticator.from_environment()
     permitted = (
         persistence_permitted
@@ -59,9 +62,92 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/v1/jobs")
-    def list_jobs(authorization: str | None = Header(default=None)) -> JSONResponse:
+    def list_jobs(
+        limit: int = Query(default=30, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        return respond(store.list_for_subject(subject))
+        return respond(store.list_for_subject(subject, limit=limit, offset=offset))
+
+    @app.get("/v1/history/daily")
+    def query_daily_history(
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _authenticated_subject(auth, authorization)
+        if start_date > end_date:
+            raise HTTPException(422, "start_date must not follow end_date")
+        try:
+            normalized = normalize_symbol(symbol)
+        except ValueError as exc:
+            raise HTTPException(422, "Invalid security symbol") from exc
+        result = daily_history.get_shared_daily_history_page(
+            normalized,
+            start_date,
+            end_date,
+            limit=limit,
+            offset=offset,
+        )
+        if result is None:
+            return respond(
+                {
+                    "symbol": normalized,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "covered": False,
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": False,
+                    "bars": [],
+                }
+            )
+        bars, total = result
+        return respond(
+            {
+                "symbol": normalized,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "covered": True,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(bars) < total,
+                "bars": [
+                    {
+                        "date": (
+                            bar.timestamp.astimezone(ZoneInfo("Asia/Shanghai"))
+                            .date()
+                            .isoformat()
+                        ),
+                        "open": str(bar.open),
+                        "high": str(bar.high),
+                        "low": str(bar.low),
+                        "close": str(bar.close),
+                        "volume": bar.volume,
+                        "amount": None if bar.amount is None else str(bar.amount),
+                    }
+                    for bar in bars
+                ],
+            }
+        )
+
+    @app.delete("/v1/jobs/{job_id}", status_code=204)
+    def delete_job(
+        job_id: UUID, authorization: str | None = Header(default=None)
+    ) -> Response:
+        subject = _authenticated_subject(auth, authorization)
+        deleted = store.delete(subject, str(job_id))
+        if deleted is None:
+            raise HTTPException(404, "Job not found")
+        if not deleted:
+            raise HTTPException(409, "Only finished jobs can be deleted")
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/jobs")
     def submit(

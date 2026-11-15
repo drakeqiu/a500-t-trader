@@ -1,7 +1,7 @@
 import type React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HistoryJob } from "@/lib/a500-client";
+import type { DailyHistoryPage, HistoryJob, HistoryJobPage } from "@/lib/a500-client";
 
 const { client } = vi.hoisted(() => ({
   client: {
@@ -9,6 +9,8 @@ const { client } = vi.hoisted(() => ({
     createHistoryJob: vi.fn(),
     getHistoryJob: vi.fn(),
     cancelHistoryJob: vi.fn(),
+    getDailyHistory: vi.fn(),
+    deleteHistoryJob: vi.fn(),
   },
 }));
 vi.mock("@/lib/a500-client", async (importOriginal) => ({
@@ -29,6 +31,32 @@ vi.mock("@/components/app-shell", () => ({
 }));
 import HistoryPage from "@/app/data/history/page";
 
+function jobsPage(jobs: HistoryJob[], total = jobs.length): HistoryJobPage {
+  return { jobs, total, limit: 30, offset: 0, has_more: total > jobs.length };
+}
+
+const dailyPage: DailyHistoryPage = {
+  symbol: "510300",
+  start_date: "2026-01-01",
+  end_date: "2026-01-03",
+  covered: true,
+  has_more: false,
+  bars: [
+    {
+      date: "2026-01-02",
+      open: "1",
+      high: "2",
+      low: "1",
+      close: "2",
+      volume: 100,
+      amount: "200",
+    },
+  ],
+  total: 1,
+  limit: 20,
+  offset: 0,
+};
+
 const job: HistoryJob = {
   type: "daily_history",
   id: "job-1",
@@ -44,7 +72,9 @@ const job: HistoryJob = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  client.listHistoryJobs.mockResolvedValue([]);
+  client.listHistoryJobs.mockResolvedValue(jobsPage([]));
+  client.getDailyHistory.mockResolvedValue(dailyPage);
+  client.deleteHistoryJob.mockResolvedValue(undefined);
   window.localStorage.clear();
 });
 afterEach(() => {
@@ -54,11 +84,15 @@ afterEach(() => {
 
 describe("history task page", () => {
   it("loads recent jobs from the account in a browser with no saved job IDs", async () => {
-    client.listHistoryJobs.mockResolvedValue([job]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([job]));
     render(<HistoryPage />);
 
     expect(await screen.findByText(job.id)).toBeTruthy();
-    expect(client.listHistoryJobs).toHaveBeenCalledWith("memory-token", expect.any(AbortSignal));
+    expect(client.listHistoryJobs).toHaveBeenCalledWith(
+      "memory-token",
+      { limit: 30, offset: 0 },
+      expect.any(AbortSignal),
+    );
     expect(window.localStorage.getItem("a500.history-job-ids")).toBeNull();
   });
 
@@ -86,7 +120,7 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 1,
     };
-    client.listHistoryJobs.mockResolvedValue([running]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([running]));
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
     expect(await screen.findByRole("progressbar", { name: "任务进度 25%" })).toBeTruthy();
@@ -99,12 +133,16 @@ describe("history task page", () => {
       status: "failed" as const,
       error: "供应商连接超时",
     };
-    client.listHistoryJobs.mockResolvedValue([failed]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([failed]));
     client.getHistoryJob.mockResolvedValue(failed);
     render(<HistoryPage />);
     expect(await screen.findByText("失败")).toBeTruthy();
     expect(screen.getByText("失败原因：供应商连接超时")).toBeTruthy();
-    expect(client.listHistoryJobs).toHaveBeenCalledWith("memory-token", expect.any(AbortSignal));
+    expect(client.listHistoryJobs).toHaveBeenCalledWith(
+      "memory-token",
+      { limit: 30, offset: 0 },
+      expect.any(AbortSignal),
+    );
   });
 
   it("shows terminal progress from confirmed chunks without marking failures or cancellations complete", async () => {
@@ -120,7 +158,7 @@ describe("history task page", () => {
         completed_chunks: task.completed_chunks,
         total_chunks: task.total_chunks,
       };
-      client.listHistoryJobs.mockResolvedValue([terminalJob]);
+      client.listHistoryJobs.mockResolvedValue(jobsPage([terminalJob]));
       client.getHistoryJob.mockResolvedValueOnce(terminalJob);
       const { unmount } = render(<HistoryPage />);
       expect(
@@ -140,7 +178,7 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 5,
     };
-    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([inconsistent]));
     client.getHistoryJob.mockResolvedValue(inconsistent);
     render(<HistoryPage />);
     expect(await screen.findByText("5 / 4")).toBeTruthy();
@@ -154,7 +192,7 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 1,
     };
-    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([inconsistent]));
     client.getHistoryJob.mockResolvedValue(inconsistent);
     render(<HistoryPage />);
     expect(await screen.findByText("已完成")).toBeTruthy();
@@ -169,7 +207,7 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 4,
     };
-    client.listHistoryJobs.mockResolvedValue([cancelled]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([cancelled]));
     client.getHistoryJob.mockResolvedValue(cancelled);
     render(<HistoryPage />);
     expect(await screen.findByText("4 / 4")).toBeTruthy();
@@ -186,7 +224,7 @@ describe("history task page", () => {
       total_chunks: 1,
       completed_chunks: 1,
     };
-    client.listHistoryJobs.mockResolvedValue([succeeded]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([succeeded]));
     client.getHistoryJob.mockResolvedValue(succeeded);
     render(<HistoryPage />);
     expect((await screen.findAllByText("已完成")).length).toBe(2);
@@ -202,13 +240,13 @@ describe("history task page", () => {
     render(<HistoryPage />);
     expect(await screen.findByText("网络不可用")).toBeTruthy();
 
-    client.listHistoryJobs.mockResolvedValue([job]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([job]));
     fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     expect(await screen.findByText(job.id)).toBeTruthy();
   });
 
   it("keeps the last confirmed task state explicit when an automatic status refresh fails", async () => {
-    client.listHistoryJobs.mockResolvedValue([job]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([job]));
     client.getHistoryJob.mockRejectedValue(new Error("服务暂不可用"));
     render(<HistoryPage />);
     expect(await screen.findByText("等待执行")).toBeTruthy();
@@ -260,7 +298,7 @@ describe("history task page", () => {
       total_chunks: 10,
       completed_chunks: 3,
     };
-    client.listHistoryJobs.mockResolvedValue([running]);
+    client.listHistoryJobs.mockResolvedValue(jobsPage([running]));
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
     await act(async () => {
@@ -272,5 +310,52 @@ describe("history task page", () => {
       await vi.advanceTimersByTimeAsync(60_001);
     });
     expect(screen.getByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeTruthy();
+  });
+  it("queries shared daily history only after submission and shows market rows", async () => {
+    render(<HistoryPage />);
+    fireEvent.change(await screen.findByLabelText("查询证券代码"), {
+      target: { value: "SH.510300" },
+    });
+    fireEvent.change(screen.getAllByLabelText("开始日期")[0], {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.change(screen.getAllByLabelText("结束日期")[0], {
+      target: { value: "2026-01-03" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "查询行情" }));
+
+    expect(await screen.findByText("2026-01-02")).toBeTruthy();
+    expect(screen.getByText("200")).toBeTruthy();
+    expect(client.getDailyHistory).toHaveBeenCalledWith(
+      "memory-token",
+      {
+        symbol: "SH.510300",
+        start_date: "2026-01-01",
+        end_date: "2026-01-03",
+        limit: 20,
+        offset: 0,
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("asks before deleting terminal jobs and removes only the task record", async () => {
+    const succeeded = { ...job, status: "succeeded" as const };
+    client.listHistoryJobs.mockResolvedValue(jobsPage([succeeded]));
+    const confirmation = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<HistoryPage />);
+    fireEvent.click(screen.getByText(/任务记录/, { selector: "summary" }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除任务记录" }));
+
+    await waitFor(() =>
+      expect(client.deleteHistoryJob).toHaveBeenCalledWith(
+        "memory-token",
+        succeeded.id,
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining("共享历史行情不会被删除"));
+    await waitFor(() => expect(screen.queryByText(succeeded.id)).toBeNull());
+    expect(screen.getByText("任务记录已删除，共享历史行情保留。")).toBeTruthy();
   });
 });

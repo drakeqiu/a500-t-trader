@@ -62,6 +62,33 @@ export type HistoryJob = {
   finished_at: string | null;
   error: string | null;
 };
+export type HistoryJobPage = {
+  jobs: HistoryJob[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+export type DailyHistoryBar = {
+  date: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: number;
+  amount: string | null;
+};
+export type DailyHistoryPage = {
+  symbol: string;
+  start_date: string;
+  end_date: string;
+  covered: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  bars: DailyHistoryBar[];
+};
 export type SignalEvent = { event: string; id?: string; data: unknown };
 export type SignalSnapshot = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
 const apiOrigin = "/api";
@@ -198,8 +225,42 @@ export function createHistoryJob(
     body: JSON.stringify({ type: "daily_history", ...input }),
   });
 }
-export function listHistoryJobs(token: string, signal?: AbortSignal) {
-  return api<HistoryJob[]>("/v1/jobs", token, { signal });
+export function listHistoryJobs(
+  token: string,
+  { limit = 30, offset = 0 }: { limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return api<HistoryJobPage>(`/v1/jobs?${params}`, token, { signal });
+}
+
+
+export function getDailyHistory(
+  token: string,
+  input: {
+    symbol: string;
+    start_date: string;
+    end_date: string;
+    limit: number;
+    offset: number;
+  },
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({
+    symbol: input.symbol,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    limit: String(input.limit),
+    offset: String(input.offset),
+  });
+  return api<DailyHistoryPage>(`/v1/history/daily?${params}`, token, { signal });
+}
+
+export function deleteHistoryJob(token: string, jobId: string, signal?: AbortSignal) {
+  return api<void>(`/v1/jobs/${encodeURIComponent(jobId)}`, token, {
+    method: "DELETE",
+    signal,
+  });
 }
 
 export function getHistoryJob(token: string, jobId: string, signal?: AbortSignal) {

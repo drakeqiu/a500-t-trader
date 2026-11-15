@@ -8,6 +8,7 @@ import {
   getSignals,
   getSignalSnapshot,
   getSnapshot,
+  getDailyHistory,
   parseSignalEvent,
   saveSnapshot,
   streamSignals,
@@ -60,6 +61,23 @@ describe("account API", () => {
     await getSnapshot("token");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/account-snapshot",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer token" }),
+      }),
+    );
+  });
+  it("serializes daily-history pagination as query parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    await getDailyHistory("token", {
+      symbol: "510500",
+      start_date: "2026-01-01",
+      end_date: "2026-01-31",
+      limit: 20,
+      offset: 40,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/history/daily?symbol=510500&start_date=2026-01-01&end_date=2026-01-31&limit=20&offset=40",
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: "Bearer token" }),
       }),
