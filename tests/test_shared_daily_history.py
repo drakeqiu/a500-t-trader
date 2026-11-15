@@ -259,7 +259,47 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
     assert staged_row[0] == 0
 
 
+def test_authenticated_daily_history_symbols_list_shared_coverage(
+    postgres_url: str,
+) -> None:
+    repository = BacktestRepository(postgres_url)
+    repository.save_daily_history(
+        (), date(2026, 1, 1), date(2026, 1, 5), symbol="510300"
+    )
+    repository.save_daily_history(
+        (), date(2026, 1, 4), date(2026, 1, 8), symbol="510300"
+    )
+    repository.save_daily_history(
+        (), date(2025, 12, 1), date(2026, 1, 9), symbol="510500"
+    )
+    app = create_app(postgres_url, lambda token: token)
+    with TestClient(app) as client:
+        assert client.get("/v1/history/daily/symbols").status_code == 401
+        response = client.get(
+            "/v1/history/daily/symbols",
+            headers={"Authorization": "Bearer alice"},
+        )
+        assert client.get(
+            "/v1/history/daily/symbols/510300/ranges"
+        ).status_code == 401
+        ranges = client.get(
+            "/v1/history/daily/symbols/SH.510300/ranges",
+            headers={"Authorization": "Bearer alice"},
+        )
+    assert response.status_code == 200
+    assert response.json()["symbols"] == [
+        {"symbol": "510300", "start_date": "2026-01-01", "end_date": "2026-01-08"},
+        {"symbol": "510500", "start_date": "2025-12-01", "end_date": "2026-01-09"},
+    ]
+    assert ranges.status_code == 200
+    assert ranges.json() == {
+        "symbol": "510300",
+        "ranges": [{"start_date": "2026-01-01", "end_date": "2026-01-08"}],
+    }
+
+
 def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
+
     postgres_url: str,
 ) -> None:
     repository = BacktestRepository(postgres_url)

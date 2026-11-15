@@ -447,6 +447,34 @@ class BacktestRepository:
                 "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                 (symbol, start_date.isoformat(), end_date.isoformat()),
             )
+    def list_shared_daily_history_symbols(self) -> tuple[tuple[str, str, str], ...]:
+        """Return instruments and the outer dates of their downloaded coverage."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT symbol, min(start_date), max(end_date) "
+                "FROM shared_daily_history_ranges GROUP BY symbol ORDER BY symbol"
+            ).fetchall()
+        return tuple((str(symbol), str(start), str(end)) for symbol, start, end in rows)
+    def list_shared_daily_history_ranges(
+        self, symbol: str
+    ) -> tuple[tuple[str, str], ...]:
+        """Return merged coverage intervals from the shared history store."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT start_date, end_date FROM shared_daily_history_ranges "
+                "WHERE symbol=%s ORDER BY start_date, end_date",
+                (symbol,),
+            ).fetchall()
+        merged: list[tuple[str, str]] = []
+        for start, end in rows:
+            start_text, end_text = str(start), str(end)
+            if merged and start_text <= merged[-1][1]:
+                previous_start, previous_end = merged[-1]
+                merged[-1] = (previous_start, max(previous_end, end_text))
+            else:
+                merged.append((start_text, end_text))
+        return tuple(merged)
+
 
     def get_shared_daily_history(
         self, symbol: str, start_date: date, end_date: date

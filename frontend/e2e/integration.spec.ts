@@ -634,7 +634,7 @@ test("shows checkpoint progress for a running quarterly history task", async ({ 
   await expect(page.getByRole("progressbar", { name: "任务进度 33%" })).toBeVisible();
   await expect(page.getByText("33%", { exact: true })).toBeVisible();
 });
-test("queries covered shared daily history and deletes only a finished task record", async ({
+test("shows downloaded securities with lazy-loaded coverage and deletes only a finished task record", async ({
   page,
 }) => {
   await page.goto("/");
@@ -660,44 +660,32 @@ test("queries covered shared daily history and deletes only a finished task reco
       await route.fulfill({ status: 204 });
       return;
     }
-    expect(route.request().method()).toBe("GET");
     await route.fulfill({
       json: { jobs: [finished], total: 1, limit: 30, offset: 0, has_more: false },
     });
   });
-  await page.route("**/api/v1/history/daily**", async (route) => {
-    expect(route.request().url()).toContain("symbol=SH.510300");
+  await page.route("**/api/v1/history/daily/symbols", async (route) => {
     await route.fulfill({
       json: {
-        symbol: "SH.510300",
-        start_date: "2026-01-01",
-        end_date: "2026-01-03",
-        covered: true,
-        total: 1,
-        limit: 20,
-        offset: 0,
-        has_more: false,
-        bars: [
-          {
-            date: "2026-01-02",
-            open: "1",
-            high: "2",
-            low: "1",
-            close: "2",
-            volume: 100,
-            amount: "200",
-          },
-        ],
+        symbols: [{ symbol: "510300", start_date: "2026-01-01", end_date: "2026-01-03" }],
+      },
+    });
+  });
+  await page.route("**/api/v1/history/daily/symbols/510300/ranges", async (route) => {
+    await route.fulfill({
+      json: {
+        symbol: "510300",
+        ranges: [{ start_date: "2026-01-01", end_date: "2026-01-03" }],
       },
     });
   });
   await page.getByRole("link", { name: "历史行情" }).click();
-  await page.getByLabel("查询证券代码").fill("SH.510300");
-  await page.getByLabel("开始日期").first().fill("2026-01-01");
-  await page.getByLabel("结束日期").first().fill("2026-01-03");
-  await page.getByRole("button", { name: "查询行情" }).click();
-  await expect(page.getByRole("row", { name: /2026-01-02/ })).toBeVisible();
-  await expect(page.getByText("200")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "已下载的证券" })).toBeVisible();
+  await expect(page.locator(".history-symbol-list")).toContainText("510300");
+  await expect(page.getByText("2026-01-01 至 2026-01-03")).toHaveCount(0);
+  await page.locator(".history-symbol-details summary").click();
+  await expect(page.getByText("2026-01-01 至 2026-01-03")).toBeVisible();
+
 
   page.on("dialog", (dialog) => dialog.accept());
   await page.locator(".history-jobs > summary").click();

@@ -10,6 +10,8 @@ const { client } = vi.hoisted(() => ({
     getHistoryJob: vi.fn(),
     cancelHistoryJob: vi.fn(),
     getDailyHistory: vi.fn(),
+    listDailyHistorySymbols: vi.fn(),
+    listDailyHistorySymbolRanges: vi.fn(),
     deleteHistoryJob: vi.fn(),
   },
 }));
@@ -73,8 +75,16 @@ const job: HistoryJob = {
 beforeEach(() => {
   vi.resetAllMocks();
   client.listHistoryJobs.mockResolvedValue(jobsPage([]));
-  client.getDailyHistory.mockResolvedValue(dailyPage);
-  client.deleteHistoryJob.mockResolvedValue(undefined);
+  client.listDailyHistorySymbols.mockResolvedValue({
+    symbols: [{ symbol: "510300", start_date: "2026-01-01", end_date: "2026-01-03" }],
+  });
+  client.listDailyHistorySymbolRanges.mockResolvedValue({
+    symbol: "510300",
+    ranges: [
+      { start_date: "2026-01-01", end_date: "2026-01-03" },
+      { start_date: "2026-01-07", end_date: "2026-01-09" },
+    ],
+  });
   window.localStorage.clear();
 });
 afterEach(() => {
@@ -311,32 +321,20 @@ describe("history task page", () => {
     });
     expect(screen.getByText("后端状态超过 1 分钟未更新；仍在查询，不代表任务失败。")).toBeTruthy();
   });
-  it("queries shared daily history only after submission and shows market rows", async () => {
+  it("lazy-loads exact downloaded coverage when a security is expanded", async () => {
     render(<HistoryPage />);
-    fireEvent.change(await screen.findByLabelText("查询证券代码"), {
-      target: { value: "SH.510300" },
-    });
-    fireEvent.change(screen.getAllByLabelText("开始日期")[0], {
-      target: { value: "2026-01-01" },
-    });
-    fireEvent.change(screen.getAllByLabelText("结束日期")[0], {
-      target: { value: "2026-01-03" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "查询行情" }));
-
-    expect(await screen.findByText("2026-01-02")).toBeTruthy();
-    expect(screen.getByText("200")).toBeTruthy();
-    expect(client.getDailyHistory).toHaveBeenCalledWith(
+    expect(await screen.findByRole("heading", { name: "已下载的证券" })).toBeTruthy();
+    expect(screen.getByText("510300")).toBeTruthy();
+    expect(client.listDailyHistorySymbolRanges).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("510300"));
+    expect(await screen.findByText("2026-01-01 至 2026-01-03")).toBeTruthy();
+    expect(screen.getByText("2026-01-07 至 2026-01-09")).toBeTruthy();
+    expect(client.listDailyHistorySymbolRanges).toHaveBeenCalledWith(
       "memory-token",
-      {
-        symbol: "SH.510300",
-        start_date: "2026-01-01",
-        end_date: "2026-01-03",
-        limit: 20,
-        offset: 0,
-      },
+      "510300",
       expect.any(AbortSignal),
     );
+    expect(client.getDailyHistory).not.toHaveBeenCalled();
   });
 
   it("asks before deleting terminal jobs and removes only the task record", async () => {

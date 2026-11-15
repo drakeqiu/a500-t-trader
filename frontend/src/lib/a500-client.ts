@@ -89,6 +89,18 @@ export type DailyHistoryPage = {
   has_more: boolean;
   bars: DailyHistoryBar[];
 };
+export type DailyHistorySymbol = {
+  symbol: string;
+  start_date: string;
+  end_date: string;
+};
+export type DailyHistorySymbols = { symbols: DailyHistorySymbol[] };
+export type DailyHistoryRange = { start_date: string; end_date: string };
+export type DailyHistorySymbolRanges = {
+  symbol: string;
+  ranges: DailyHistoryRange[];
+};
+
 export type SignalEvent = { event: string; id?: string; data: unknown };
 export type SignalSnapshot = { signals: Signal[]; strategy: string; parameter_fingerprint: string };
 const apiOrigin = "/api";
@@ -225,6 +237,21 @@ export function createHistoryJob(
     body: JSON.stringify({ type: "daily_history", ...input }),
   });
 }
+export function listDailyHistorySymbols(token: string, signal?: AbortSignal) {
+  return api<DailyHistorySymbols>("/v1/history/daily/symbols", token, { signal });
+}
+export function listDailyHistorySymbolRanges(
+  token: string,
+  symbol: string,
+  signal?: AbortSignal,
+) {
+  return api<DailyHistorySymbolRanges>(
+    `/v1/history/daily/symbols/${encodeURIComponent(symbol)}/ranges`,
+    token,
+    { signal },
+  );
+}
+
 export function listHistoryJobs(
   token: string,
   { limit = 30, offset = 0 }: { limit?: number; offset?: number } = {},

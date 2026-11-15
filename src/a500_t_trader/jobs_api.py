@@ -70,6 +70,44 @@ def create_app(
         subject = _authenticated_subject(auth, authorization)
         return respond(store.list_for_subject(subject, limit=limit, offset=offset))
 
+    @app.get("/v1/history/daily/symbols")
+    def list_daily_history_symbols(
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _authenticated_subject(auth, authorization)
+        return respond(
+            {
+                "symbols": [
+                    {"symbol": symbol, "start_date": start, "end_date": end}
+                    for symbol, start, end in (
+                        daily_history.list_shared_daily_history_symbols()
+                    )
+                ]
+            }
+        )
+
+    @app.get("/v1/history/daily/symbols/{symbol}/ranges")
+    def list_daily_history_symbol_ranges(
+        symbol: str,
+        authorization: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _authenticated_subject(auth, authorization)
+        try:
+            normalized = normalize_symbol(symbol)
+        except ValueError as exc:
+            raise HTTPException(422, "Invalid security symbol") from exc
+        return respond(
+            {
+                "symbol": normalized,
+                "ranges": [
+                    {"start_date": start, "end_date": end}
+                    for start, end in (
+                        daily_history.list_shared_daily_history_ranges(normalized)
+                    )
+                ],
+            }
+        )
+
     @app.get("/v1/history/daily")
     def query_daily_history(
         symbol: str,
