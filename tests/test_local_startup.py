@@ -546,3 +546,10 @@ def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
     )
     assert lan.main() == 1
     assert "Rauthy readiness timed out" in capsys.readouterr().err
+
+
+def test_gateway_routes_shared_history_through_jobs_api() -> None:
+    gateway = (SCRIPT.parents[1] / "deploy" / "oidc-gateway.conf").read_text()
+    jobs_location = gateway.split("location ~ ^/api/v1/(jobs|history/daily)", 1)[1]
+    jobs_location = jobs_location.split("\n    }", 1)[0]
+    assert "set $jobs_api jobs-api:8000;" in jobs_location

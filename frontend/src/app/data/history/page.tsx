@@ -6,12 +6,15 @@ import {
   cancelHistoryJob,
   createHistoryJob,
   deleteHistoryJob,
-  getDailyHistory,
   getHistoryJob,
+  listDailyHistorySymbolRanges,
+  listDailyHistorySymbols,
   listHistoryJobs,
-  type DailyHistoryPage,
+  type DailyHistoryRange,
+  type DailyHistorySymbol,
   type HistoryJob,
 } from "@/lib/a500-client";
+
 import { AppShell } from "@/components/app-shell";
 import { PageHeading } from "@/components/page-heading";
 import { beginAuthorization, configurationReady } from "@/lib/oidc";
@@ -45,7 +48,7 @@ function messageFor(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError")
     return "查询超时，尚未取得新的后端状态；可手动重试。";
   if (error instanceof ApiError && error.status === 401) return "授权已失效，请重新安全连接。";
-  if (error instanceof ApiError && error.status === 404) return "任务不存在或不属于当前登录账户。";
+  if (error instanceof ApiError && error.status === 404) return "请求的资源不存在。";
   if (error instanceof ApiError && error.status === 409)
     return "任务已进入不可取消阶段；请刷新状态确认结果。";
   if (error instanceof ApiError && error.status === 422) return `请求未被接受：${error.message}`;
@@ -64,6 +67,71 @@ function requestMessageFor(error: unknown, action: "create" | "cancel" | "delete
     return "任务仍在处理中，不能删除；请刷新状态后重试。";
   return messageFor(error);
 }
+function DownloadedSecurity({ token, symbol }: { token: string; symbol: string }) {
+  const [ranges, setRanges] = useState<DailyHistoryRange[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const loaded = useRef(false);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  const loadRanges = () => {
+    if (loaded.current || loading) return;
+    const current = new AbortController();
+    controller.current = current;
+    setLoading(true);
+    setError("");
+    void listDailyHistorySymbolRanges(token, symbol, requestSignal(current.signal))
+      .then((result) => {
+        setRanges(result.ranges);
+        loaded.current = true;
+      })
+      .catch((reason: unknown) => {
+        if (!abortError(reason)) setError(messageFor(reason));
+      })
+      .finally(() => {
+        if (!current.signal.aborted) setLoading(false);
+      });
+  };
+  return (
+    <li>
+      <details
+        className="history-symbol-details"
+        onToggle={(event) => {
+          if (event.currentTarget.open) loadRanges();
+        }}
+      >
+        <summary>{symbol}</summary>
+        {loading ? (
+          <p className="history-muted" role="status">
+            正在读取下载日期…
+          </p>
+        ) : error ? (
+          <p className="history-error" role="alert">
+            {error}{" "}
+            <button className="history-range-retry" onClick={loadRanges}>
+              重试
+            </button>
+          </p>
+        ) : ranges ? (
+          ranges.length ? (
+            <ul className="history-range-list">
+              {ranges.map((range) => (
+                <li key={`${range.start_date}:${range.end_date}`}>
+                  {range.start_date} 至 {range.end_date}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="history-muted">暂无下载日期记录。</p>
+          )
+        ) : (
+          <p className="history-muted">展开后读取已下载的行情日期。</p>
+        )}
+      </details>
+    </li>
+  );
+}
+
 function HistoryPage() {
   const token = useSyncExternalStore(subscribeSession, getAccessToken, () => null);
   const [hydrated, setHydrated] = useState(false);
@@ -75,12 +143,7 @@ function HistoryPage() {
   const [symbol, setSymbol] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [querySymbol, setQuerySymbol] = useState("");
-  const [queryStartDate, setQueryStartDate] = useState("");
-  const [queryEndDate, setQueryEndDate] = useState("");
-  const [queryPageSize, setQueryPageSize] = useState(20);
-  const [historyPage, setHistoryPage] = useState<DailyHistoryPage | null>(null);
-  const [queryLoading, setQueryLoading] = useState(false);
+  const [historySymbols, setHistorySymbols] = useState<DailyHistorySymbol[]>([]);
   const [queryError, setQueryError] = useState("");
   const [today, setToday] = useState("");
   const [now, setNow] = useState(0);
@@ -89,22 +152,18 @@ function HistoryPage() {
   const [notice, setNotice] = useState("");
   const [jobErrors, setJobErrors] = useState<Record<string, string>>({});
   const request = useRef<AbortController | null>(null);
-  const queryRequest = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
     const currentDate = shanghaiToday();
     setToday(currentDate);
     setStartDate(dateDaysAgo(365, currentDate));
     setEndDate(dateDaysAgo(1, currentDate));
-    setQueryStartDate(dateDaysAgo(365, currentDate));
-    setQueryEndDate(dateDaysAgo(1, currentDate));
     setNow(Date.now());
     setHydrated(true);
   }, []);
   useEffect(
     () => () => {
       request.current?.abort();
-      queryRequest.current?.abort();
     },
     [],
   );
@@ -160,6 +219,17 @@ function HistoryPage() {
       });
     return () => controller.abort();
   }, [hydrated, loadJobs, token]);
+  useEffect(() => {
+    if (!hydrated || !token) return;
+    const controller = new AbortController();
+    void listDailyHistorySymbols(token, requestSignal(controller.signal))
+      .then(({ symbols: available }) => setHistorySymbols(available))
+      .catch((reason: unknown) => {
+        if (!abortError(reason)) setQueryError(messageFor(reason));
+      });
+    return () => controller.abort();
+  }, [hydrated, token]);
+
   useEffect(() => {
     const nextStaleAt = jobs
       .filter((job) => !terminal.has(job.status))
@@ -321,39 +391,6 @@ function HistoryPage() {
       }
     });
 
-  const queryHistory = async (offset = 0, pageSize = queryPageSize) => {
-    if (!token) return;
-    queryRequest.current?.abort();
-    const controller = new AbortController();
-    queryRequest.current = controller;
-    setQueryLoading(true);
-    setQueryError("");
-    try {
-      const page = await getDailyHistory(
-        token,
-        {
-          symbol: querySymbol.trim(),
-          start_date: queryStartDate,
-          end_date: queryEndDate,
-          limit: pageSize,
-          offset,
-        },
-        requestSignal(controller.signal),
-      );
-      setHistoryPage(page);
-    } catch (reason) {
-      if (!abortError(reason)) {
-        setHistoryPage(null);
-        setQueryError(messageFor(reason));
-      }
-    } finally {
-      if (queryRequest.current === controller) {
-        queryRequest.current = null;
-        setQueryLoading(false);
-      }
-    }
-  };
-
   const remove = (job: HistoryJob) => {
     if (!window.confirm(`确定删除任务 ${job.id} 的记录吗？共享历史行情不会被删除。`)) return;
     runRequest(async (signal) => {
@@ -390,10 +427,38 @@ function HistoryPage() {
           as="header"
           className="history-heading"
           title="历史行情"
-          description="按标的与日期范围创建日线拉取任务；任务按登录账户隔离。"
+          description="查看已保存的行情标的，或创建日线拉取任务；任务按账户隔离。"
         >
           <span className="history-date-note">日期以北京时间为准</span>
         </PageHeading>
+        {token && (
+          <section className="history-panel history-query" aria-labelledby="history-query-title">
+            <div className="history-section-heading">
+              <div>
+                <h2 id="history-query-title">已下载的证券</h2>
+                <p>按证券查看已下载的行情覆盖日期，展开时再读取详情。</p>
+              </div>
+            </div>
+            {historySymbols.length === 0 ? (
+              <p className="history-muted">暂无已下载行情证券。</p>
+            ) : (
+              <ul className="history-symbol-list">
+                {historySymbols.map(({ symbol: availableSymbol }) => (
+                  <DownloadedSecurity
+                    key={availableSymbol}
+                    token={token}
+                    symbol={availableSymbol}
+                  />
+                ))}
+              </ul>
+            )}
+            {queryError && (
+              <p className="history-error" role="alert">
+                {queryError}
+              </p>
+            )}
+          </section>
+        )}
         {!token ? (
           <section className="history-panel" aria-labelledby="history-auth-title">
             <h2 id="history-auth-title">连接账户后管理历史任务</h2>
@@ -408,152 +473,6 @@ function HistoryPage() {
           </section>
         ) : (
           <>
-            <section className="history-panel history-query" aria-labelledby="history-query-title">
-              <div className="history-section-heading">
-                <div>
-                  <h2 id="history-query-title">查询共享日线</h2>
-                  <p>按标的和日期范围读取已保存的行情；查询不会创建任务或触发下载。</p>
-                </div>
-              </div>
-              <div className="history-form">
-                <label>
-                  查询证券代码
-                  <input
-                    autoComplete="off"
-                    placeholder="例如 510500 或 SH.510500"
-                    value={querySymbol}
-                    onChange={(event) => setQuerySymbol(event.target.value)}
-                  />
-                </label>
-                <label>
-                  开始日期
-                  <input
-                    type="date"
-                    value={queryStartDate}
-                    onChange={(event) => setQueryStartDate(event.target.value)}
-                  />
-                </label>
-                <label>
-                  结束日期
-                  <input
-                    type="date"
-                    value={queryEndDate}
-                    onChange={(event) => setQueryEndDate(event.target.value)}
-                  />
-                </label>
-                <button
-                  className="trade-import-primary"
-                  disabled={
-                    !hydrated ||
-                    !querySymbol.trim() ||
-                    !queryStartDate ||
-                    !queryEndDate ||
-                    queryStartDate > queryEndDate ||
-                    queryLoading
-                  }
-                  onClick={() => void queryHistory()}
-                >
-                  {queryLoading ? "正在查询…" : "查询行情"}
-                </button>
-              </div>
-              {queryError && (
-                <p className="history-error" role="alert">
-                  {queryError}
-                </p>
-              )}
-              {historyPage && (
-                <div className="history-results" aria-live="polite">
-                  {!historyPage.covered ? (
-                    <p className="history-muted">
-                      该日期范围尚未完整覆盖。当前只读取已有数据，不会自动补拉行情。
-                    </p>
-                  ) : historyPage.total === 0 ? (
-                    <p className="history-muted">
-                      日期范围已完整覆盖，但没有已观察到的交易日数据。
-                    </p>
-                  ) : (
-                    <>
-                      <div className="history-query-summary">
-                        <p>
-                          {historyPage.symbol} · {historyPage.start_date} 至 {historyPage.end_date}
-                        </p>
-                        <label>
-                          每页行数
-                          <select
-                            value={queryPageSize}
-                            onChange={(event) => {
-                              const nextSize = Number(event.target.value);
-                              setQueryPageSize(nextSize);
-                              void queryHistory(0, nextSize);
-                            }}
-                          >
-                            <option value={10}>10</option>
-                            <option value={20}>20</option>
-                            <option value={50}>50</option>
-                          </select>
-                        </label>
-                      </div>
-                      <div className="history-table-wrap">
-                        <table className="history-bars-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">日期</th>
-                              <th scope="col">开盘</th>
-                              <th scope="col">最高</th>
-                              <th scope="col">最低</th>
-                              <th scope="col">收盘</th>
-                              <th scope="col">成交量</th>
-                              {historyPage.bars.some((bar) => bar.amount !== null) && (
-                                <th scope="col">成交额</th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {historyPage.bars.map((bar) => (
-                              <tr key={bar.date}>
-                                <th scope="row">{bar.date}</th>
-                                <td>{bar.open}</td>
-                                <td>{bar.high}</td>
-                                <td>{bar.low}</td>
-                                <td>{bar.close}</td>
-                                <td>{bar.volume.toLocaleString("zh-CN")}</td>
-                                {historyPage.bars.some((item) => item.amount !== null) && (
-                                  <td>{bar.amount ?? "—"}</td>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="history-pagination">
-                        <span>
-                          共 {historyPage.total} 条 · 第 {historyPage.offset + 1}–
-                          {historyPage.offset + historyPage.bars.length} 条
-                        </span>
-                        <div>
-                          <button
-                            className="trade-import-secondary"
-                            disabled={queryLoading || historyPage.offset === 0}
-                            onClick={() =>
-                              void queryHistory(Math.max(0, historyPage.offset - queryPageSize))
-                            }
-                          >
-                            上一页
-                          </button>
-                          <button
-                            className="trade-import-secondary"
-                            disabled={queryLoading || !historyPage.has_more}
-                            onClick={() => void queryHistory(historyPage.offset + queryPageSize)}
-                          >
-                            下一页
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
             <section
               className="history-panel history-create"
               aria-labelledby="history-create-title"
