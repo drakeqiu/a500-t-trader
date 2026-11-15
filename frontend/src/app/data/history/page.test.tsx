@@ -5,6 +5,7 @@ import type { HistoryJob } from "@/lib/a500-client";
 
 const { client } = vi.hoisted(() => ({
   client: {
+    listHistoryJobs: vi.fn(),
     createHistoryJob: vi.fn(),
     getHistoryJob: vi.fn(),
     cancelHistoryJob: vi.fn(),
@@ -43,6 +44,7 @@ const job: HistoryJob = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  client.listHistoryJobs.mockResolvedValue([]);
   window.localStorage.clear();
 });
 afterEach(() => {
@@ -51,6 +53,15 @@ afterEach(() => {
 });
 
 describe("history task page", () => {
+  it("loads recent jobs from the account in a browser with no saved job IDs", async () => {
+    client.listHistoryJobs.mockResolvedValue([job]);
+    render(<HistoryPage />);
+
+    expect(await screen.findByText(job.id)).toBeTruthy();
+    expect(client.listHistoryJobs).toHaveBeenCalledWith("memory-token", expect.any(AbortSignal));
+    expect(window.localStorage.getItem("a500.history-job-ids")).toBeNull();
+  });
+
   it("does not present an accepted job as completed and uses non-percent status feedback without progress data", async () => {
     client.createHistoryJob.mockResolvedValue(job);
     render(<HistoryPage />);
@@ -64,7 +75,7 @@ describe("history task page", () => {
     expect(screen.getByText("等待执行")).toBeTruthy();
     expect(screen.getByText("正在等待后端处理；当前没有可用的精确百分比。")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(window.localStorage.getItem("a500.history-job-ids")).toContain("job-1");
+    expect(client.listHistoryJobs).toHaveBeenCalled();
   });
 
   it("shows progress only when the backend reports valid chunk totals", async () => {
@@ -75,7 +86,7 @@ describe("history task page", () => {
       total_chunks: 4,
       completed_chunks: 1,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    client.listHistoryJobs.mockResolvedValue([running]);
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
     expect(await screen.findByRole("progressbar", { name: "任务进度 25%" })).toBeTruthy();
@@ -88,56 +99,120 @@ describe("history task page", () => {
       status: "failed" as const,
       error: "供应商连接超时",
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    client.listHistoryJobs.mockResolvedValue([failed]);
     client.getHistoryJob.mockResolvedValue(failed);
     render(<HistoryPage />);
     expect(await screen.findByText("失败")).toBeTruthy();
     expect(screen.getByText("失败原因：供应商连接超时")).toBeTruthy();
-    expect(client.getHistoryJob).toHaveBeenCalledWith(
-      "memory-token",
-      job.id,
-      expect.any(AbortSignal),
-    );
+    expect(client.listHistoryJobs).toHaveBeenCalledWith("memory-token", expect.any(AbortSignal));
   });
 
-  it("keeps succeeded jobs in the task list without fetching or showing task-bound bars", async () => {
+  it("shows terminal progress from confirmed chunks without marking failures or cancellations complete", async () => {
+    const terminalJobs = [
+      { status: "failed" as const, completed_chunks: 2, total_chunks: 4, percent: 50 },
+      { status: "cancelled" as const, completed_chunks: 3, total_chunks: 4, percent: 75 },
+    ];
+    for (const [index, task] of terminalJobs.entries()) {
+      const terminalJob = {
+        ...job,
+        id: `terminal-${index}`,
+        status: task.status,
+        completed_chunks: task.completed_chunks,
+        total_chunks: task.total_chunks,
+      };
+      client.listHistoryJobs.mockResolvedValue([terminalJob]);
+      client.getHistoryJob.mockResolvedValueOnce(terminalJob);
+      const { unmount } = render(<HistoryPage />);
+      expect(
+        await screen.findByRole("progressbar", {
+          name: `任务进度 ${task.percent}%`,
+        }),
+      ).toBeTruthy();
+      expect(screen.getByText(`${task.percent}%`)).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("does not report exact progress when chunk counts are inconsistent", async () => {
+    const inconsistent = {
+      ...job,
+      status: "running" as const,
+      total_chunks: 4,
+      completed_chunks: 5,
+    };
+    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.getHistoryJob.mockResolvedValue(inconsistent);
+    render(<HistoryPage />);
+    expect(await screen.findByText("5 / 4")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("does not report exact progress for a succeeded job with incomplete chunks", async () => {
+    const inconsistent = {
+      ...job,
+      status: "succeeded" as const,
+      total_chunks: 4,
+      completed_chunks: 1,
+    };
+    client.listHistoryJobs.mockResolvedValue([inconsistent]);
+    client.getHistoryJob.mockResolvedValue(inconsistent);
+    render(<HistoryPage />);
+    expect(await screen.findByText("已完成")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText("25%")).toBeNull();
+  });
+
+  it("does not show task completion when a cancellation follows the last checkpoint", async () => {
+    const cancelled = {
+      ...job,
+      status: "cancelled" as const,
+      total_chunks: 4,
+      completed_chunks: 4,
+    };
+    client.listHistoryJobs.mockResolvedValue([cancelled]);
+    client.getHistoryJob.mockResolvedValue(cancelled);
+    render(<HistoryPage />);
+    expect(await screen.findByText("4 / 4")).toBeTruthy();
+    expect((await screen.findAllByText("已取消")).length).toBe(1);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.queryByText("99%")).toBeNull();
+  });
+
+  it("shows succeeded jobs as complete without exposing task-bound bars", async () => {
     const succeeded = {
       ...job,
       status: "succeeded" as const,
       total_chunks: 1,
       completed_chunks: 1,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    client.listHistoryJobs.mockResolvedValue([succeeded]);
     client.getHistoryJob.mockResolvedValue(succeeded);
     render(<HistoryPage />);
-    expect(await screen.findByText("已完成")).toBeTruthy();
+    expect((await screen.findAllByText("已完成")).length).toBe(2);
+    expect(screen.getByRole("progressbar", { name: "任务进度 100%" })).toBeTruthy();
+    expect(screen.getByText("100%")).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新状态" })).toBeTruthy();
     expect(screen.queryByText("查看结果")).toBeNull();
     expect(screen.queryByText("行情结果")).toBeNull();
-    expect(client.getHistoryJob).toHaveBeenCalled();
+    expect(client.listHistoryJobs).toHaveBeenCalled();
   });
-  it("keeps failed status lookups visible and allows unresolved task IDs to be retried", async () => {
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id, "job-2"]));
-    client.getHistoryJob.mockImplementation((_token: string, id: string) =>
-      id === job.id ? Promise.resolve(job) : Promise.reject(new Error("网络不可用")),
-    );
+  it("shows job-list errors and retries loading recent jobs", async () => {
+    client.listHistoryJobs.mockRejectedValueOnce(new Error("网络不可用"));
     render(<HistoryPage />);
-    expect(await screen.findByText("无法确认任务状态")).toBeTruthy();
-    expect(screen.getByText(/网络不可用/)).toBeTruthy();
-    client.getHistoryJob.mockImplementation(() => Promise.resolve({ ...job, id: "job-2" }));
-    fireEvent.click(screen.getByRole("button", { name: "重新查询" }));
-    await waitFor(() => expect(screen.queryByText("无法确认任务状态")).toBeNull());
-    expect(screen.getByText("job-2")).toBeTruthy();
+    expect(await screen.findByText("网络不可用")).toBeTruthy();
+
+    client.listHistoryJobs.mockResolvedValue([job]);
+    fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
+    expect(await screen.findByText(job.id)).toBeTruthy();
   });
 
-  it("keeps the last confirmed task state explicit when a manual refresh fails", async () => {
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
-    client.getHistoryJob
-      .mockResolvedValueOnce(job)
-      .mockRejectedValueOnce(new Error("服务暂不可用"));
+  it("keeps the last confirmed task state explicit when an automatic status refresh fails", async () => {
+    client.listHistoryJobs.mockResolvedValue([job]);
+    client.getHistoryJob.mockRejectedValue(new Error("服务暂不可用"));
     render(<HistoryPage />);
     expect(await screen.findByText("等待执行")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+    await waitFor(() => expect(client.getHistoryJob).toHaveBeenCalled(), { timeout: 5000 });
     expect(await screen.findByText("状态查询失败：服务暂不可用")).toBeTruthy();
     expect(screen.getByText("以下为最近一次成功读取的后端状态，并非最新状态。")).toBeTruthy();
     expect(screen.getByText("等待执行")).toBeTruthy();
@@ -185,7 +260,7 @@ describe("history task page", () => {
       total_chunks: 10,
       completed_chunks: 3,
     };
-    window.localStorage.setItem("a500.history-job-ids", JSON.stringify([job.id]));
+    client.listHistoryJobs.mockResolvedValue([running]);
     client.getHistoryJob.mockResolvedValue(running);
     render(<HistoryPage />);
     await act(async () => {

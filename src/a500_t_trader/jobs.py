@@ -8,9 +8,9 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol, cast
 
 import psycopg
@@ -43,6 +43,33 @@ def _date(value: date | str) -> date:
     return value if isinstance(value, date) else date.fromisoformat(value)
 
 
+def _calendar_quarters(start: date, end: date) -> Iterator[tuple[date, date]]:
+    chunk_start = start
+    while chunk_start <= end:
+        quarter_end_month = ((chunk_start.month - 1) // 3 + 1) * 3
+        if quarter_end_month == 12:
+            next_quarter = date(chunk_start.year + 1, 1, 1)
+        else:
+            next_quarter = date(chunk_start.year, quarter_end_month + 1, 1)
+        chunk_end = min(end, next_quarter - timedelta(days=1))
+        yield chunk_start, chunk_end
+        chunk_start = chunk_end + timedelta(days=1)
+
+
+def _quarter_checkpoint_count(
+    start: date, end: date, completed_annual_chunks: int
+) -> int:
+    if completed_annual_chunks == 0:
+        return 0
+    checkpoint_year = min(end.year, start.year + completed_annual_chunks - 1)
+    checkpoint_end = min(end, date(checkpoint_year, 12, 31))
+    return sum(
+        1
+        for _, chunk_end in _calendar_quarters(start, end)
+        if chunk_end <= checkpoint_end
+    )
+
+
 def _bar_date(timestamp: str) -> date:
     return datetime.fromisoformat(timestamp).astimezone(SHANGHAI).date()
 
@@ -67,6 +94,8 @@ _COLUMNS = (
     "created_at, updated_at, finished_at, error"
 )
 
+_RECENT_JOB_LIMIT = 30
+
 
 class JobRepository:
     """PostgreSQL task store; all public reads and mutations are subject-scoped."""
@@ -87,6 +116,57 @@ class JobRepository:
                 error TEXT, lease_token UUID, lease_until TIMESTAMPTZ,
                 cancel_requested BOOLEAN NOT NULL DEFAULT false
             )""")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS daily_history_job_migrations (
+                    version INTEGER PRIMARY KEY
+                )"""
+            )
+            migration = db.execute(
+                "SELECT version FROM daily_history_job_migrations WHERE version=1"
+            ).fetchone()
+            if migration is None:
+                legacy_jobs = db.execute(
+                    """SELECT id, start_date, end_date, completed_chunks, status
+                    FROM daily_history_jobs FOR UPDATE"""
+                ).fetchall()
+                for legacy_job in legacy_jobs:
+                    start, end = legacy_job["start_date"], legacy_job["end_date"]
+                    db.execute(
+                        """UPDATE daily_history_jobs SET total_chunks=%s,
+                            completed_chunks=%s,
+                            lease_token=CASE WHEN status='running'
+                                THEN NULL ELSE lease_token END,
+                            lease_until=CASE WHEN status='running'
+                                THEN NULL ELSE lease_until END
+                        WHERE id=%s""",
+                        (
+                            sum(1 for _ in _calendar_quarters(start, end)),
+                            _quarter_checkpoint_count(
+                                start, end, legacy_job["completed_chunks"]
+                            ),
+                            legacy_job["id"],
+                        ),
+                    )
+                db.execute(
+                    "INSERT INTO daily_history_job_migrations (version) VALUES (1)"
+                )
+            constraint = db.execute(
+                """SELECT 1 FROM pg_constraint
+                WHERE conrelid='daily_history_jobs'::regclass
+                    AND conname='daily_history_jobs_quarter_chunks'"""
+            ).fetchone()
+            if constraint is None:
+                db.execute(
+                    """ALTER TABLE daily_history_jobs
+                    ADD CONSTRAINT daily_history_jobs_quarter_chunks CHECK (
+                        total_chunks = (
+                            (EXTRACT(YEAR FROM end_date)::int
+                                - EXTRACT(YEAR FROM start_date)::int) * 4
+                            + EXTRACT(QUARTER FROM end_date)::int
+                            - EXTRACT(QUARTER FROM start_date)::int + 1
+                        )
+                    )"""
+                )
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_outbox (
                 id UUID PRIMARY KEY,
                 job_id UUID NOT NULL UNIQUE REFERENCES daily_history_jobs(id)
@@ -152,7 +232,7 @@ class JobRepository:
                     symbol,
                     start,
                     end,
-                    end.year - start.year + 1,
+                    sum(1 for _ in _calendar_quarters(start, end)),
                 ),
             ).fetchone()
             db.execute(
@@ -161,6 +241,21 @@ class JobRepository:
             )
         assert row is not None
         return _job(row)  # type: ignore[return-value]
+
+    def list_for_subject(self, subject: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                f"""SELECT {_COLUMNS} FROM daily_history_jobs
+                WHERE subject=%s ORDER BY created_at DESC, id DESC
+                LIMIT %s""",
+                (subject, _RECENT_JOB_LIMIT),
+            ).fetchall()
+        jobs: list[dict[str, Any]] = []
+        for row in rows:
+            job = _job(row)
+            assert job is not None
+            jobs.append(job)
+        return jobs
 
     def get(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
@@ -534,7 +629,11 @@ def _run_job(
     thread.start()
     try:
         provider = None
-        for index in range(job["completed_chunks"], job["total_chunks"]):
+        for index, (start, end) in enumerate(
+            _calendar_quarters(job["start_date"], job["end_date"])
+        ):
+            if index < job["completed_chunks"]:
+                continue
             chunk_started = time.monotonic()
             _LOG.info(
                 "History chunk started job_id=%s chunk=%d/%d",
@@ -545,9 +644,6 @@ def _run_job(
             if not repository.set_stage(job_id, token, "checking_cache"):
                 repository.finish(job_id, token)
                 return
-            year = job["start_date"].year + index
-            start = max(job["start_date"], date(year, 1, 1))
-            end = min(job["end_date"], date(year, 12, 31))
             _LOG.info(
                 "History cache lookup starting job_id=%s chunk=%d",
                 job_id,
