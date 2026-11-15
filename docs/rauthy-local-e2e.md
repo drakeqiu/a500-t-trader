@@ -21,7 +21,7 @@ The runner creates a random Compose project, free localhost ports, and disposabl
 
 The runner drives the real browser authorization-code flow with PKCE/S256 and the real device-authorization flow in a browser, obtaining each user's access token from Rauthy. It checks token issuer, audience, signature algorithm, five-minute lifetime, and that both tokens can call the public signal API. It verifies each subject's separately valued snapshot, rejects the real ID token, and checks the second subject cannot read or confirm the browser subject's trade-import preview. The actual identity-administrator token is also denied access to the browser user's subject-owned preview.
 
-After ordinary Rauthy stop/start, the runner verifies that the same named `/app/data` volume is mounted, then logs in again through both separate clients and verifies the original subjects and isolated account data remain usable.
+After ordinary Rauthy stop/start, the runner verifies that the same named `/app/data` volume is mounted, then logs in again through both separate clients and verifies the original subjects and isolated account data remain usable. The full device-protocol edge checks run once near the end; their 300-second natural-expiry wait also covers the disabled browser user's five-minute access-token expiry, avoiding a second serial wait.
 
 The successful API requests verify access-token signatures through the existing Rauthy JWKS validator. Failure of either token path or any cross-subject/admin isolation check is an acceptance failure. The runner does not log credentials or tokens and does not bypass validation.
 
@@ -29,17 +29,17 @@ The successful API requests verify access-token signatures through the existing 
 
 The browser client receives a five-minute access token (`access_token_lifetime: 300`) and a refresh credential from the real Rauthy authorization-code flow. In the isolated run, the Rauthy administrator API disables only the disposable browser user; the runner confirms the disabled state, attempts a fresh browser login, and submits the already-issued refresh credential. Both authentication operations must be rejected. The credential and token values are never printed.
 
-The runner then calls the public API with the access token issued before disablement. It must still succeed while that JWT is unexpired because the API validates its signature, issuer, audience, and expiration locally; it does not query Rauthy for every request or implement online revocation. After the token's actual `exp` time, the same API call must return `401`. User disablement therefore prevents new authentication/renewal but does not instantly revoke already-issued access tokens; the residual acceptance window lasts until their expiry (up to five minutes from issuance).
+The runner then calls the public API with the access token issued before disablement. It must still succeed while that JWT is unexpired because the API validates its signature, issuer, audience, and expiration locally; it does not query Rauthy for every request or implement online revocation. The device flow's natural-expiry wait runs concurrently with this token's remaining lifetime; afterward the same API call must return `401`. User disablement prevents new authentication/renewal but does not instantly revoke already-issued access tokens.
 
 This is a disposable local acceptance fixture, not evidence from a production identity deployment. The isolated local Podman Compose run is sufficient acceptance; no separately deployed environment is required.
 
-## 用户准入、邮箱变更与邮件捕获
+## 用户准入与邮箱变更
 
 隔离 Rauthy 使用 `OPEN_USER_REG=false`，测试账号由一次性 bootstrap 创建并已启用、已验证邮箱，不会发送账户激活邮件。该 bootstrap 用于自动化验收，不等同于人工管理员在 Rauthy 管理界面创建用户；真实环境必须由管理员创建并审批账号，禁止开放自助注册。
 
 用户邮箱变更验收会修改一次性浏览器用户邮箱，再使用新邮箱登录；runner 比对变更前后的 `sub`，并以新 token 读取先前创建的账户快照。另一用户及身份管理员均不能读取或确认浏览器用户的交易导入预览。系统按稳定的身份主体 ID 归属业务数据，不按邮箱转移数据。
 
-runner 实际提交密码恢复请求，轮询 Mailpit API 取得该一次性用户的邮件正文，从本机 Rauthy 链接完成密码重设，再用新密码执行真实浏览器登录，并使用新 access token 读取原账户快照。恢复链接、恢复令牌、密码和 access token 均只在进程内存中处理，不输出到 runner 日志；测试只接受 issuer 主机为 localhost 的恢复链接。Mailpit 已启动或只收到邮件仍不构成恢复通过。
+The current runner does not repeat Mailpit password recovery: #226 already records that historical capability, and the acceptance boundary explicitly excludes it as a current switching gate. The runner still verifies email change, login with the changed email, stable subject, and existing business-data access.
 
 ## 当前验收边界
 
@@ -59,7 +59,7 @@ Browser automation failures are reported with a fixed message; Playwright diagno
 | Default audience      | `a500-api`                                 |
 | Access-token lifetime | 300 seconds                                |
 
-The runner performs the PKCE browser-login acceptance, then exercises a separate device authorization context without reusing the A500 browser session. The device flow checks pending, early-poll `slow_down`, approval, denial, and natural expiry. It verifies issuer, audience, RS256, and five-minute token lifetime, then accesses signals, writes and reads an account snapshot, and verifies SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
+The runner performs one full device-authorization lifecycle check near the end of the run: pending, early-poll `slow_down`, approval, denial, and natural expiry. The device grant's 300-second natural-expiry wait also lets the disabled browser user's five-minute access token expire, so CI does not wait serially for both timers. The freshly approved device token verifies issuer, audience, RS256, five-minute lifetime, signals, account snapshot, and SSE through the public gateway. Credentials and tokens are generated per run and never logged; temporary bootstrap files are removed after Compose cleanup.
 
 ## #231 切换准入审核（2026-11-13）
 

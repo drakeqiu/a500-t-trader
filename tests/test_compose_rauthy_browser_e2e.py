@@ -286,33 +286,6 @@ def test_email_update_preserves_the_user_record_and_changes_only_email() -> None
     assert current_user["email"] == "before@example.test"
 
 
-def test_extract_recovery_link_from_mailpit_message() -> None:
-    from scripts.compose_rauthy_browser_e2e import _recovery_link
-
-    assert (
-        _recovery_link(
-            [
-                {
-                    "Text": "Use this link: https://localhost:18443/auth/v1/reset-password?token=secret"
-                }
-            ],
-            "localhost",
-        )
-        == "https://localhost:18443/auth/v1/reset-password?token=secret"
-    )
-
-
-def test_recovery_link_rejects_non_localhost_and_missing_link() -> None:
-    from scripts.compose_rauthy_browser_e2e import _recovery_link
-
-    with pytest.raises(AssertionError, match="local Rauthy"):
-        _recovery_link(
-            [{"Text": "https://example.com/reset?token=secret"}], "localhost"
-        )
-    with pytest.raises(AssertionError, match="no recovery link"):
-        _recovery_link([{"Text": "https://localhost/account"}], "localhost")
-
-
 def test_refresh_token_accepts_local_self_signed_tls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -336,22 +309,6 @@ def test_refresh_token_accepts_local_self_signed_tls(
     monkeypatch.setattr(runner, "urlopen", fake_urlopen)
 
     assert runner._refresh_token("https://localhost/token", "client", "secret") == 401
-
-
-def test_extract_recovery_link_from_mailpit_html() -> None:
-    from scripts.compose_rauthy_browser_e2e import _recovery_link
-
-    assert (
-        _recovery_link(
-            [
-                {
-                    "HTML": '<a href="https://localhost/auth/reset?token=secret&amp;code=once">Reset</a>'
-                }
-            ],
-            "localhost",
-        )
-        == "https://localhost/auth/reset?token=secret&code=once"
-    )
 
 
 def test_bootstrap_clients_use_supported_audience_update_path(
@@ -515,6 +472,49 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
     assert runner._device_grant(
         "http://localhost:18080", "http://localhost:8081/auth/v1/", "user", "pass"
     ) == ("fresh-access", "fresh-id")
+
+
+def test_device_grant_can_skip_repeated_lifecycle_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import compose_rauthy_browser_e2e as runner
+
+    calls: list[str] = []
+    monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_device_public_api", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
+
+    def oauth_post(
+        _opener: object, url: str, _data: dict[str, str]
+    ) -> tuple[int, dict[str, object]]:
+        if url.endswith("/device"):
+            calls.append("device")
+            return (
+                200,
+                {
+                    "device_code": "code",
+                    "expires_in": 300,
+                    "interval": 0,
+                    "verification_uri_complete": "http://localhost/device?code=x",
+                    "user_code": "x",
+                },
+            )
+        calls.append("token")
+        return (200, {"access_token": "access", "id_token": "id"})
+
+    monkeypatch.setattr(runner, "_oauth_post", oauth_post)
+    assert runner._device_grant(
+        "http://localhost:18080",
+        "http://localhost:8081/auth/v1/",
+        "user",
+        "pass",
+        verify_lifecycle=False,
+    ) == ("access", "id")
+    assert calls == ["device", "token"]
 
 
 @pytest.mark.parametrize(

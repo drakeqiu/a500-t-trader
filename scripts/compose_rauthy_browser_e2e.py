@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import html
 import json
 import os
 import re
@@ -32,88 +31,10 @@ from urllib.request import (
 )
 
 
-def _recovery_link(messages: list[dict[str, object]], hostname: str) -> str:
-    for message in messages:
-        text = html.unescape(
-            "\n".join(
-                str(message.get(field, "")) for field in ("Text", "HTML", "Subject")
-            )
-        )
-        for match in re.finditer(r"https?://[^\s\"'<>]+", text):
-            link = match.group(0).rstrip(").,;")
-            parsed = urlsplit(link)
-            if parsed.hostname != hostname or "reset" not in parsed.path.lower():
-                continue
-            return link
-    raise AssertionError("Mailpit message has no recovery link for local Rauthy")
-
-
-def _mailpit_recovery_link(mailpit: str, email: str, hostname: str) -> str:
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        try:
-            with urlopen(mailpit + "/api/v1/messages", timeout=5) as response:
-                result = json.load(response)
-            messages = result.get("messages", []) if isinstance(result, dict) else []
-            for message in messages:
-                if (
-                    not isinstance(message, dict)
-                    or email.lower() not in json.dumps(message).lower()
-                ):
-                    continue
-                message_id = message.get("ID")
-                if not isinstance(message_id, str):
-                    continue
-                with urlopen(
-                    mailpit + "/api/v1/message/" + message_id, timeout=5
-                ) as response:
-                    detail = json.load(response)
-                if isinstance(detail, dict):
-                    return _recovery_link([detail], hostname)
-        except OSError, TimeoutError, json.JSONDecodeError:
-            pass
-        time.sleep(1)
-    raise RuntimeError("Timed out waiting for local password recovery email")
-
-
 def _email_update_payload(user: dict[str, object], new_email: str) -> dict[str, object]:
     updated = dict(user)
     updated["email"] = new_email
     return updated
-
-
-def _perform_password_recovery(
-    issuer: str, mailpit: str, email: str, new_password: str
-) -> None:
-    from playwright.sync_api import sync_playwright
-
-    hostname = urlsplit(issuer).hostname or "localhost"
-    stage = "opening the password-reset request page"
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(ignore_https_errors=True)
-        try:
-            page.goto(issuer + "users/password_reset", wait_until="domcontentloaded")
-            stage = "submitting the reset request"
-            page.get_by_role("textbox").first.fill(email)
-            page.locator('button[type="submit"]:visible').click()
-            page.locator(".success").wait_for(state="visible", timeout=30_000)
-            stage = "retrieving the reset email"
-            link = _mailpit_recovery_link(mailpit, email, hostname)
-            page.goto(link, wait_until="domcontentloaded")
-            stage = "submitting the new password"
-            password_fields = page.locator('input[type="password"]:visible')
-            password_fields.first.fill(new_password)
-            if password_fields.count() > 1:
-                password_fields.nth(1).fill(new_password)
-            page.locator('button[type="submit"]:visible').click()
-            page.wait_for_load_state("domcontentloaded")
-        except Exception as exc:
-            raise RuntimeError(
-                f"Local password recovery failed while {stage} ({type(exc).__name__})"
-            ) from None
-        finally:
-            browser.close()
 
 
 def _change_user_email(
@@ -267,6 +188,7 @@ def _device_grant(
     password: str,
     *,
     create_snapshot: bool = True,
+    verify_lifecycle: bool = True,
 ) -> tuple[str, str]:
     from playwright.sync_api import sync_playwright
 
@@ -358,16 +280,19 @@ def _device_grant(
         or not isinstance(interval, int)
     ):
         raise AssertionError("Malformed device authorization response")
-    time.sleep(interval + 1)
-    status, response = poll(code)
-    if status != 400 or protocol_error(response) != "authorization_pending":
-        raise AssertionError("Expected authorization_pending before browser approval")
-    print("Device protocol: authorization_pending.")
-    status, response = poll(code)
-    if status != 400 or protocol_error(response) != "slow_down":
-        raise AssertionError("Expected slow_down after an early poll")
-    print("Device protocol: slow_down; respecting updated poll interval.")
-    time.sleep(interval + 5)
+    if verify_lifecycle:
+        time.sleep(interval + 1)
+        status, response = poll(code)
+        if status != 400 or protocol_error(response) != "authorization_pending":
+            raise AssertionError(
+                "Expected authorization_pending before browser approval"
+            )
+        print("Device protocol: authorization_pending.")
+        status, response = poll(code)
+        if status != 400 or protocol_error(response) != "slow_down":
+            raise AssertionError("Expected slow_down after an early poll")
+        print("Device protocol: slow_down; respecting updated poll interval.")
+        time.sleep(interval + 5)
     decision(approved, True)
     status, response = poll(code)
     if status != 200 or not isinstance(response.get("access_token"), str):
@@ -382,6 +307,8 @@ def _device_grant(
         "Device protocol: approved; RS256, default audience and "
         "five-minute token verified."
     )
+    if not verify_lifecycle:
+        return token, id_token
 
     denied = start()
     denied_code = denied.get("device_code")
@@ -1404,7 +1331,6 @@ def main() -> None:
         for name in ("rauthy", "gateway", "postgres", "rabbit", "mailpit")
     }
     issuer = f"http://localhost:{ports['rauthy']}/auth/v1/"
-    mailpit = f"http://127.0.0.1:{ports['mailpit']}"
     gateway = f"http://localhost:{ports['gateway']}"
     env = dict(os.environ)
     env.setdefault("UV_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/")
@@ -1575,7 +1501,6 @@ def main() -> None:
         except RuntimeError:
             _safe_container_diagnostics(project, ("account-api", "gateway"))
             raise
-        print(f"Disposable Mailpit inbox: {mailpit}")
         try:
             browser_token, browser_refresh_token = _browser_flow(
                 gateway,
@@ -1588,7 +1513,11 @@ def main() -> None:
             _safe_container_diagnostics(project, ("account-api", "gateway"))
             raise
         device_token, device_id_token = _device_grant(
-            gateway, issuer, "device@example.test", user_password
+            gateway,
+            issuer,
+            "device@example.test",
+            user_password,
+            verify_lifecycle=False,
         )
         device_subject = _decode(device_token.split(".")[1]).get("sub")
         if not isinstance(device_subject, str) or not device_subject:
@@ -1667,7 +1596,6 @@ def main() -> None:
             )
         original_subject = _decode(browser_token.split(".")[1]).get("sub")
         changed_email = "browser-renamed@example.test"
-        recovered_password = secrets.token_urlsafe(24)
         if (
             _change_user_email(
                 issuer,
@@ -1731,6 +1659,7 @@ def main() -> None:
             "device@example.test",
             user_password,
             create_snapshot=False,
+            verify_lifecycle=False,
         )
         persisted_token, _ = _browser_flow(
             gateway,
@@ -1791,25 +1720,24 @@ def main() -> None:
             raise AssertionError(
                 "Rauthy identity or existing API data did not survive ordinary restart"
             )
-        _perform_password_recovery(issuer, mailpit, changed_email, recovered_password)
-        recovered_token, recovered_refresh_token = _browser_flow(
+        changed_email_token, _ = _browser_flow(
             gateway,
             issuer,
             str(discovery["token_endpoint"]),
             changed_email,
-            recovered_password,
+            user_password,
             create_snapshot=False,
         )
-        if _decode(recovered_token.split(".")[1]).get("sub") != original_subject:
-            raise AssertionError(
-                "Recovered-password login changed the authenticated subject"
-            )
+        if _decode(changed_email_token.split(".")[1]).get("sub") != original_subject:
+            raise AssertionError("Email-update login changed the authenticated subject")
         if (
-            _public_api_request(gateway, "/api/v1/account-snapshot", recovered_token)[0]
+            _public_api_request(
+                gateway, "/api/v1/account-snapshot", changed_email_token
+            )[0]
             != 200
         ):
             raise AssertionError(
-                "Recovered-password login could not access existing business data"
+                "Email-update login could not access existing business data"
             )
         fresh_device_token, _ = _browser_flow(
             gateway,
@@ -1824,7 +1752,7 @@ def main() -> None:
                 "Fresh login for the device user changed the authenticated subject"
             )
         device_token = fresh_device_token
-        browser_token = recovered_token
+        browser_token = changed_email_token
         import_body, import_type = _multipart_csv(22500001)
         status, _, imported = _public_api_request(
             gateway,
@@ -1905,7 +1833,7 @@ def main() -> None:
             issuer,
             str(discovery["token_endpoint"]),
             changed_email,
-            recovered_password,
+            user_password,
             create_snapshot=False,
         )
         if _decode(browser_token.split(".")[1]).get("sub") != original_subject:
@@ -1914,7 +1842,7 @@ def main() -> None:
             )
         if not browser_refresh_token:
             raise AssertionError(
-                "Rauthy did not issue the recovered user's browser refresh credential"
+                "Rauthy did not issue the user's browser refresh credential"
             )
         token_exp = _decode(browser_token.split(".")[1]).get("exp")
         if not isinstance(token_exp, int):
@@ -1934,15 +1862,26 @@ def main() -> None:
             gateway,
             issuer,
             changed_email,
-            recovered_password,
+            user_password,
         ):
             raise AssertionError(
                 "Rauthy accepted a new browser login after the user was disabled"
             )
+        expiry_device_token, _ = _device_grant(
+            gateway,
+            issuer,
+            "device@example.test",
+            user_password,
+            create_snapshot=False,
+        )
+        if _decode(expiry_device_token.split(".")[1]).get("sub") != device_subject:
+            raise AssertionError(
+                "Device-grant lifecycle checks changed the authenticated subject"
+            )
         wait_seconds = max(0, token_exp - int(time.time())) + 1
         print(
             "Disabled disposable browser user: prior token remains locally valid; "
-            f"waiting {wait_seconds}s for its five-minute expiry."
+            f"waiting at most {wait_seconds}s beyond the device-flow expiry wait."
         )
         time.sleep(wait_seconds)
         expiry_status = _public_api_request(gateway, "/api/v1/signals", browser_token)[
