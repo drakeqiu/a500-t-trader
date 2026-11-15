@@ -74,6 +74,7 @@ def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
     assert alice_jobs.json()["has_more"] is False
     assert [job["id"] for job in bob_jobs.json()["jobs"]] == [bob_job["id"]]
 
+
 def test_job_list_pagination_and_subject_scoped_deletion(postgres_url: str) -> None:
     app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
     with TestClient(app) as client:
@@ -100,10 +101,17 @@ def test_job_list_pagination_and_subject_scoped_deletion(postgres_url: str) -> N
         assert len(next_page["jobs"]) == 1
         assert next_page["has_more"] is False
 
-        assert client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=bob).status_code == 404
-        assert client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code == 204
+        assert (
+            client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=bob).status_code == 404
+        )
+        assert (
+            client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code == 204
+        )
         assert client.get(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code == 404
-        assert client.get("/v1/jobs?limit=30&offset=0", headers=alice).json()["total"] == 2
+        assert (
+            client.get("/v1/jobs?limit=30&offset=0", headers=alice).json()["total"] == 2
+        )
+
 
 def test_active_job_cannot_be_deleted(postgres_url: str) -> None:
     app = create_app(postgres_url, lambda token: token, persistence_permitted=True)

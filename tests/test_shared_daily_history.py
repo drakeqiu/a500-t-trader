@@ -257,6 +257,8 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
         ).fetchone()
     assert staged_row is not None
     assert staged_row[0] == 0
+
+
 def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
     postgres_url: str,
 ) -> None:

@@ -8,6 +8,7 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -119,7 +120,11 @@ def create_app(
                 "has_more": offset + len(bars) < total,
                 "bars": [
                     {
-                        "date": bar.timestamp.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+                        "date": (
+                            bar.timestamp.astimezone(ZoneInfo("Asia/Shanghai"))
+                            .date()
+                            .isoformat()
+                        ),
                         "open": str(bar.open),
                         "high": str(bar.high),
                         "low": str(bar.low),
@@ -131,6 +136,7 @@ def create_app(
                 ],
             }
         )
+
     @app.delete("/v1/jobs/{job_id}", status_code=204)
     def delete_job(
         job_id: UUID, authorization: str | None = Header(default=None)

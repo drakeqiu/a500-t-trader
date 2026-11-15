@@ -276,7 +276,7 @@ class JobRepository:
     def delete(self, subject: str, job_id: str) -> bool | None:
         try:
             identifier = uuid.UUID(str(job_id))
-        except (ValueError, TypeError, AttributeError):
+        except ValueError, TypeError, AttributeError:
             return None
 
         with self._connect() as db:
@@ -298,7 +298,7 @@ class JobRepository:
     def get(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
             identifier = uuid.UUID(str(job_id))
-        except (ValueError, TypeError, AttributeError):
+        except ValueError, TypeError, AttributeError:
             return None
         with self._connect() as db:
             row = db.execute(
