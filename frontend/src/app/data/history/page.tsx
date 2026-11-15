@@ -20,8 +20,6 @@ import { PageHeading } from "@/components/page-heading";
 import { beginAuthorization, configurationReady } from "@/lib/oidc";
 import { getAccessToken, subscribeSession } from "@/lib/session";
 
-
-
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const statusLabels: Record<HistoryJob["status"], string> = {
   queued: "等待执行",
@@ -104,11 +102,15 @@ function DownloadedSecurity({ token, symbol }: { token: string; symbol: string }
       >
         <summary>{symbol}</summary>
         {loading ? (
-          <p className="history-muted" role="status">正在读取下载日期…</p>
+          <p className="history-muted" role="status">
+            正在读取下载日期…
+          </p>
         ) : error ? (
           <p className="history-error" role="alert">
             {error}{" "}
-            <button className="history-range-retry" onClick={loadRanges}>重试</button>
+            <button className="history-range-retry" onClick={loadRanges}>
+              重试
+            </button>
           </p>
         ) : ranges ? (
           ranges.length ? (
@@ -388,7 +390,6 @@ function HistoryPage() {
         setLoadingMoreJobs(false);
       }
     });
-
 
   const remove = (job: HistoryJob) => {
     if (!window.confirm(`确定删除任务 ${job.id} 的记录吗？共享历史行情不会被删除。`)) return;

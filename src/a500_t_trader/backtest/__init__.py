@@ -447,6 +447,7 @@ class BacktestRepository:
                 "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                 (symbol, start_date.isoformat(), end_date.isoformat()),
             )
+
     def list_shared_daily_history_symbols(self) -> tuple[tuple[str, str, str], ...]:
         """Return instruments and the outer dates of their downloaded coverage."""
         with self._connect() as db:
@@ -455,6 +456,7 @@ class BacktestRepository:
                 "FROM shared_daily_history_ranges GROUP BY symbol ORDER BY symbol"
             ).fetchall()
         return tuple((str(symbol), str(start), str(end)) for symbol, start, end in rows)
+
     def list_shared_daily_history_ranges(
         self, symbol: str
     ) -> tuple[tuple[str, str], ...]:
@@ -474,7 +476,6 @@ class BacktestRepository:
             else:
                 merged.append((start_text, end_text))
         return tuple(merged)
-
 
     def get_shared_daily_history(
         self, symbol: str, start_date: date, end_date: date

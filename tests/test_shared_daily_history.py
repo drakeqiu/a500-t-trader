@@ -279,9 +279,7 @@ def test_authenticated_daily_history_symbols_list_shared_coverage(
             "/v1/history/daily/symbols",
             headers={"Authorization": "Bearer alice"},
         )
-        assert client.get(
-            "/v1/history/daily/symbols/510300/ranges"
-        ).status_code == 401
+        assert client.get("/v1/history/daily/symbols/510300/ranges").status_code == 401
         ranges = client.get(
             "/v1/history/daily/symbols/SH.510300/ranges",
             headers={"Authorization": "Bearer alice"},
@@ -299,7 +297,6 @@ def test_authenticated_daily_history_symbols_list_shared_coverage(
 
 
 def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
-
     postgres_url: str,
 ) -> None:
     repository = BacktestRepository(postgres_url)

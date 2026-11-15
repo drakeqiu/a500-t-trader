@@ -686,7 +686,6 @@ test("shows downloaded securities with lazy-loaded coverage and deletes only a f
   await page.locator(".history-symbol-details summary").click();
   await expect(page.getByText("2026-01-01 至 2026-01-03")).toBeVisible();
 
-
   page.on("dialog", (dialog) => dialog.accept());
   await page.locator(".history-jobs > summary").click();
   await page.getByRole("button", { name: "删除任务记录" }).click();
