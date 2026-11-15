@@ -6,6 +6,7 @@ import {
   cancelHistoryJob,
   createHistoryJob,
   getHistoryJob,
+  listHistoryJobs,
   type HistoryJob,
 } from "@/lib/a500-client";
 import { AppShell } from "@/components/app-shell";
@@ -13,7 +14,7 @@ import { PageHeading } from "@/components/page-heading";
 import { beginAuthorization, configurationReady } from "@/lib/oidc";
 import { getAccessToken, subscribeSession } from "@/lib/session";
 
-const storageKey = "a500.history-job-ids";
+const hiddenJobsKey = "a500.history-hidden-job-ids";
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const statusLabels: Record<HistoryJob["status"], string> = {
   queued: "等待执行",
@@ -58,9 +59,9 @@ function requestMessageFor(error: unknown, action: "create" | "cancel") {
   }
   return messageFor(error);
 }
-function readIds() {
+function readHiddenJobIds() {
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]");
+    const value: unknown = JSON.parse(window.localStorage.getItem(hiddenJobsKey) ?? "[]");
     return Array.isArray(value)
       ? value.filter((id): id is string => typeof id === "string").slice(0, 30)
       : [];
@@ -68,17 +69,19 @@ function readIds() {
     return [];
   }
 }
-function saveIds(ids: string[]) {
+function saveHiddenJobIds(ids: string[]) {
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify(ids.slice(0, 30)));
+    window.localStorage.setItem(hiddenJobsKey, JSON.stringify(ids.slice(0, 30)));
   } catch {
-    // Private browsing or storage limits do not block a task in the current session.
+    // Private browsing or storage limits do not block the task list.
   }
 }
 function HistoryPage() {
   const token = useSyncExternalStore(subscribeSession, getAccessToken, () => null);
   const [hydrated, setHydrated] = useState(false);
   const [jobs, setJobs] = useState<HistoryJob[]>([]);
+  const [hiddenJobIds, setHiddenJobIds] = useState<string[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
   const [symbol, setSymbol] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -88,7 +91,6 @@ function HistoryPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [jobErrors, setJobErrors] = useState<Record<string, string>>({});
-  const [unresolvedIds, setUnresolvedIds] = useState<string[]>([]);
   const request = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
@@ -129,36 +131,31 @@ function HistoryPage() {
         setError(reason instanceof Error ? reason.message : "无法启动安全连接。");
       });
   }, []);
-
+  const loadJobs = useCallback(
+    async (signal: AbortSignal) => {
+      if (!token) return;
+      const latest = await listHistoryJobs(token, requestSignal(signal));
+      const hidden = readHiddenJobIds();
+      setHiddenJobIds(hidden);
+      setJobs(latest.filter((job) => !hidden.includes(job.id)));
+    },
+    [token],
+  );
   useEffect(() => {
     if (!hydrated || !token) return;
     const controller = new AbortController();
     request.current?.abort();
     request.current = controller;
-    const ids = readIds();
-    void Promise.all(
-      ids.map(async (id) => {
-        try {
-          return { id, job: await reload(id, controller.signal), error: "" };
-        } catch (reason) {
-          return { id, job: null, error: abortError(reason) ? "" : messageFor(reason) };
-        }
-      }),
-    ).then((records) => {
-      if (controller.signal.aborted) return;
-      const available = records.flatMap(({ job }) => (job ? [job] : []));
-      const unresolved = records.filter(({ job }) => !job).map(({ id }) => id);
-      setJobs(available);
-      setUnresolvedIds(unresolved);
-      setJobErrors(
-        Object.fromEntries(
-          records.filter(({ error }) => error).map(({ id, error }) => [id, error]),
-        ),
-      );
-      saveIds(ids);
-    });
+    setLoadingJobs(true);
+    void loadJobs(controller.signal)
+      .catch((reason: unknown) => {
+        if (!abortError(reason)) setError(messageFor(reason));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingJobs(false);
+      });
     return () => controller.abort();
-  }, [hydrated, token, reload]);
+  }, [hydrated, loadJobs, token]);
   useEffect(() => {
     const nextStaleAt = jobs
       .filter((job) => !terminal.has(job.status))
@@ -215,7 +212,6 @@ function HistoryPage() {
           changed = true;
           return updated;
         });
-        if (changed) saveIds(next.map((job) => job.id).concat(unresolvedIds));
         return changed ? next : current;
       });
       timer = setTimeout(() => void poll(), 2500);
@@ -225,7 +221,7 @@ function HistoryPage() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [jobs, reload, token, unresolvedIds]);
+  }, [jobs, reload, token]);
 
   const runRequest = async (action: (signal: AbortSignal) => Promise<void>) => {
     if (inFlight.current) return;
@@ -260,10 +256,8 @@ function HistoryPage() {
         );
         setJobs((current) => {
           const next = [job, ...current.filter((item) => item.id !== job.id)].slice(0, 30);
-          saveIds([...next.map((item) => item.id), ...unresolvedIds]);
           return next;
         });
-        setUnresolvedIds((current) => current.filter((id) => id !== job.id));
         setJobErrors((current) => {
           const next = { ...current };
           delete next[job.id];
@@ -297,38 +291,28 @@ function HistoryPage() {
       try {
         const updated = await reload(jobId, signal);
         setJobs((current) => [updated, ...current.filter((job) => job.id !== updated.id)]);
-        setUnresolvedIds((current) => current.filter((id) => id !== jobId));
         setJobErrors((current) => {
           const next = { ...current };
           delete next[jobId];
           return next;
         });
-        saveIds([
-          updated.id,
-          ...jobs.filter((job) => job.id !== updated.id).map((job) => job.id),
-          ...unresolvedIds.filter((id) => id !== updated.id),
-        ]);
       } catch (reason) {
         if (!abortError(reason))
           setJobErrors((current) => ({ ...current, [jobId]: messageFor(reason) }));
       }
     });
-  const removeUnresolved = (jobId: string) => {
-    setUnresolvedIds((current) => current.filter((id) => id !== jobId));
-    setJobErrors((current) => {
-      const next = { ...current };
-      delete next[jobId];
-      return next;
+
+  const refreshJobs = () =>
+    runRequest(async (signal) => {
+      await loadJobs(signal);
+      setError("");
     });
-    saveIds([...jobs.map((job) => job.id), ...unresolvedIds.filter((id) => id !== jobId)]);
-  };
 
   const remove = (jobId: string) => {
-    setJobs((current) => {
-      const next = current.filter((job) => job.id !== jobId);
-      saveIds([...next.map((job) => job.id), ...unresolvedIds]);
-      return next;
-    });
+    const hidden = [jobId, ...hiddenJobIds.filter((id) => id !== jobId)].slice(0, 30);
+    setHiddenJobIds(hidden);
+    saveHiddenJobIds(hidden);
+    setJobs((current) => current.filter((job) => job.id !== jobId));
     setJobErrors((current) => {
       const next = { ...current };
       delete next[jobId];
@@ -435,46 +419,26 @@ function HistoryPage() {
               <div className="history-section-heading">
                 <div>
                   <h2 id="history-jobs-title">任务记录</h2>
-                  <p>刷新后从本浏览器保存的任务编号恢复状态；后端不提供完整任务列表。</p>
+                  <p>最近 30 项任务按登录账户保存，可在不同浏览器查看。</p>
                 </div>
-                <span>{jobs.length + unresolvedIds.length} 项</span>
+                <div className="history-job-actions">
+                  <span>{jobs.length} 项</span>
+                  <button
+                    className="trade-import-secondary"
+                    disabled={busy || loadingJobs}
+                    onClick={refreshJobs}
+                  >
+                    刷新列表
+                  </button>
+                </div>
               </div>
-              {jobs.length === 0 && unresolvedIds.length === 0 ? (
+              {jobs.length === 0 ? (
                 <div className="history-empty">
-                  <h3>尚无已保存的任务</h3>
-                  <p>创建任务后，状态和结果会显示在此处。</p>
+                  <h3>{loadingJobs ? "正在加载任务记录" : "暂无历史任务"}</h3>
+                  <p>提交任务后，状态和结果会显示在此处。</p>
                 </div>
               ) : (
                 <div className="history-job-list">
-                  {unresolvedIds.map((id) => (
-                    <article className="history-job" key={id}>
-                      <div className="history-job-head">
-                        <div>
-                          <h3>无法确认任务状态</h3>
-                          <p>
-                            任务编号：<code>{id}</code>
-                          </p>
-                        </div>
-                        <span className="history-status is-failed">状态未知</span>
-                      </div>
-                      <p className="history-error" role="alert">
-                        {jobErrors[id] || "尚未从后端取得此任务的状态。"}{" "}
-                        页面不会将其显示为成功或失败。
-                      </p>
-                      <div className="history-job-actions">
-                        <button
-                          className="trade-import-secondary"
-                          disabled={busy}
-                          onClick={() => refreshTask(id)}
-                        >
-                          重新查询
-                        </button>
-                        <button className="history-remove" onClick={() => removeUnresolved(id)}>
-                          从此浏览器移除
-                        </button>
-                      </div>
-                    </article>
-                  ))}
                   {jobs.map((job) => {
                     const progress =
                       job.total_chunks > 0 &&

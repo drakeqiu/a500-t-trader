@@ -43,6 +43,36 @@ def test_jobs_are_private_and_completed_dates_required(postgres_url: str) -> Non
         payload["end_date"] = today.isoformat()
         assert client.post("/v1/jobs", json=payload, headers=alice).status_code == 422
 
+def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
+    postgres_url: str,
+) -> None:
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    with TestClient(app) as client:
+        alice = {"Authorization": "Bearer alice"}
+        bob = {"Authorization": "Bearer bob"}
+        payload = {
+            "type": "daily_history",
+            "symbol": "563360",
+            "start_date": "2020-01-01",
+            "end_date": "2020-12-31",
+        }
+        assert client.get("/v1/jobs").status_code == 401
+        alice_first = client.post("/v1/jobs", json=payload, headers=alice).json()
+        alice_second = client.post("/v1/jobs", json=payload, headers=alice).json()
+        bob_job = client.post("/v1/jobs", json=payload, headers=bob).json()
+
+        alice_jobs = client.get("/v1/jobs", headers=alice)
+        bob_jobs = client.get("/v1/jobs", headers=bob)
+
+    assert alice_jobs.status_code == 200
+    assert [job["id"] for job in alice_jobs.json()] == [
+        alice_second["id"],
+        alice_first["id"],
+    ]
+    assert [job["id"] for job in bob_jobs.json()] == [bob_job["id"]]
+
+
+
 
 def test_submission_requires_persistence_permission(postgres_url: str) -> None:
     app = create_app(postgres_url, lambda token: token, persistence_permitted=False)
@@ -90,6 +120,157 @@ def test_submission_persists_queued_job_with_pending_outbox(
     assert persisted == ("queued", None)
 
 
+
+
+def test_job_splits_adjacent_quarter_boundary_dates(
+    postgres_url: str,
+) -> None:
+    ranges: list[tuple[date, date]] = []
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            ranges.append((start_date, end_date))
+            return ()
+
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    headers = {"Authorization": "Bearer alice"}
+    with TestClient(app) as client:
+        job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-03-31",
+                "end_date": "2023-04-01",
+            },
+        ).json()
+        assert job["total_chunks"] == 2
+        assert process_one(JobRepository(postgres_url), lambda: Provider())
+        status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+
+    assert ranges == [
+        (date(2023, 3, 31), date(2023, 3, 31)),
+        (date(2023, 4, 1), date(2023, 4, 1)),
+    ]
+    assert status["status"] == "succeeded"
+    assert status["completed_chunks"] == status["total_chunks"] == 2
+
+
+def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
+    postgres_url: str,
+) -> None:
+    from a500_t_trader.backtest import BacktestRepository
+
+    ranges: list[tuple[date, date]] = []
+    quarter_bars = {
+        date(2023, 1, 1): (date(2023, 1, 2), Decimal("1")),
+        date(2023, 4, 1): (date(2023, 4, 2), Decimal("2")),
+        date(2023, 7, 1): (date(2023, 7, 2), Decimal("3")),
+        date(2023, 10, 1): (date(2023, 10, 2), Decimal("4")),
+    }
+
+    class Provider:
+        def get_daily_history(
+            self, symbol: str, start_date: date, end_date: date
+        ) -> tuple[DailyBar, ...]:
+            ranges.append((start_date, end_date))
+            bar_date, close = quarter_bars[start_date]
+            return (
+                DailyBar(
+                    symbol=symbol,
+                    timestamp=datetime.combine(bar_date, datetime.min.time()).replace(
+                        tzinfo=SHANGHAI
+                    ),
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=100,
+                ),
+            )
+
+    provider = Provider()
+    repository = JobRepository(postgres_url)
+    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    headers = {"Authorization": "Bearer alice"}
+    with TestClient(app) as client:
+        job = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "type": "daily_history",
+                "symbol": "563360",
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+            },
+        ).json()
+        with psycopg.connect(postgres_url) as db:
+            db.execute(
+                """CREATE FUNCTION fail_test_quarter_checkpoint()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF NEW.bar_date = DATE '2023-04-02' THEN
+                        RAISE EXCEPTION 'simulated checkpoint interruption'
+                            USING ERRCODE='08006';
+                    END IF;
+                    RETURN NEW;
+                END
+                $$"""
+            )
+            db.execute(
+                """CREATE TRIGGER fail_test_quarter_checkpoint
+                BEFORE INSERT ON daily_history_job_fetched_bars
+                FOR EACH ROW EXECUTE FUNCTION fail_test_quarter_checkpoint()"""
+            )
+        try:
+            with pytest.raises(psycopg.Error):
+                process_one(repository, lambda: provider)
+        finally:
+            with psycopg.connect(postgres_url) as db:
+                db.execute(
+                    "DROP TRIGGER IF EXISTS fail_test_quarter_checkpoint "
+                    "ON daily_history_job_fetched_bars"
+                )
+                db.execute("DROP FUNCTION IF EXISTS fail_test_quarter_checkpoint()")
+
+        interrupted = client.get(
+            f"/v1/jobs/{job['id']}", headers=headers
+        ).json()
+        assert interrupted["status"] == "running"
+        assert interrupted["completed_chunks"] == 1
+        with psycopg.connect(postgres_url) as db:
+            db.execute(
+                """UPDATE daily_history_jobs SET lease_until=now() - interval '1 second'
+                WHERE id=%s""",
+                (job["id"],),
+            )
+        assert process_one(repository, lambda: provider)
+        completed = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+
+    history = BacktestRepository(postgres_url).get_shared_daily_history(
+        "563360", date(2023, 1, 1), date(2023, 12, 31)
+    )
+    assert completed["status"] == "succeeded"
+    assert completed["completed_chunks"] == completed["total_chunks"] == 4
+    assert ranges == [
+        (date(2023, 1, 1), date(2023, 3, 31)),
+        (date(2023, 4, 1), date(2023, 6, 30)),
+        (date(2023, 4, 1), date(2023, 6, 30)),
+        (date(2023, 7, 1), date(2023, 9, 30)),
+        (date(2023, 10, 1), date(2023, 12, 31)),
+    ]
+    assert history is not None
+    assert [(bar.timestamp.date(), bar.close) for bar in history] == [
+        (date(2023, 1, 2), Decimal("1")),
+        (date(2023, 4, 2), Decimal("2")),
+        (date(2023, 7, 2), Decimal("3")),
+        (date(2023, 10, 2), Decimal("4")),
+    ]
+
+        db.execute("DELETE FROM daily_history_job_migrations")
 def test_job_publishes_shared_history_without_result_endpoint(
     postgres_url: str,
 ) -> None:

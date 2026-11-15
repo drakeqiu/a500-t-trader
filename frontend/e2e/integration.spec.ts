@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 
 // Business REST/SSE calls use deterministic in-memory API mocks and fixture identity.
 // This suite exercises browser workflows, not live Rauthy or market-provider access.
@@ -525,6 +525,10 @@ test("creates a history task without treating acceptance as completion", async (
     error: null,
   };
   await page.route("**/api/v1/jobs", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: [] });
+      return;
+    }
     expect(route.request().method()).toBe("POST");
     expect(route.request().postDataJSON()).toEqual({
       type: "daily_history",
@@ -542,7 +546,7 @@ test("creates a history task without treating acceptance as completion", async (
   await expect(page.getByText("等待执行")).toBeVisible();
   await expect(page.getByText("提交成功不代表行情已拉取完成。")).toBeVisible();
   await expect(
-    page.getByText("任务成功后，共享历史行情会独立提供给其他行情页面；此处仅跟踪任务状态与进度。"),
+    page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。"),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新状态" })).toBeVisible();
   await expect(page.getByRole("button", { name: "请求取消" })).toBeVisible();
@@ -555,4 +559,42 @@ test("creates a history task without treating acceptance as completion", async (
     .evaluate((element) => element.getBoundingClientRect().right);
   expect(pageBounds).toBeLessThanOrEqual(391);
   await expect(page.getByRole("heading", { name: "历史行情", exact: true })).toBeVisible();
+});
+test("loads account history in a fresh browser with no saved task IDs", async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: test.info().project.use.baseURL as string,
+  });
+  try {
+    const page = await context.newPage();
+    const existing = {
+      type: "daily_history",
+      id: "00000000-0000-4000-8000-000000000003",
+      symbol: "SH.510500",
+      start_date: "2025-01-01",
+      end_date: "2025-01-02",
+      status: "running",
+      stage: "fetching",
+      cancel_requested: false,
+      total_chunks: 4,
+      completed_chunks: 1,
+      created_at: "2025-01-03T00:00:00+00:00",
+      updated_at: "2025-01-03T00:00:00+00:00",
+      finished_at: null,
+      error: null,
+    };
+    await page.route("**/api/v1/jobs", async (route) => {
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({ json: [existing] });
+    });
+    await page.goto("/");
+    await connect(page, "history-owner");
+    await page.getByRole("link", { name: "历史行情" }).click();
+    await expect(page.getByText(existing.id)).toBeVisible();
+    await expect(
+      page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。"),
+    ).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("a500.history-job-ids"))).toBeNull();
+  } finally {
+    await context.close();
+  }
 });

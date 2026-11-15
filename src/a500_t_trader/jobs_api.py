@@ -58,6 +58,12 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/v1/jobs")
+    def list_jobs(authorization: str | None = Header(default=None)) -> JSONResponse:
+        subject = _authenticated_subject(auth, authorization)
+        return respond(store.list_for_subject(subject))
+
+
     @app.post("/v1/jobs")
     def submit(
         request: DailyHistoryRequest, authorization: str | None = Header(default=None)

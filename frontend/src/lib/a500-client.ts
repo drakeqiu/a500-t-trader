@@ -198,6 +198,10 @@ export function createHistoryJob(
     body: JSON.stringify({ type: "daily_history", ...input }),
   });
 }
+export function listHistoryJobs(token: string, signal?: AbortSignal) {
+  return api<HistoryJob[]>("/v1/jobs", token, { signal });
+}
+
 export function getHistoryJob(token: string, jobId: string, signal?: AbortSignal) {
   return api<HistoryJob>(`/v1/jobs/${encodeURIComponent(jobId)}`, token, { signal });
 }

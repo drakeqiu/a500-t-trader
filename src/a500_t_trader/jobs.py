@@ -67,6 +67,9 @@ _COLUMNS = (
     "created_at, updated_at, finished_at, error"
 )
 
+_RECENT_JOB_LIMIT = 30
+
+
 
 class JobRepository:
     """PostgreSQL task store; all public reads and mutations are subject-scoped."""
@@ -161,6 +164,22 @@ class JobRepository:
             )
         assert row is not None
         return _job(row)  # type: ignore[return-value]
+
+    def list_for_subject(self, subject: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                f"""SELECT {_COLUMNS} FROM daily_history_jobs
+                WHERE subject=%s ORDER BY created_at DESC, id DESC
+                LIMIT %s""",
+                (subject, _RECENT_JOB_LIMIT),
+            ).fetchall()
+        jobs: list[dict[str, Any]] = []
+        for row in rows:
+            job = _job(row)
+            assert job is not None
+            jobs.append(job)
+        return jobs
+
 
     def get(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
