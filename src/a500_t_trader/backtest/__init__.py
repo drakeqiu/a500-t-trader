@@ -451,8 +451,24 @@ class BacktestRepository:
     def get_shared_daily_history(
         self, symbol: str, start_date: date, end_date: date
     ) -> tuple[DailyBar, ...] | None:
+        result = self.get_shared_daily_history_page(
+            symbol, start_date, end_date, limit=None, offset=0
+        )
+        return None if result is None else result[0]
+
+    def get_shared_daily_history_page(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        *,
+        limit: int | None,
+        offset: int,
+    ) -> tuple[tuple[DailyBar, ...], int] | None:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
+        if offset < 0 or (limit is not None and limit < 1):
+            raise ValueError("limit must be positive and offset must not be negative")
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
             ranges = db.execute(
@@ -475,12 +491,31 @@ class BacktestRepository:
                     next_uncovered = range_end.fromordinal(range_end.toordinal() + 1)
             if not complete:
                 return None
-            rows = db.execute(
-                "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
-                "AND trading_date>=%s AND trading_date<=%s ORDER BY trading_date",
+            total_row = db.execute(
+                "SELECT count(*) FROM shared_daily_bars WHERE symbol=%s "
+                "AND trading_date>=%s AND trading_date<=%s",
                 (symbol, start_date.isoformat(), end_date.isoformat()),
-            ).fetchall()
-        return tuple(_daily_bar_from_json(row[0]) for row in rows)
+            ).fetchone()
+            assert total_row is not None
+            total = int(total_row[0])
+            query = (
+                "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
+                "AND trading_date>=%s AND trading_date<=%s ORDER BY trading_date"
+            )
+            params: tuple[object, ...] = (
+                symbol,
+                start_date.isoformat(),
+                end_date.isoformat(),
+            )
+            if limit is not None:
+                query += " LIMIT %s"
+                params += (limit,)
+            if offset:
+                query += " OFFSET %s"
+                params += (offset,)
+            rows = db.execute(query, params).fetchall()
+        bars = tuple(_daily_bar_from_json(row[0]) for row in rows)
+        return bars, total
 
     def cleanup_shared_history(self) -> int:
         with self._connect() as db:

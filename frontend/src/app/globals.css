@@ -1756,6 +1756,58 @@ code {
 .history-jobs {
   margin-top: 32px;
 }
+.history-jobs > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--rule);
+  padding: 13px 2px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.history-jobs > summary:focus-visible {
+  outline: 3px solid #6398c1;
+  outline-offset: 3px;
+}
+.history-job-content {
+  padding-top: 16px;
+}
+.history-query-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.history-query-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.history-query-summary label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #354a5e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.history-query-summary select {
+  min-height: 34px;
+  border: 1px solid #cbd6df;
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+.history-load-more {
+  margin-top: 14px;
+}
 .history-section-heading {
   margin-bottom: 14px;
 }
@@ -1977,5 +2029,10 @@ code {
   }
   .history-job-meta dd {
     overflow-wrap: anywhere;
+  }
+  .history-query-summary,
+  .history-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

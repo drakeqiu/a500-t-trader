@@ -526,7 +526,7 @@ test("creates a history task without treating acceptance as completion", async (
   };
   await page.route("**/api/v1/jobs", async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: { jobs: [], total: 0, limit: 30, offset: 0, has_more: false } });
       return;
     }
     expect(route.request().method()).toBe("POST");
@@ -539,13 +539,13 @@ test("creates a history task without treating acceptance as completion", async (
     await route.fulfill({ status: 202, json: created });
   });
 
-  await page.getByLabel("证券代码").fill("SH.510500");
-  await page.getByLabel("开始日期").fill("2025-01-01");
-  await page.getByLabel("结束日期").fill("2025-01-02");
+  await page.locator(".history-create").getByLabel("证券代码").fill("SH.510500");
+  await page.locator(".history-create").getByLabel("开始日期").fill("2025-01-01");
+  await page.locator(".history-create").getByLabel("结束日期").fill("2025-01-02");
   await page.getByRole("button", { name: "创建任务" }).click();
-  await expect(page.getByText("等待执行")).toBeVisible();
+  await page.locator(".history-jobs > summary").click();
   await expect(page.getByText("提交成功不代表行情已拉取完成。")).toBeVisible();
-  await expect(page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。")).toBeVisible();
+  await expect(page.getByText("任务记录 · 已加载 1 / 1 项")).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新状态" })).toBeVisible();
   await expect(page.getByRole("button", { name: "请求取消" })).toBeVisible();
   await expect(page.getByText("查看结果")).toHaveCount(0);
@@ -580,17 +580,17 @@ test("loads account history in a fresh browser with no saved task IDs", async ({
       finished_at: null,
       error: null,
     };
-    await page.route("**/api/v1/jobs", async (route) => {
+    await page.route("**/api/v1/jobs**", async (route) => {
       expect(route.request().method()).toBe("GET");
-      await route.fulfill({ json: [existing] });
+      await route.fulfill({
+        json: { jobs: [existing], total: 1, limit: 30, offset: 0, has_more: false },
+      });
     });
     await page.goto("/");
     await connect(page, "history-owner");
     await page.getByRole("link", { name: "历史行情" }).click();
+    await page.locator(".history-jobs > summary").click();
     await expect(page.getByText(existing.id)).toBeVisible();
-    await expect(
-      page.getByText("最近 30 项任务按登录账户保存，可在不同浏览器查看。"),
-    ).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("a500.history-job-ids"))).toBeNull();
   } finally {
     await context.close();
@@ -620,17 +620,88 @@ test("shows checkpoint progress for a running quarterly history task", async ({ 
   };
   await page.route("**/api/v1/jobs", async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: { jobs: [], total: 0, limit: 30, offset: 0, has_more: false } });
       return;
     }
     expect(route.request().method()).toBe("POST");
     await route.fulfill({ status: 202, json: running });
   });
-  await page.getByLabel("证券代码").fill("SH.510500");
-  await page.getByLabel("开始日期").fill("2023-02-15");
-  await page.getByLabel("结束日期").fill("2024-05-10");
+  await page.locator(".history-create").getByLabel("证券代码").fill("SH.510500");
+  await page.locator(".history-create").getByLabel("开始日期").fill("2023-02-15");
+  await page.locator(".history-create").getByLabel("结束日期").fill("2024-05-10");
   await page.getByRole("button", { name: "创建任务" }).click();
-  await expect(page.getByText("2 / 6")).toBeVisible();
+  await page.locator(".history-jobs > summary").click();
   await expect(page.getByRole("progressbar", { name: "任务进度 33%" })).toBeVisible();
   await expect(page.getByText("33%", { exact: true })).toBeVisible();
+});
+test("queries covered shared daily history and deletes only a finished task record", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await connect(page, "history-owner");
+  const finished = {
+    type: "daily_history",
+    id: "00000000-0000-4000-8000-000000000004",
+    symbol: "SH.510300",
+    start_date: "2026-01-01",
+    end_date: "2026-01-03",
+    status: "succeeded",
+    stage: "completed",
+    cancel_requested: false,
+    total_chunks: 1,
+    completed_chunks: 1,
+    created_at: "2026-01-04T00:00:00+00:00",
+    updated_at: "2026-01-04T00:00:00+00:00",
+    finished_at: "2026-01-04T00:00:00+00:00",
+    error: null,
+  };
+  await page.route("**/api/v1/jobs**", async (route) => {
+    if (route.request().method() === "DELETE") {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    expect(route.request().method()).toBe("GET");
+    await route.fulfill({
+      json: { jobs: [finished], total: 1, limit: 30, offset: 0, has_more: false },
+    });
+  });
+  await page.route("**/api/v1/history/daily**", async (route) => {
+    expect(route.request().url()).toContain("symbol=SH.510300");
+    await route.fulfill({
+      json: {
+        symbol: "SH.510300",
+        start_date: "2026-01-01",
+        end_date: "2026-01-03",
+        covered: true,
+        total: 1,
+        limit: 20,
+        offset: 0,
+        has_more: false,
+        bars: [
+          {
+            date: "2026-01-02",
+            open: "1",
+            high: "2",
+            low: "1",
+            close: "2",
+            volume: 100,
+            amount: "200",
+          },
+        ],
+      },
+    });
+  });
+  await page.getByRole("link", { name: "历史行情" }).click();
+  await page.getByLabel("查询证券代码").fill("SH.510300");
+  await page.getByLabel("开始日期").first().fill("2026-01-01");
+  await page.getByLabel("结束日期").first().fill("2026-01-03");
+  await page.getByRole("button", { name: "查询行情" }).click();
+  await expect(page.getByRole("row", { name: /2026-01-02/ })).toBeVisible();
+  await expect(page.getByText("200")).toBeVisible();
+
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.locator(".history-jobs > summary").click();
+  await page.getByRole("button", { name: "删除任务记录" }).click();
+  await expect(page.getByText("任务记录已删除，共享历史行情保留。")).toBeVisible();
+  await expect(page.getByText(finished.id)).toHaveCount(0);
 });

@@ -257,3 +257,76 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
         ).fetchone()
     assert staged_row is not None
     assert staged_row[0] == 0
+def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
+    postgres_url: str,
+) -> None:
+    repository = BacktestRepository(postgres_url)
+    start, end = date(2026, 1, 1), date(2026, 1, 5)
+    repository.save_daily_history(
+        (_bar("510300", 2, "2"), _bar("510300", 5, "5")),
+        start,
+        end,
+    )
+    app = create_app(postgres_url, lambda token: token)
+    with TestClient(app) as client:
+        params = {
+            "symbol": "SH.510300",
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "limit": 1,
+            "offset": 0,
+        }
+        assert client.get("/v1/history/daily", params=params).status_code == 401
+        first = client.get(
+            "/v1/history/daily",
+            params=params,
+            headers={"Authorization": "Bearer alice"},
+        )
+        second = client.get(
+            "/v1/history/daily",
+            params={**params, "offset": 1},
+            headers={"Authorization": "Bearer alice"},
+        )
+        uncovered = client.get(
+            "/v1/history/daily",
+            params={**params, "symbol": "510301"},
+            headers={"Authorization": "Bearer alice"},
+        )
+        invalid = client.get(
+            "/v1/history/daily",
+            params={**params, "symbol": "invalid"},
+            headers={"Authorization": "Bearer alice"},
+        )
+
+    assert first.status_code == 200
+    assert first.json()["covered"] is True
+    assert first.json()["total"] == 2
+    assert first.json()["bars"][0]["date"] == "2026-01-02"
+    assert first.json()["bars"][0]["close"] == "2"
+    assert second.json()["bars"][0]["date"] == "2026-01-05"
+    assert uncovered.json()["covered"] is False
+    assert uncovered.json()["bars"] == []
+    assert invalid.status_code == 422
+
+
+def test_daily_history_api_distinguishes_covered_empty_from_uncovered(
+    postgres_url: str,
+) -> None:
+    BacktestRepository(postgres_url).save_daily_history(
+        (), date(2026, 1, 1), date(2026, 1, 5), symbol="510300"
+    )
+    app = create_app(postgres_url, lambda token: token)
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/history/daily",
+            params={
+                "symbol": "510300",
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-05",
+            },
+            headers={"Authorization": "Bearer alice"},
+        )
+    assert response.status_code == 200
+    assert response.json()["covered"] is True
+    assert response.json()["total"] == 0
+    assert response.json()["bars"] == []

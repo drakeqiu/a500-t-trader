@@ -5,8 +5,11 @@ import {
   ApiError,
   cancelHistoryJob,
   createHistoryJob,
+  deleteHistoryJob,
+  getDailyHistory,
   getHistoryJob,
   listHistoryJobs,
+  type DailyHistoryPage,
   type HistoryJob,
 } from "@/lib/a500-client";
 import { AppShell } from "@/components/app-shell";
@@ -14,7 +17,6 @@ import { PageHeading } from "@/components/page-heading";
 import { beginAuthorization, configurationReady } from "@/lib/oidc";
 import { getAccessToken, subscribeSession } from "@/lib/session";
 
-const hiddenJobsKey = "a500.history-hidden-job-ids";
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const statusLabels: Record<HistoryJob["status"], string> = {
   queued: "等待执行",
@@ -51,40 +53,36 @@ function messageFor(error: unknown) {
     return "历史行情持久化尚未获部署者授权，当前不能创建任务。";
   return error instanceof Error ? error.message : "服务暂时无法处理请求，请稍后重试。";
 }
-function requestMessageFor(error: unknown, action: "create" | "cancel") {
+function requestMessageFor(error: unknown, action: "create" | "cancel" | "delete") {
   if (error instanceof DOMException && error.name === "TimeoutError") {
-    return action === "create"
-      ? "提交响应超时，后端可能已创建任务，但未返回任务编号；当前接口无法查询未返回编号的任务。请勿重复提交，先确认后端是否已创建。"
-      : "取消请求超时，无法确认后端是否已收到；请刷新任务状态后再决定是否重试。";
+    if (action === "create")
+      return "提交响应超时，后端可能已创建任务，但未返回任务编号；请勿盲目重复提交。";
+    if (action === "delete")
+      return "删除请求超时，无法确认任务记录是否已删除；请刷新列表确认。";
+    return "取消请求超时，无法确认后端是否已收到；请刷新任务状态后再决定是否重试。";
   }
+  if (action === "delete" && error instanceof ApiError && error.status === 409)
+    return "任务仍在处理中，不能删除；请刷新状态后重试。";
   return messageFor(error);
-}
-function readHiddenJobIds() {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(hiddenJobsKey) ?? "[]");
-    return Array.isArray(value)
-      ? value.filter((id): id is string => typeof id === "string").slice(0, 30)
-      : [];
-  } catch {
-    return [];
-  }
-}
-function saveHiddenJobIds(ids: string[]) {
-  try {
-    window.localStorage.setItem(hiddenJobsKey, JSON.stringify(ids.slice(0, 30)));
-  } catch {
-    // Private browsing or storage limits do not block the task list.
-  }
 }
 function HistoryPage() {
   const token = useSyncExternalStore(subscribeSession, getAccessToken, () => null);
   const [hydrated, setHydrated] = useState(false);
   const [jobs, setJobs] = useState<HistoryJob[]>([]);
-  const [hiddenJobIds, setHiddenJobIds] = useState<string[]>([]);
+  const [jobsTotal, setJobsTotal] = useState(0);
+  const [jobsHasMore, setJobsHasMore] = useState(false);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
   const [symbol, setSymbol] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [querySymbol, setQuerySymbol] = useState("");
+  const [queryStartDate, setQueryStartDate] = useState("");
+  const [queryEndDate, setQueryEndDate] = useState("");
+  const [queryPageSize, setQueryPageSize] = useState(20);
+  const [historyPage, setHistoryPage] = useState<DailyHistoryPage | null>(null);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState("");
   const [today, setToday] = useState("");
   const [now, setNow] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -92,22 +90,25 @@ function HistoryPage() {
   const [notice, setNotice] = useState("");
   const [jobErrors, setJobErrors] = useState<Record<string, string>>({});
   const request = useRef<AbortController | null>(null);
+  const queryRequest = useRef<AbortController | null>(null);
   const inFlight = useRef(false);
   useEffect(() => {
     const currentDate = shanghaiToday();
     setToday(currentDate);
     setStartDate(dateDaysAgo(365, currentDate));
     setEndDate(dateDaysAgo(1, currentDate));
+    setQueryStartDate(dateDaysAgo(365, currentDate));
+    setQueryEndDate(dateDaysAgo(1, currentDate));
     setNow(Date.now());
     setHydrated(true);
   }, []);
   useEffect(
     () => () => {
       request.current?.abort();
+      queryRequest.current?.abort();
     },
     [],
   );
-
   const reload = useCallback(
     async (jobId: string, signal: AbortSignal) => {
       if (!token) throw new Error("尚未连接账户。");
@@ -132,12 +133,20 @@ function HistoryPage() {
       });
   }, []);
   const loadJobs = useCallback(
-    async (signal: AbortSignal) => {
+    async (signal: AbortSignal, offset = 0, append = false) => {
       if (!token) return;
-      const latest = await listHistoryJobs(token, requestSignal(signal));
-      const hidden = readHiddenJobIds();
-      setHiddenJobIds(hidden);
-      setJobs(latest.filter((job) => !hidden.includes(job.id)));
+      const page = await listHistoryJobs(
+        token,
+        { limit: 30, offset },
+        requestSignal(signal),
+      );
+      setJobs((current) =>
+        append
+          ? [...current, ...page.jobs.filter((job) => !current.some((item) => item.id === job.id))]
+          : page.jobs,
+      );
+      setJobsTotal(page.total);
+      setJobsHasMore(page.has_more);
     },
     [token],
   );
@@ -254,10 +263,9 @@ function HistoryPage() {
           },
           requestSignal(signal),
         );
-        setJobs((current) => {
-          const next = [job, ...current.filter((item) => item.id !== job.id)].slice(0, 30);
-          return next;
-        });
+        setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].slice(0, 30));
+        setJobsTotal((current) => current + 1);
+        setJobsHasMore((current) => current || jobsTotal >= 30);
         setJobErrors((current) => {
           const next = { ...current };
           delete next[job.id];
@@ -290,7 +298,7 @@ function HistoryPage() {
     runRequest(async (signal) => {
       try {
         const updated = await reload(jobId, signal);
-        setJobs((current) => [updated, ...current.filter((job) => job.id !== updated.id)]);
+        setJobs((current) => current.map((job) => (job.id === updated.id ? updated : job)));
         setJobErrors((current) => {
           const next = { ...current };
           delete next[jobId];
@@ -308,15 +316,66 @@ function HistoryPage() {
       setError("");
     });
 
-  const remove = (jobId: string) => {
-    const hidden = [jobId, ...hiddenJobIds.filter((id) => id !== jobId)].slice(0, 30);
-    setHiddenJobIds(hidden);
-    saveHiddenJobIds(hidden);
-    setJobs((current) => current.filter((job) => job.id !== jobId));
-    setJobErrors((current) => {
-      const next = { ...current };
-      delete next[jobId];
-      return next;
+  const loadMoreJobs = () =>
+    runRequest(async (signal) => {
+      setLoadingMoreJobs(true);
+      try {
+        await loadJobs(signal, jobs.length, true);
+      } finally {
+        setLoadingMoreJobs(false);
+      }
+    });
+
+  const queryHistory = async (offset = 0, pageSize = queryPageSize) => {
+    if (!token) return;
+    queryRequest.current?.abort();
+    const controller = new AbortController();
+    queryRequest.current = controller;
+    setQueryLoading(true);
+    setQueryError("");
+    try {
+      const page = await getDailyHistory(
+        token,
+        {
+          symbol: querySymbol.trim(),
+          start_date: queryStartDate,
+          end_date: queryEndDate,
+          limit: pageSize,
+          offset,
+        },
+        requestSignal(controller.signal),
+      );
+      setHistoryPage(page);
+    } catch (reason) {
+      if (!abortError(reason)) {
+        setHistoryPage(null);
+        setQueryError(messageFor(reason));
+      }
+    } finally {
+      if (queryRequest.current === controller) {
+        queryRequest.current = null;
+        setQueryLoading(false);
+      }
+    }
+  };
+
+  const remove = (job: HistoryJob) => {
+    if (!window.confirm(`确定删除任务 ${job.id} 的记录吗？共享历史行情不会被删除。`)) return;
+    runRequest(async (signal) => {
+      if (!token) return;
+      try {
+        await deleteHistoryJob(token, job.id, requestSignal(signal));
+        setJobs((current) => current.filter((item) => item.id !== job.id));
+        setJobsTotal((current) => Math.max(0, current - 1));
+        setJobErrors((current) => {
+          const next = { ...current };
+          delete next[job.id];
+          return next;
+        });
+        setNotice("任务记录已删除，共享历史行情保留。");
+      } catch (reason) {
+        throw new Error(requestMessageFor(reason, "delete"));
+      }
     });
   };
 
@@ -354,6 +413,150 @@ function HistoryPage() {
           </section>
         ) : (
           <>
+            <section className="history-panel history-query" aria-labelledby="history-query-title">
+              <div className="history-section-heading">
+                <div>
+                  <h2 id="history-query-title">查询共享日线</h2>
+                  <p>按标的和日期范围读取已保存的行情；查询不会创建任务或触发下载。</p>
+                </div>
+              </div>
+              <div className="history-form">
+                <label>
+                  查询证券代码
+                  <input
+                    autoComplete="off"
+                    placeholder="例如 510500 或 SH.510500"
+                    value={querySymbol}
+                    onChange={(event) => setQuerySymbol(event.target.value)}
+                  />
+                </label>
+                <label>
+                  开始日期
+                  <input
+                    type="date"
+                    value={queryStartDate}
+                    onChange={(event) => setQueryStartDate(event.target.value)}
+                  />
+                </label>
+                <label>
+                  结束日期
+                  <input
+                    type="date"
+                    value={queryEndDate}
+                    onChange={(event) => setQueryEndDate(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="trade-import-primary"
+                  disabled={
+                    !hydrated ||
+                    !querySymbol.trim() ||
+                    !queryStartDate ||
+                    !queryEndDate ||
+                    queryStartDate > queryEndDate ||
+                    queryLoading
+                  }
+                  onClick={() => void queryHistory()}
+                >
+                  {queryLoading ? "正在查询…" : "查询行情"}
+                </button>
+              </div>
+              {queryError && (
+                <p className="history-error" role="alert">
+                  {queryError}
+                </p>
+              )}
+              {historyPage && (
+                <div className="history-results" aria-live="polite">
+                  {!historyPage.covered ? (
+                    <p className="history-muted">
+                      该日期范围尚未完整覆盖。当前只读取已有数据，不会自动补拉行情。
+                    </p>
+                  ) : historyPage.total === 0 ? (
+                    <p className="history-muted">日期范围已完整覆盖，但没有已观察到的交易日数据。</p>
+                  ) : (
+                    <>
+                      <div className="history-query-summary">
+                        <p>
+                          {historyPage.symbol} · {historyPage.start_date} 至 {historyPage.end_date}
+                        </p>
+                        <label>
+                          每页行数
+                          <select
+                            value={queryPageSize}
+                            onChange={(event) => {
+                              const nextSize = Number(event.target.value);
+                              setQueryPageSize(nextSize);
+                              void queryHistory(0, nextSize);
+                            }}
+                          >
+                            <option value={10}>10</option>
+                            <option value={20}>20</option>
+                            <option value={50}>50</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="history-table-wrap">
+                        <table className="history-bars-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">日期</th>
+                              <th scope="col">开盘</th>
+                              <th scope="col">最高</th>
+                              <th scope="col">最低</th>
+                              <th scope="col">收盘</th>
+                              <th scope="col">成交量</th>
+                              {historyPage.bars.some((bar) => bar.amount !== null) && (
+                                <th scope="col">成交额</th>
+                              )}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {historyPage.bars.map((bar) => (
+                              <tr key={bar.date}>
+                                <th scope="row">{bar.date}</th>
+                                <td>{bar.open}</td>
+                                <td>{bar.high}</td>
+                                <td>{bar.low}</td>
+                                <td>{bar.close}</td>
+                                <td>{bar.volume.toLocaleString("zh-CN")}</td>
+                                {historyPage.bars.some((item) => item.amount !== null) && (
+                                  <td>{bar.amount ?? "—"}</td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="history-pagination">
+                        <span>
+                          共 {historyPage.total} 条 · 第 {historyPage.offset + 1}–
+                          {historyPage.offset + historyPage.bars.length} 条
+                        </span>
+                        <div>
+                          <button
+                            className="trade-import-secondary"
+                            disabled={queryLoading || historyPage.offset === 0}
+                            onClick={() =>
+                              void queryHistory(Math.max(0, historyPage.offset - queryPageSize))
+                            }
+                          >
+                            上一页
+                          </button>
+                          <button
+                            className="trade-import-secondary"
+                            disabled={queryLoading || !historyPage.has_more}
+                            onClick={() => void queryHistory(historyPage.offset + queryPageSize)}
+                          >
+                            下一页
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
             <section
               className="history-panel history-create"
               aria-labelledby="history-create-title"
@@ -415,23 +618,25 @@ function HistoryPage() {
                 {notice}
               </p>
             )}
-            <section className="history-jobs" aria-labelledby="history-jobs-title">
-              <div className="history-section-heading">
-                <div>
-                  <h2 id="history-jobs-title">任务记录</h2>
-                  <p>最近 30 项任务按登录账户保存，可在不同浏览器查看。</p>
+            <details className="history-jobs">
+              <summary>任务记录 · 已加载 {jobs.length} / {jobsTotal} 项</summary>
+              <section className="history-job-content" aria-labelledby="history-jobs-title">
+                <div className="history-section-heading">
+                  <div>
+                    <h2 id="history-jobs-title">任务状态与进度</h2>
+                    <p>任务按账户保存；刷新或加载更多可查看全部历史记录。</p>
+                  </div>
+                  <div className="history-job-actions">
+                    <span>{jobs.length} / {jobsTotal} 项</span>
+                    <button
+                      className="trade-import-secondary"
+                      disabled={busy || loadingJobs}
+                      onClick={refreshJobs}
+                    >
+                      刷新列表
+                    </button>
+                  </div>
                 </div>
-                <div className="history-job-actions">
-                  <span>{jobs.length} 项</span>
-                  <button
-                    className="trade-import-secondary"
-                    disabled={busy || loadingJobs}
-                    onClick={refreshJobs}
-                  >
-                    刷新列表
-                  </button>
-                </div>
-              </div>
               {jobs.length === 0 ? (
                 <div className="history-empty">
                   <h3>{loadingJobs ? "正在加载任务记录" : "暂无历史任务"}</h3>
@@ -549,8 +754,12 @@ function HistoryPage() {
                             </button>
                           )}
                           {terminal.has(job.status) && (
-                            <button className="history-remove" onClick={() => remove(job.id)}>
-                              从此浏览器移除
+                            <button
+                              className="history-remove"
+                              disabled={busy}
+                              onClick={() => remove(job)}
+                            >
+                              删除任务记录
                             </button>
                           )}
                           <button
@@ -566,7 +775,17 @@ function HistoryPage() {
                   })}
                 </div>
               )}
-            </section>
+              {jobsHasMore && (
+                <button
+                  className="trade-import-secondary history-load-more"
+                  disabled={busy || loadingMoreJobs}
+                  onClick={loadMoreJobs}
+                >
+                  {loadingMoreJobs ? "正在加载…" : "加载更多任务"}
+                </button>
+              )}
+              </section>
+            </details>
           </>
         )}
       </div>

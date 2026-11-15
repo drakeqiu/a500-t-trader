@@ -242,25 +242,63 @@ class JobRepository:
         assert row is not None
         return _job(row)  # type: ignore[return-value]
 
-    def list_for_subject(self, subject: str) -> list[dict[str, Any]]:
+    def list_for_subject(
+        self, subject: str, *, limit: int = _RECENT_JOB_LIMIT, offset: int = 0
+    ) -> dict[str, Any]:
+        if limit < 1 or offset < 0:
+            raise ValueError("limit must be positive and offset must not be negative")
         with self._connect() as db:
+            total_row = db.execute(
+                "SELECT count(*) FROM daily_history_jobs WHERE subject=%s",
+                (subject,),
+            ).fetchone()
+            assert total_row is not None
+            total = int(total_row["count"])
             rows = db.execute(
                 f"""SELECT {_COLUMNS} FROM daily_history_jobs
                 WHERE subject=%s ORDER BY created_at DESC, id DESC
-                LIMIT %s""",
-                (subject, _RECENT_JOB_LIMIT),
+                LIMIT %s OFFSET %s""",
+                (subject, limit, offset),
             ).fetchall()
         jobs: list[dict[str, Any]] = []
         for row in rows:
             job = _job(row)
             assert job is not None
             jobs.append(job)
-        return jobs
+        return {
+            "jobs": jobs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(jobs) < total,
+        }
+
+    def delete(self, subject: str, job_id: str) -> bool | None:
+        try:
+            identifier = uuid.UUID(str(job_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+        with self._connect() as db:
+            deleted = db.execute(
+                """DELETE FROM daily_history_jobs
+                WHERE subject=%s AND id=%s
+                    AND status IN ('succeeded','failed','cancelled')
+                RETURNING id""",
+                (subject, identifier),
+            ).fetchone()
+            if deleted is not None:
+                return True
+            existing = db.execute(
+                "SELECT 1 FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                (subject, identifier),
+            ).fetchone()
+        return False if existing is not None else None
 
     def get(self, subject: str, job_id: str) -> dict[str, Any] | None:
         try:
             identifier = uuid.UUID(str(job_id))
-        except ValueError, TypeError, AttributeError:
+        except (ValueError, TypeError, AttributeError):
             return None
         with self._connect() as db:
             row = db.execute(
