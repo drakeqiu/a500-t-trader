@@ -29,7 +29,6 @@ async function connect(page: Page, subject: string, heading = "策略信号") {
 }
 
 async function fillSnapshot(page: Page, cash = "125.50") {
-  await page.getByLabel("快照时间").fill(new Date().toISOString());
   await page.getByLabel("可用现金", { exact: true }).fill(cash);
   await page.getByRole("button", { name: "添加证券" }).click();
   await page.getByLabel("第 1 行证券代码").fill("510300");
@@ -199,13 +198,16 @@ test("authenticates on /assets and creates an account snapshot through the API",
   expect(["available", "unavailable"]).toContain((await navResponse.json()).status);
 
   await page.getByRole("button", { name: "创建快照", exact: true }).click();
+  await expect(page.getByLabel("快照时间")).toHaveCount(0);
   await fillSnapshot(page);
   const saved = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/account-snapshot") && response.request().method() === "PUT",
   );
   await page.getByRole("button", { name: "创建账户快照", exact: true }).click();
-  expect((await saved).status()).toBe(201);
+  const savedResponse = await saved;
+  const createdPayload = savedResponse.request().postDataJSON();
+  expect(createdPayload.as_of).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   await expect(
     page.getByText("账户快照已保存。正在从服务端重新读取完整净资产估值。"),
   ).toBeVisible();
@@ -245,9 +247,7 @@ test("validates snapshot amounts and preserves oversized decimal precision on re
     (response) =>
       response.url().endsWith("/api/v1/account-snapshot") && response.request().method() === "PUT",
   );
-  await page.getByLabel("快照时间").evaluate((input: HTMLInputElement) => {
-    input.form?.requestSubmit();
-  });
+  await page.getByRole("button", { name: "创建账户快照", exact: true }).click();
   const response = await saved;
   expect(response.status()).toBe(201);
   expect(snapshotWrites).toBe(1);
@@ -270,8 +270,11 @@ test("creates and edits an account; a mocked 412 retains the draft until explici
   const nav = page.getByRole("region", { name: "当前净资产（NAV）" });
   await expect(nav).toContainText(/不可用|不可估值|暂无|尚无/);
   await page.getByRole("button", { name: "创建快照", exact: true }).click();
+  await expect(page.getByLabel("快照时间")).toHaveCount(0);
   await fillSnapshot(page);
   const created = await saveSnapshot(page, 201);
+  const createdPayload = created.request().postDataJSON();
+  expect(createdPayload.as_of).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   expect(created.headers().etag).toBeTruthy();
   expect(created.request().headers()["if-none-match"]).toBe("*");
   await expect(nav).toContainText("market_data_unavailable");
@@ -281,11 +284,13 @@ test("creates and edits an account; a mocked 412 retains the draft until explici
   await other.goto("/assets");
   await connect(other, subject, "账户资产");
   await other.getByRole("button", { name: "编辑快照", exact: true }).click();
+  await expect(other.getByLabel("快照时间")).toHaveCount(0);
   await expect(other.getByLabel("可用现金", { exact: true })).toHaveValue("125.50");
   await page.getByRole("button", { name: "编辑快照", exact: true }).click();
   await page.getByLabel("可用现金", { exact: true }).fill("999.00");
   await other.getByLabel("可用现金", { exact: true }).fill("456.00");
   const edited = await saveSnapshot(other, 200);
+  expect(edited.request().postDataJSON().as_of).toBe(createdPayload.as_of);
   expect(edited.headers().etag).not.toBe(created.headers().etag);
 
   const conflict = await saveSnapshot(page, 412);
