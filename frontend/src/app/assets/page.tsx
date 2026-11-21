@@ -218,7 +218,11 @@ function AssetsDashboard({ token }: { token: string | null }) {
       if (new Set(positions.map((position) => position.symbol.trim())).size !== positions.length) {
         throw new Error("证券代码不能重复。");
       }
-      const result = await saveSnapshot(token, parseSnapshotDraft(draft), snapshot?.etag ?? null);
+      const payload = parseSnapshotDraft({
+        ...draft,
+        as_of: snapshot?.snapshot.as_of ?? new Date().toISOString(),
+      });
+      const result = await saveSnapshot(token, payload, snapshot?.etag ?? null);
       setSnapshot(result);
       replaceDraft(snapshotDraft(result.snapshot));
       setDraftDirty(false);
@@ -515,26 +519,6 @@ function AssetsDashboard({ token }: { token: string | null }) {
                     JSON；保存后会完整替换当前快照。
                   </p>
                   <div className="snapshot-fields">
-                    <label className="snapshot-field">
-                      <span>快照时间</span>
-                      <input
-                        aria-label="快照时间"
-                        aria-describedby="as_of-hint"
-                        value={draft.as_of}
-                        required
-                        onChange={(event) => setField("as_of", event.target.value)}
-                      />
-                      <small id="as_of-hint">
-                        记录这份余额和持仓对应的时间，必须包含时区。例：2026-11-06T15:00:00+08:00
-                      </small>
-                      <button
-                        className="text-action snapshot-time-action"
-                        type="button"
-                        onClick={() => setField("as_of", new Date().toISOString())}
-                      >
-                        填入当前时间（UTC）
-                      </button>
-                    </label>
                     <label className="snapshot-field">
                       <span>可用现金（元）</span>
                       <input

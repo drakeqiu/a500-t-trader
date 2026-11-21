@@ -70,7 +70,7 @@ describe("assets route", () => {
     expect(screen.queryByLabelText("可用现金")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "编辑快照" }));
     expect((screen.getByLabelText("可用现金") as HTMLInputElement).value).toBe("125.5000");
-    expect((screen.getByLabelText("快照时间") as HTMLInputElement).value).toBe(snapshot.as_of);
+    expect(screen.queryByLabelText("快照时间")).toBeNull();
     expect((screen.getByLabelText("第 1 行持有总份额") as HTMLInputElement).value).toBe("100");
     expect(screen.queryByLabelText(/JSON/)).toBeNull();
     expect(screen.getByText(/不打算卖出的保留份额/)).toBeTruthy();
@@ -111,12 +111,25 @@ describe("assets route", () => {
     expect(screen.queryByLabelText("可用现金")).toBeNull();
   });
 
+  it("generates UTC snapshot time when creating without a time field", async () => {
+    const saveStartedAt = Date.now();
+    render(<AssetsPage />);
+    await screen.findByText("尚无账户快照");
+    fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
+    expect(screen.queryByLabelText("快照时间")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "创建账户快照" }));
+    await waitFor(() => expect(saveSnapshot).toHaveBeenCalledTimes(1));
+    const payload = saveSnapshot.mock.calls[0][1];
+    expect(payload.as_of).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Date.parse(payload.as_of)).toBeGreaterThanOrEqual(saveStartedAt);
+    expect(Date.parse(payload.as_of)).toBeLessThanOrEqual(Date.now());
+  });
+
   it("preserves user input after save failure, then sends the position fields as one snapshot", async () => {
     saveSnapshot.mockRejectedValueOnce(new Error("服务暂不可用"));
     render(<AssetsPage />);
     await screen.findByText("尚无账户快照");
     fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
-    fireEvent.change(screen.getByLabelText("快照时间"), { target: { value: snapshot.as_of } });
     fireEvent.change(screen.getByLabelText("可用现金"), { target: { value: "987.654321" } });
     fillPosition();
     fireEvent.click(screen.getByRole("button", { name: "创建账户快照" }));
@@ -124,9 +137,9 @@ describe("assets route", () => {
     expect((screen.getByLabelText("可用现金") as HTMLInputElement).value).toBe("987.654321");
     fireEvent.click(screen.getByRole("button", { name: "创建账户快照" }));
     await waitFor(() =>
-      expect(saveSnapshot).toHaveBeenCalledWith(
+      expect(saveSnapshot).toHaveBeenLastCalledWith(
         "memory-token",
-        { ...snapshot, available_cash: "987.654321" },
+        expect.objectContaining({ available_cash: "987.654321" }),
         null,
       ),
     );
@@ -137,7 +150,6 @@ describe("assets route", () => {
     render(<AssetsPage />);
     await screen.findByText("尚无账户快照");
     fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
-    fireEvent.change(screen.getByLabelText("快照时间"), { target: { value: snapshot.as_of } });
     fireEvent.change(screen.getByLabelText("可用现金"), { target: { value: "NaN" } });
     fireEvent.submit(screen.getByRole("button", { name: "创建账户快照" }).closest("form")!);
     expect((await screen.findByRole("alert")).textContent).toContain("可用现金");
@@ -151,7 +163,6 @@ describe("assets route", () => {
     render(<AssetsPage />);
     await screen.findByText("尚无账户快照");
     fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
-    fireEvent.change(screen.getByLabelText("快照时间"), { target: { value: snapshot.as_of } });
     fireEvent.change(screen.getByLabelText("可用现金"), { target: { value: "100" } });
     fillPosition(1);
     fillPosition(2);
@@ -168,7 +179,6 @@ describe("assets route", () => {
     render(<AssetsPage />);
     await screen.findByText("尚无账户快照");
     fireEvent.click(screen.getByRole("button", { name: "创建快照" }));
-    fireEvent.change(screen.getByLabelText("快照时间"), { target: { value: snapshot.as_of } });
     const form = screen.getByRole("button", { name: "创建账户快照" }).closest("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form!);

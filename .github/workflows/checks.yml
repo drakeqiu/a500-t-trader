@@ -95,6 +95,9 @@ jobs:
 
       - name: mypy strict
         run: uv run mypy
+      - name: mypy fixture script bodies
+        run: >-
+          uv run mypy scripts/frontend-api-mock.py
 
       - name: pytest
         run: uv run pytest

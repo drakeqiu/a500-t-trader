@@ -13,6 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pika
+from pika.exceptions import AMQPConnectionError, ChannelClosedByBroker
 
 from a500_t_trader.market_data import Trade
 from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
@@ -158,7 +159,7 @@ def main() -> None:
             try:
                 connection = pika.BlockingConnection(pika.URLParameters(url))
                 break
-            except pika.exceptions.AMQPConnectionError:
+            except AMQPConnectionError:
                 time.sleep(1)
         if connection is None:
             raise RuntimeError("RabbitMQ did not become available")
@@ -169,7 +170,7 @@ def main() -> None:
                 try:
                     connection.channel().queue_declare(queue=queue, passive=True)
                     break
-                except pika.exceptions.ChannelClosedByBroker as error:
+                except ChannelClosedByBroker as error:
                     if time.monotonic() >= deadline:
                         raise RuntimeError(
                             f"consumer queue {queue} was not declared"
@@ -192,6 +193,7 @@ def main() -> None:
             connection.close()
         for purpose in ("signals", "audit"):
             output = ""
+            events = []
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
                 result = subprocess.run(
@@ -209,7 +211,6 @@ def main() -> None:
                     timeout=15,
                 )
                 output = result.stdout
-                events = []
                 for line in output.splitlines():
                     start = line.find("{")
                     if start < 0:

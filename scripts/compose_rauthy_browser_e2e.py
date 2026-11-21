@@ -373,15 +373,15 @@ def _device_public_api(
     ) as response:
         if response.status != 200:
             raise AssertionError(f"Public signal API returned HTTP {response.status}")
+    snapshot = {
+        "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "holdings": {"510300": 100},
+        "protected_floor": {"510300": 20},
+        "sellable": {"510300": 80},
+        "cost_basis": {"510300": "3.8500"},
+        "available_cash": "125.50",
+    }
     if create_snapshot:
-        snapshot = {
-            "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "holdings": {"510300": 100},
-            "protected_floor": {"510300": 20},
-            "sellable": {"510300": 80},
-            "cost_basis": {"510300": "3.8500"},
-            "available_cash": "125.50",
-        }
         create = Request(
             gateway + "/api/v1/account-snapshot",
             data=json.dumps(snapshot).encode(),
@@ -876,9 +876,6 @@ def _browser_flow_impl(
         if create_snapshot:
             stage[0] = "saving account snapshot"
             page.get_by_role("button", name="创建快照").click()
-            page.get_by_label("快照时间").fill(
-                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            )
             page.get_by_label("可用现金", exact=True).fill(cash)
             page.get_by_role("button", name="添加证券").click()
             page.get_by_label("第 1 行证券代码").fill("510300")
