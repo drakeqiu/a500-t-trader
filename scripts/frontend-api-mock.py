@@ -135,9 +135,8 @@ def create_fixture(port: int) -> FastAPI:
     ) -> Response:
         generation = stream_generation
         response = await call_next(request)
-        if (
-            request.url.path != "/v1/signals/stream"
-            or not isinstance(response, StreamingResponse)
+        if request.url.path != "/v1/signals/stream" or not isinstance(
+            response, StreamingResponse
         ):
             return response
         original = aiter(response.body_iterator)
