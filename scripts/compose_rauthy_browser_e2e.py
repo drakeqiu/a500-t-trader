@@ -373,15 +373,15 @@ def _device_public_api(
     ) as response:
         if response.status != 200:
             raise AssertionError(f"Public signal API returned HTTP {response.status}")
+    snapshot = {
+        "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "holdings": {"510300": 100},
+        "protected_floor": {"510300": 20},
+        "sellable": {"510300": 80},
+        "cost_basis": {"510300": "3.8500"},
+        "available_cash": "125.50",
+    }
     if create_snapshot:
-        snapshot = {
-            "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "holdings": {"510300": 100},
-            "protected_floor": {"510300": 20},
-            "sellable": {"510300": 80},
-            "cost_basis": {"510300": "3.8500"},
-            "available_cash": "125.50",
-        }
         create = Request(
             gateway + "/api/v1/account-snapshot",
             data=json.dumps(snapshot).encode(),
