@@ -8,7 +8,7 @@ on:
       - reopened
       - synchronize
       - edited
-      - ready_for_review
+      - closed
       - labeled
       - unlabeled
   workflow_run:
@@ -19,7 +19,7 @@ permissions:
   checks: read
   contents: write
   pull-requests: write
-
+  actions: write
 concurrency:
   group: >-
     automerge-${{ github.event.pull_request.number ||
@@ -48,7 +48,21 @@ jobs:
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha ||
                 github.event.workflow_run.head_sha }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
         run: |
+          if [[ "$EVENT_NAME" == pull_request_target &&
+                "$EVENT_ACTION" == closed ]]; then
+            if [[ "$PR_MERGED" != true ]]; then
+              echo "Pull request closed without merging; skipping CI dispatch."
+              exit 0
+            fi
+            gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" \
+              --ref main
+            gh workflow run compose-e2e.yml --repo "$GITHUB_REPOSITORY" \
+              --ref main
+            exit 0
+          fi
+
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             PR_NUMBER=$(gh api \
               "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" |
@@ -143,19 +157,4 @@ jobs:
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --match-head-commit "$HEAD_SHA" --auto --squash
 
-          for attempt in {1..30}; do
-            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --json state --jq .state)
-            if [[ "$state" == MERGED ]]; then
-              break
-            fi
-            sleep 2
-          done
-          if [[ "$state" != MERGED ]]; then
-            echo "Pull request was not merged; skipping post-merge workflows."
-            exit 0
-          fi
-
-          gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref main
-          gh workflow run compose-e2e.yml --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          # The closed pull_request_target event dispatches post-merge CI.
