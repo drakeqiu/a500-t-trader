@@ -139,7 +139,6 @@ describe("assets route", () => {
     expect(Date.parse(payload.as_of)).toBeLessThanOrEqual(Date.now());
   });
 
-
   it("preserves user input after save failure, then sends the position fields as one snapshot", async () => {
     saveSnapshot.mockRejectedValueOnce(new Error("服务暂不可用"));
     render(<AssetsPage />);

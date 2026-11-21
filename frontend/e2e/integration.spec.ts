@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 // Business REST/SSE calls use deterministic in-memory API mocks and fixture identity.
 // This suite exercises browser workflows, not live Rauthy or market-provider access.

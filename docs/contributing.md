@@ -80,8 +80,9 @@ git config --local core.hooksPath .githooks
 ```
 
 启用后，每次 `git commit` 都会检查暂存的 Markdown（lint 与格式）和 JSON（格式）文件，
-并运行全仓库 Ruff lint/格式检查、`mypy` 严格检查及前端 API mock 脚本的 `mypy` 检查。
-运行前需按上文执行 `uv sync --locked` 和 `npm ci`。
+并运行全仓库 Ruff lint/格式检查、`mypy` 严格检查、前端 API mock 脚本的 `mypy` 检查，
+以及前端 lint、格式检查和 Vitest 单元测试。运行前需按上文执行 `uv sync --locked`、
+`npm ci`，并在 `frontend/` 执行 `bun install --frozen-lockfile`。Playwright E2E 仍由 CI 执行。
 
 该配置仅对当前克隆生效；新克隆仓库后需重新执行一次。
 
