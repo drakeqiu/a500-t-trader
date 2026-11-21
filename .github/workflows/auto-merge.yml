@@ -142,3 +142,20 @@ jobs:
           fi
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --match-head-commit "$HEAD_SHA" --auto --squash
+
+          for attempt in {1..30}; do
+            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json state --jq .state)
+            if [[ "$state" == MERGED ]]; then
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$state" != MERGED ]]; then
+            echo "Pull request was not merged; skipping post-merge workflows."
+            exit 0
+          fi
+
+          gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run compose-e2e.yml --repo "$GITHUB_REPOSITORY" \
+            --ref main
