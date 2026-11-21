@@ -71,6 +71,20 @@ git config --local commit.template .gitmessage
 
 此配置仅对当前克隆生效，不会通过仓库共享。
 
+## 提交前质量检查
+
+启用仓库提供的 Git hook：
+
+```bash
+git config --local core.hooksPath .githooks
+```
+
+启用后，每次 `git commit` 都会检查暂存的 Markdown（lint 与格式）和 JSON（格式）文件，
+并运行全仓库 Ruff lint/格式检查、`mypy` 严格检查及前端 API mock 脚本的 `mypy` 检查。
+运行前需按上文执行 `uv sync --locked` 和 `npm ci`。
+
+该配置仅对当前克隆生效；新克隆仓库后需重新执行一次。
+
 ## 持续集成
 
 GitHub Actions 将 Python/文档检查与前端检查并行运行；前端 job 执行 lint、
