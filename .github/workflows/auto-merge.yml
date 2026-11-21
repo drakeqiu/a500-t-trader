@@ -11,6 +11,8 @@ on:
       - closed
       - labeled
       - unlabeled
+  pull_request_review:
+    types: [submitted]
   workflow_run:
     workflows: [CI, Compose E2E]
     types: [completed]
@@ -50,17 +52,32 @@ jobs:
                 github.event.workflow_run.head_sha }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
         run: |
+          dispatch_post_merge_workflows() {
+            gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" \
+              --ref main
+            gh workflow run compose-e2e.yml --repo "$GITHUB_REPOSITORY" \
+              --ref main
+          }
+
           if [[ "$EVENT_NAME" == pull_request_target &&
                 "$EVENT_ACTION" == closed ]]; then
             if [[ "$PR_MERGED" != true ]]; then
               echo "Pull request closed without merging; skipping CI dispatch."
               exit 0
             fi
-            gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" \
-              --ref main
-            gh workflow run compose-e2e.yml --repo "$GITHUB_REPOSITORY" \
-              --ref main
+            dispatch_post_merge_workflows
             exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == pull_request_review ]]; then
+            pr_state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json state --jq .state)
+            if [[ "$pr_state" == MERGED ]]; then
+              echo "Pull request is already merged; dispatching post-merge"
+              echo "workflows."
+              dispatch_post_merge_workflows
+              exit 0
+            fi
           fi
 
           if [[ "$EVENT_NAME" == workflow_run ]]; then
@@ -157,4 +174,15 @@ jobs:
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --match-head-commit "$HEAD_SHA" --auto --squash
 
-          # The closed pull_request_target event dispatches post-merge CI.
+          for attempt in {1..30}; do
+            pr_state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json state --jq .state)
+            if [[ "$pr_state" == MERGED ]]; then
+              echo "Pull request merged; dispatching post-merge workflows."
+              dispatch_post_merge_workflows
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Auto-merge is pending; waiting for a review or CI event."
