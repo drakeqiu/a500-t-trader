@@ -220,7 +220,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
       }
       const payload = parseSnapshotDraft({
         ...draft,
-        as_of: snapshot?.snapshot.as_of ?? new Date().toISOString(),
+        as_of: new Date().toISOString(),
       });
       const result = await saveSnapshot(token, payload, snapshot?.etag ?? null);
       setSnapshot(result);

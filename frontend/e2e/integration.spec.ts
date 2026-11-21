@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 // Business REST/SSE calls use deterministic in-memory API mocks and fixture identity.
 // This suite exercises browser workflows, not live Rauthy or market-provider access.
@@ -289,8 +289,13 @@ test("creates and edits an account; a mocked 412 retains the draft until explici
   await page.getByRole("button", { name: "编辑快照", exact: true }).click();
   await page.getByLabel("可用现金", { exact: true }).fill("999.00");
   await other.getByLabel("可用现金", { exact: true }).fill("456.00");
+  const editStartedAt = Date.now();
   const edited = await saveSnapshot(other, 200);
-  expect(edited.request().postDataJSON().as_of).toBe(createdPayload.as_of);
+  const editedAsOf = edited.request().postDataJSON().as_of as string;
+  expect(editedAsOf).not.toBe(createdPayload.as_of);
+  expect(editedAsOf).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  expect(Date.parse(editedAsOf)).toBeGreaterThanOrEqual(editStartedAt);
+  expect(Date.parse(editedAsOf)).toBeLessThanOrEqual(Date.now());
   expect(edited.headers().etag).not.toBe(created.headers().etag);
 
   const conflict = await saveSnapshot(page, 412);

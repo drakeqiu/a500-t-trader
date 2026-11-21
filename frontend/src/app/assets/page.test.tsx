@@ -124,6 +124,20 @@ describe("assets route", () => {
     expect(Date.parse(payload.as_of)).toBeGreaterThanOrEqual(saveStartedAt);
     expect(Date.parse(payload.as_of)).toBeLessThanOrEqual(Date.now());
   });
+  it("generates a new UTC snapshot time when editing", async () => {
+    getSnapshot.mockResolvedValue(stored);
+    render(<AssetsPage />);
+    await screen.findByText("¥125.5000");
+    fireEvent.click(screen.getByRole("button", { name: "编辑快照" }));
+    const saveStartedAt = Date.now();
+    fireEvent.click(screen.getByRole("button", { name: "保存账户快照" }));
+    await waitFor(() => expect(saveSnapshot).toHaveBeenCalledTimes(1));
+    const payload = saveSnapshot.mock.calls[0][1];
+    expect(payload.as_of).not.toBe(snapshot.as_of);
+    expect(payload.as_of).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Date.parse(payload.as_of)).toBeGreaterThanOrEqual(saveStartedAt);
+    expect(Date.parse(payload.as_of)).toBeLessThanOrEqual(Date.now());
+  });
 
   it("preserves user input after save failure, then sends the position fields as one snapshot", async () => {
     saveSnapshot.mockRejectedValueOnce(new Error("服务暂不可用"));
@@ -211,7 +225,11 @@ describe("assets route", () => {
     await waitFor(() =>
       expect(saveSnapshot).toHaveBeenLastCalledWith(
         "memory-token",
-        { ...snapshot, available_cash: "999.00" },
+        {
+          ...snapshot,
+          as_of: expect.any(String),
+          available_cash: "999.00",
+        },
         '"v2"',
       ),
     );

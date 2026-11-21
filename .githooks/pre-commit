@@ -23,3 +23,11 @@ uv run --no-sync mypy
 
 echo "Running mypy fixture script bodies..."
 uv run --no-sync mypy scripts/frontend-api-mock.py
+echo "Running frontend lint..."
+(cd "$repo_root/frontend" && bun run lint)
+
+echo "Running frontend format check..."
+(cd "$repo_root/frontend" && bun run format:check)
+
+echo "Running frontend unit tests..."
+(cd "$repo_root/frontend" && bun run test)

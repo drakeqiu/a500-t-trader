@@ -1,7 +1,7 @@
 import type React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DailyHistoryPage, HistoryJob, HistoryJobPage } from "@/lib/a500-client";
+import type { HistoryJob, HistoryJobPage } from "@/lib/a500-client";
 
 const { client } = vi.hoisted(() => ({
   client: {
@@ -36,28 +36,6 @@ import HistoryPage from "@/app/data/history/page";
 function jobsPage(jobs: HistoryJob[], total = jobs.length): HistoryJobPage {
   return { jobs, total, limit: 30, offset: 0, has_more: total > jobs.length };
 }
-
-const dailyPage: DailyHistoryPage = {
-  symbol: "510300",
-  start_date: "2026-01-01",
-  end_date: "2026-01-03",
-  covered: true,
-  has_more: false,
-  bars: [
-    {
-      date: "2026-01-02",
-      open: "1",
-      high: "2",
-      low: "1",
-      close: "2",
-      volume: 100,
-      amount: "200",
-    },
-  ],
-  total: 1,
-  limit: 20,
-  offset: 0,
-};
 
 const job: HistoryJob = {
   type: "daily_history",
