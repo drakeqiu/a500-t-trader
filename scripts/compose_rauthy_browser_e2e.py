@@ -876,9 +876,6 @@ def _browser_flow_impl(
         if create_snapshot:
             stage[0] = "saving account snapshot"
             page.get_by_role("button", name="创建快照").click()
-            page.get_by_label("快照时间").fill(
-                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            )
             page.get_by_label("可用现金", exact=True).fill(cash)
             page.get_by_role("button", name="添加证券").click()
             page.get_by_label("第 1 行证券代码").fill("510300")
