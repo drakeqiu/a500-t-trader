@@ -234,11 +234,17 @@ test("shows asset explanations on hover and keyboard focus", async ({ page }) =>
       help.evaluate((element) => ({
         content: getComputedStyle(element, "::after").content,
         opacity: getComputedStyle(element, "::after").opacity,
+        popupRight: getComputedStyle(element, "::after").right,
+        popupMaxWidth: getComputedStyle(element, "::after").maxWidth,
+        markerWidth: getComputedStyle(element).width,
       })),
     )
     .toEqual({
       content: '"净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"',
       opacity: "1",
+      popupRight: "-8px",
+      popupMaxWidth: "280px",
+      markerWidth: "16px",
     });
   await help.focus();
   await expect

@@ -766,15 +766,15 @@ code {
 .asset-help {
   position: relative;
   display: inline-grid;
-  width: 19px;
-  height: 19px;
-  margin-left: 8px;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--focus) 30%, var(--rule));
   border-radius: 50%;
   background: color-mix(in srgb, var(--focus) 7%, var(--surface));
   color: var(--focus);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1;
   vertical-align: middle;
@@ -801,37 +801,37 @@ code {
     visibility 160ms ease;
 }
 .asset-help::before {
+  right: 12px;
   bottom: calc(100% + 4px);
-  left: 50%;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-right: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
   background: var(--surface);
   content: "";
-  transform: translate(-50%, 4px) rotate(45deg);
+  transform: translateY(4px) rotate(45deg);
 }
 .asset-help::after {
+  right: -8px;
   bottom: calc(100% + 8px);
-  left: 50%;
   width: max-content;
-  max-width: min(320px, calc(100vw - 32px));
-  padding: 11px 13px;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 9px 11px;
   border: 1px solid var(--rule);
-  border-top: 2px solid var(--focus);
-  border-radius: 7px;
+  border-top: 1px solid var(--focus);
+  border-radius: 6px;
   background: var(--surface);
   box-shadow:
     0 8px 22px rgb(23 32 29 / 14%),
     0 2px 5px rgb(23 32 29 / 7%);
   color: var(--ink);
   content: attr(data-tooltip);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 450;
-  line-height: 1.55;
+  line-height: 1.5;
   text-align: left;
   white-space: normal;
-  transform: translate(-50%, 5px);
+  transform: translateY(5px);
 }
 .asset-help:hover::before,
 .asset-help:focus-visible::before,
@@ -842,11 +842,11 @@ code {
 }
 .asset-help:hover::before,
 .asset-help:focus-visible::before {
-  transform: translate(-50%, 0) rotate(45deg);
+  transform: translateY(0) rotate(45deg);
 }
 .asset-help:hover::after,
 .asset-help:focus-visible::after {
-  transform: translate(-50%, 0);
+  transform: translateY(0);
 }
 .asset-help:focus-visible {
   outline: 2px solid var(--focus);
