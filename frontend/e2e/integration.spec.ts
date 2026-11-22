@@ -218,11 +218,16 @@ test("authenticates on /assets and creates an account snapshot through the API",
   await expect(positions.getByRole("cell", { name: "3.8500" })).toBeVisible();
 });
 
-test("shows asset explanations when their help markers are hovered", async ({ page }) => {
+test("shows asset explanations on hover and keyboard focus", async ({ page }) => {
   await page.goto("/assets");
   await connect(page, `assets-help-${randomUUID()}`, "账户资产");
 
   const help = page.getByRole("note", { name: "净资产估值说明" });
+  await expect(page.locator(".asset-help[title]")).toHaveCount(0);
+  await expect(help).toHaveAttribute(
+    "aria-description",
+    "净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。",
+  );
   await help.hover();
   await expect
     .poll(() =>
@@ -232,9 +237,18 @@ test("shows asset explanations when their help markers are hovered", async ({ pa
       })),
     )
     .toEqual({
-      content: '"按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。"',
+      content: '"净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"',
       opacity: "1",
     });
+  await help.focus();
+  await expect
+    .poll(() =>
+      help.evaluate((element) => ({
+        focused: element.matches(":focus-visible"),
+        opacity: getComputedStyle(element, "::after").opacity,
+      })),
+    )
+    .toEqual({ focused: true, opacity: "1" });
 });
 test("validates snapshot amounts and preserves oversized decimal precision on repeat submits", async ({
   page,
