@@ -763,18 +763,23 @@ code {
   font-weight: 620;
   letter-spacing: -0.02em;
 }
-.asset-help {
+.asset-section-heading h2 {
   position: relative;
+  width: fit-content;
+}
+.asset-help {
+  position: absolute;
+  top: -10px;
+  right: -18px;
   display: inline-grid;
-  width: 16px;
-  height: 16px;
-  margin-left: 6px;
-  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
   border: 1px solid color-mix(in srgb, var(--focus) 30%, var(--rule));
   border-radius: 50%;
   background: color-mix(in srgb, var(--focus) 7%, var(--surface));
   color: var(--focus);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 650;
   line-height: 1;
   vertical-align: middle;
