@@ -781,16 +781,12 @@ code {
   cursor: help;
   transition:
     background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-color 160ms ease;
 }
 .asset-help:hover,
 .asset-help:focus-visible {
-  border-color: var(--focus);
-  background: var(--focus);
-  color: var(--surface);
-  transform: scale(1.06);
+  border-color: color-mix(in srgb, var(--focus) 65%, var(--rule));
+  background: color-mix(in srgb, var(--focus) 10%, var(--surface));
 }
 .asset-help::before,
 .asset-help::after {
