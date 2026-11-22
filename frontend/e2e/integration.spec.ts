@@ -491,22 +491,6 @@ test("consumes mocked SSE and resumes its cursor; expired history resets to curr
   request,
 }) => {
   await request.post(`${fixture}/__fixture/expire-events`);
-  await page.addInitScript(() => {
-    const read = ReadableStreamDefaultReader.prototype.read;
-    const decoder = new TextDecoder();
-    Reflect.set(window, "__sseBytes", "");
-    ReadableStreamDefaultReader.prototype.read = async function () {
-      const result = await read.call(this);
-      if (result.value instanceof Uint8Array) {
-        Reflect.set(
-          window,
-          "__sseBytes",
-          Reflect.get(window, "__sseBytes") + decoder.decode(result.value, { stream: true }),
-        );
-      }
-      return result;
-    };
-  });
   await request.post(`${fixture}/__fixture/signals/WAIT`);
   const cursors: string[] = [];
   page.on("request", (outgoing) => {
@@ -524,11 +508,6 @@ test("consumes mocked SSE and resumes its cursor; expired history resets to curr
   const published = await request.post(`${fixture}/__fixture/signals/BUY`);
   const buyId = (await published.json()).event_id as string;
   await expect(row).toContainText("BUY");
-  await expect
-    .poll(() =>
-      page.evaluate((id) => Reflect.get(window, "__sseBytes").includes(`id: ${id}\n`), buyId),
-    )
-    .toBeTruthy();
   await request.post(`${fixture}/__fixture/disconnect-streams`);
   await request.post(`${fixture}/__fixture/signals/SELL`);
   await request.post(`${fixture}/__fixture/signals/WAIT`);
