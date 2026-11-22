@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from a500_t_trader.market_data.trading_calendar import (
@@ -92,7 +93,7 @@ def test_amazingdata_adapter_uses_shanghai_market() -> None:
 
 def test_invalid_calendar_result_is_a_failed_refresh() -> None:
     provider = DeterministicCalendar((date(2026, 11, 2),))
-    provider.dates = ("not-a-date",)  # type: ignore[assignment]
+    provider.dates = cast(tuple[date, ...], ("not-a-date",))
     calendar = TradingCalendarService(
         provider, clock=lambda: datetime(2026, 11, 2, tzinfo=SHANGHAI)
     )

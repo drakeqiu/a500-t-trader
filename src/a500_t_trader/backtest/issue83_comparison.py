@@ -250,15 +250,15 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
             "type": "fixed_quantity_per_signal",
             "shares": 100,
             "limitation": (
-                "Exploratory order sizing only; not V1 account-state sizing or "
-                "protected-floor policy."
+                "Exploratory order sizing only; not V1 account-state "
+                "sizing or protected-floor policy."
             ),
         },
         "groups": groups,
         "certification_gates_remaining": [
             (
-                "This is an exploratory historical replay, not certified strategy "
-                "evidence."
+                "This is an exploratory historical replay, not certified "
+                "strategy evidence."
             ),
             "The fixed one-lot signal quantity is not the V1 account-state sizing, "
             "position cap, or protected-floor policy.",
@@ -270,14 +270,15 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         ],
         "reproduction": {
             "command": (
-                "uv run python -m a500_t_trader intraday-compare-563360 --bars "
-                "data/market-history/563360_5m_20240601_20261028.json --output "
-                "issue83-comparison.json"
+                "uv run python -m a500_t_trader "
+                "intraday-compare-563360 --bars "
+                "data/market-history/563360_5m_20240601_20261028.json "
+                "--output issue83-comparison.json"
             ),
             "account_and_execution": (
-                "All fixed parameters are embedded in run_issue83_comparison; all "
-                "groups receive the same relevant bars, account snapshot, and "
-                "simulator parameters."
+                "All fixed parameters are embedded in "
+                "run_issue83_comparison; all groups receive the same "
+                "relevant bars, account snapshot, and simulator parameters."
             ),
         },
     }

@@ -1,4 +1,5 @@
-"""User-started intraday condition monitoring and persisted trigger evidence."""
+"""User-started intraday condition monitoring and persisted trigger
+evidence."""
 
 from __future__ import annotations
 
@@ -116,7 +117,6 @@ def monitor_once(
     if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
         print(
             "Account snapshot is stale or future-dated; no conditions evaluated.",
-            file=errors,
         )
         return 0
 
@@ -134,7 +134,6 @@ def monitor_once(
         if not bars:
             print(
                 f"{rule.symbol}: no 1-minute bars available; no condition evaluated.",
-                file=errors,
             )
             continue
         latest_by_status: dict[bool, MinuteBar] = {}
@@ -142,7 +141,6 @@ def monitor_once(
             if bar.symbol != rule.symbol or bar.interval_minutes != 1:
                 print(
                     f"{rule.symbol}: provider returned an unexpected normalized bar.",
-                    file=errors,
                 )
                 continue
             current = latest_by_status.get(bar.is_completed)
@@ -152,8 +150,9 @@ def monitor_once(
         age = now - newest_bar.timestamp
         if age < timedelta(0) or age > MAX_INPUT_AGE:
             print(
-                f"{rule.symbol}: latest 1-minute bar is stale or future-dated; "
-                "required intraday data unavailable, condition not evaluated.",
+                f"{rule.symbol}: latest 1-minute bar is stale or "
+                "future-dated; required intraday data unavailable, "
+                "condition not evaluated.",
                 file=errors,
             )
             continue
@@ -223,7 +222,9 @@ def _triggers(
             f"expires if a later price rises above {rule.buy_below} CNY; "
             "user review required"
             if bar.is_completed
-            else "provisional while the minute bar is unfinished; user review required"
+            else (
+                "provisional while the minute bar is unfinished; user review required"
+            )
         )
         found.append(
             Trigger(
@@ -241,7 +242,9 @@ def _triggers(
             f"expires if a later price falls below {rule.sell_above} CNY; "
             "user review required"
             if bar.is_completed
-            else "provisional while the minute bar is unfinished; user review required"
+            else (
+                "provisional while the minute bar is unfinished; user review required"
+            )
         )
         found.append(
             Trigger(

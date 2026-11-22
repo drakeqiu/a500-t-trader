@@ -115,7 +115,8 @@ def generate_plan(
     *,
     as_of: datetime,
 ) -> Plan:
-    """Generate explainable suggestions; risk gates always precede quantities."""
+    """Generate explainable suggestions; risk gates always precede
+    quantities."""
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("planning timestamp must include a timezone")
     plan_time = as_of.astimezone(SHANGHAI)

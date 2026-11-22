@@ -313,8 +313,10 @@ def _vendor_symbol(symbol: str) -> str:
 
 
 def _period_value(interval_minutes: int) -> int:
-    from AmazingData.query_api.market_data import Period
+    from importlib import import_module
 
+    market_data = import_module("AmazingData.query_api.market_data")
+    Period = market_data.Period
     return int(Period.min1.value if interval_minutes == 1 else Period.min5.value)
 
 

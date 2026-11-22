@@ -1,4 +1,5 @@
-"""Post-market review assembled from saved advice, trigger evidence, and bars."""
+"""Post-market review assembled from saved advice, trigger evidence, and
+bars."""
 
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ class PostMarketReview:
 
 
 def save_plan(path: str | Path, plan: Plan, account: AccountSnapshot) -> None:
-    """Save a locally reviewable plan and its separate user-entered account input."""
+    """Save a locally reviewable plan and its separate user-entered account
+    input."""
     account_record = asdict(account)
     payload = {
         "session_date": plan.as_of.date().isoformat(),
@@ -255,7 +257,7 @@ def generate_review(
         account_record = {
             **account_record,
             "source": "user-entered; not broker-verified",
-            "classification": "account snapshot; not recommendation, order, or fill",
+            "classification": ("account snapshot; not recommendation, order, or fill"),
         }
     return PostMarketReview(
         session_date.isoformat(),

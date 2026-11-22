@@ -58,7 +58,7 @@ def passing_evidence() -> CertificationEvidence:
     )
 
 
-def test_certificate_binds_exact_rule_implementation_data_costs_and_config() -> None:
+def test_certificate_binds_rule_inputs() -> None:
     result = certify_intraday_backtest(passing_evidence(), binding(), config())
     assert result.certified is True
     assert certification_is_current(result, binding(), config()) is True
@@ -130,7 +130,7 @@ def test_certificate_requires_ruleset_identity_and_execution_assumptions() -> No
         assert result.fingerprint is None
 
 
-def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() -> None:
+def test_report_exposes_metrics_and_binding() -> None:
     result = certify_intraday_backtest(passing_evidence(), binding(), config())
     metrics = result.report["metrics"]
     thresholds = result.report["thresholds"]
@@ -146,7 +146,7 @@ def test_report_exposes_observed_metrics_thresholds_and_binding_fingerprint() ->
     assert "not a guarantee of future profitability" in disclaimer
 
 
-def test_invalid_risk_budget_or_parameter_neighbor_configuration_fails_closed() -> None:
+def test_invalid_risk_or_neighbor_config_fails_closed() -> None:
     for invalid in (
         config() | {"maximum_drawdown": "-0.1"},
         config() | {"neighbor_parameter_perturbation": {"grid.width": "-0.001"}},

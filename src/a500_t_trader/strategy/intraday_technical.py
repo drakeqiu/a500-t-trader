@@ -82,7 +82,8 @@ TECHNICAL_PARAMETER_HASH = hashlib.sha256(
 
 @dataclass(frozen=True, slots=True)
 class IntradayTechnicalAnalysis:
-    """Inspectable technical result; rule-match scores are not probabilities."""
+    """Inspectable technical result; rule-match scores are not
+    probabilities."""
 
     symbol: str
     trend: str | None

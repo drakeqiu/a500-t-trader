@@ -184,7 +184,7 @@ def test_timing_overrides_control_signal_windows() -> None:
     assert _window_allows(timestamp, timing) == (False, True)
 
 
-def test_grid_anchor_uses_session_context_and_retains_step_between_rechecks() -> None:
+def test_grid_anchor_retains_step_between_rechecks() -> None:
     bars = tuple(
         replace(
             bar,

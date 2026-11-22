@@ -192,7 +192,7 @@ def test_public_simulation_fails_when_v1_rules_are_not_available() -> None:
         )
 
 
-def test_public_simulation_cancels_unfilled_remainder_and_releases_reserve() -> None:
+def test_public_simulation_releases_unfilled_reserve() -> None:
     bars = (bar(30, 0, "10"), bar(30, 1, "10", 250), bar(30, 2, "10", 250))
     result = run_intraday_backtest(
         symbol="510300",
