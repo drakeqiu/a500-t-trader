@@ -48,11 +48,9 @@ function reasonLabel(reason?: string) {
   const labels: Record<string, string> = {
     account_snapshot_missing: "尚无账户快照",
     account_snapshot_future: "账户快照时间晚于当前时间",
-    account_snapshot_stale: "账户快照已超过 30 分钟有效期",
     quote_missing: "缺少必需持仓行情",
     quote_invalid_price: "持仓行情价格无效",
     quote_future: "持仓行情时间晚于当前时间",
-    quote_stale: "持仓行情已超过 30 分钟有效期",
     market_data_unavailable: "行情服务暂不可用",
   };
   return reason ? `${labels[reason] ?? "净资产暂不可用"}（${reason}）` : "完整估值暂不可用";
@@ -264,7 +262,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
           className="page-heading"
           title="账户资产"
           titleId="assets-title"
-          description="查看服务端净资产估值与账户快照。快照为人工录入，未经券商核验。"
+          description="净资产估值与账户快照。"
           descriptionClassName="page-intro"
         >
           {token && (
@@ -304,11 +302,19 @@ function AssetsDashboard({ token }: { token: string | null }) {
             <section className="asset-section" aria-labelledby="nav-title">
               <div className="asset-section-heading">
                 <div>
-                  <h2 id="nav-title">当前净资产（NAV）</h2>
-                  <p>
-                    服务端根据账户快照的现金与非零持仓数量、有效行情计算
-                    NAV；本页不复算。保护底仓、可卖数量和成本基础不参与估值。
-                  </p>
+                  <h2 id="nav-title">
+                    当前净资产（NAV）
+                    <span
+                      className="asset-help"
+                      role="note"
+                      tabIndex={0}
+                      aria-label="净资产估值说明"
+                      data-tooltip="按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。"
+                      title="按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。"
+                    >
+                      ?
+                    </span>
+                  </h2>
                 </div>
                 <span
                   className={`asset-status ${navError || nav?.status === "unavailable" ? "is-unavailable" : nav?.status === "available" ? "is-available" : ""}`}
@@ -414,16 +420,25 @@ function AssetsDashboard({ token }: { token: string | null }) {
                   : nav?.classification
                     ? `数据分类：${nav.classification}。`
                     : "账户数据来源：用户录入，未经券商核验。"}
-                行情或快照缺失、超过 30 分钟有效期或时间异常时，完整 NAV
-                不可用；金额保留服务端十进制精度。
               </p>
             </section>
 
             <section className="asset-section" aria-labelledby="snapshot-title">
               <div className="asset-section-heading">
                 <div>
-                  <h2 id="snapshot-title">账户快照</h2>
-                  <p>快照是对当前状态的六字段完整替换；编辑前确认数量与金额来源。</p>
+                  <h2 id="snapshot-title">
+                    账户快照
+                    <span
+                      className="asset-help"
+                      role="note"
+                      tabIndex={0}
+                      aria-label="账户快照说明"
+                      data-tooltip="编辑后将完整替换账户快照。"
+                      title="编辑后将完整替换账户快照。"
+                    >
+                      ?
+                    </span>
+                  </h2>
                 </div>
                 <div className="asset-actions">
                   {!editing && (

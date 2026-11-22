@@ -346,7 +346,7 @@ def test_account_nav_values_every_nonzero_holding_with_exact_quotes(
     assert quotes.requested == ["159915", "510300"]
 
 
-def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
+def test_account_nav_rejects_any_missing_unavailable_or_future_quote(
     postgres_url: str,
 ) -> None:
     from datetime import UTC, datetime, timedelta
@@ -399,7 +399,7 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
                 ),
             )
 
-    for failure in ("missing", "no_price", "unavailable", "stale", "future"):
+    for failure in ("missing", "no_price", "unavailable", "future"):
         with TestClient(
             create_app(
                 database,
@@ -474,7 +474,7 @@ def test_account_nav_rejects_nonpositive_or_nonfinite_quote_prices(
     assert response.json()["reason"] == "quote_invalid_price"
 
 
-def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
+def test_account_nav_accepts_old_account_snapshot_and_stale_quotes(
     postgres_url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -505,7 +505,7 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
         def get_snapshot(self, symbol: str) -> Snapshot:
             return Snapshot(
                 symbol=symbol,
-                timestamp=now - timedelta(minutes=30),
+                timestamp=now - timedelta(hours=1),
                 received_at=now,
                 last_price=Decimal("3.25"),
             )
@@ -514,7 +514,7 @@ def test_account_nav_accepts_quote_exactly_thirty_minutes_old(
     AccountSnapshotStore(database).save_snapshot(
         "alice",
         {
-            "as_of": (now - timedelta(minutes=30)).isoformat(),
+            "as_of": (now - timedelta(hours=1)).isoformat(),
             "holdings": {"510300": 2},
             "protected_floor": {},
             "sellable": {},
@@ -585,34 +585,32 @@ def test_account_nav_preserves_decimal_precision_beyond_default_context(
     assert response.json()["nav"] == "1.234567890123456789012345678901231"
 
 
-def test_account_nav_marks_stale_or_future_snapshot_unavailable(
+def test_account_nav_rejects_future_snapshot(
     postgres_url: str,
 ) -> None:
+    from datetime import UTC, datetime, timedelta
+
     database = postgres_url
     store = AccountSnapshotStore(database)
+    store.save_snapshot(
+        "alice",
+        {
+            "as_of": (datetime.now(UTC) + timedelta(minutes=1)).isoformat(),
+            "holdings": {},
+            "protected_floor": {},
+            "sellable": {},
+            "cost_basis": {},
+            "available_cash": "8.25",
+        },
+    )
     with TestClient(create_app(database, TestAuthenticator())) as client:
-        for as_of in (
-            "2026-11-05T11:00:00+08:00",
-            "2026-11-05T12:01:00+08:00",
-        ):
-            store.save_snapshot(
-                "alice",
-                {
-                    "as_of": as_of,
-                    "holdings": {},
-                    "protected_floor": {},
-                    "sellable": {},
-                    "cost_basis": {},
-                    "available_cash": "8.25",
-                },
-            )
-            response = client.get(
-                "/v1/account-nav",
-                headers={"Authorization": "Bearer alice-token"},
-            )
-            assert response.status_code == 200
-            assert response.json()["status"] == "unavailable"
-            assert response.json()["nav"] is None
+        response = client.get(
+            "/v1/account-nav",
+            headers={"Authorization": "Bearer alice-token"},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "unavailable"
+    assert response.json()["nav"] is None
 
 
 def test_account_nav_read_does_not_change_snapshot_or_history(

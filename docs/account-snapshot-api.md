@@ -80,7 +80,7 @@ DATABASE_URL=postgresql://a500:password@127.0.0.1:5432/a500
 
 计算公式为 `available_cash + Σ(持仓数量 × 有效行情价)`，货币为 CNY。保护底仓、可卖数量和成本基础不参与估值。零数量持仓估值为零，不要求行情。所有金额使用精确十进制运算并以十进制字符串返回；不逐项舍入或强制保留两位小数。
 
-行情通过注入的请求/响应 `MarketDataService.get_snapshot(symbol)` 按每项非零持仓标的查询；不依赖推送行情的共享缓存。账户快照 `as_of` 及每项必需行情的 `timestamp` 必须不晚于计算时刻且不超过 30 分钟；恰好 30 分钟有效。未来或过期时点、缺失报价、报价能力不可用，均使完整 NAV 不可用。收盘后的报价超过时效上限后不可用于当前 NAV。
+行情通过注入的请求/响应 `MarketDataService.get_snapshot(symbol)` 按每项非零持仓标的查询；不依赖推送行情的共享缓存。账户快照 `as_of` 及每项必需行情的 `timestamp` 必须不晚于计算时刻；不对其年龄设有效期上限。未来快照或行情时点、缺失报价、报价能力不可用，均使完整 NAV 不可用。行情时间随响应返回，供用户判断数据时点。
 
 若存在账户快照但无法完整估值，返回 `200`，`status` 为 `unavailable`、`nav` 为 `null`，并以 `reason` 标示原因；`holdings` 为空，不暴露部分估值明细或部分合计。完整估值时 `status` 为 `available`，`nav` 为现金与全部非零持仓市值的合计。响应包含 `currency`、`available_cash`、账户 `as_of`、服务器 `calculated_at`、每项持仓的 `symbol`、`quantity`、`last_price`、`market_value` 和行情 `as_of`，并标记 `user-entered; not broker-verified`。响应设置 `Cache-Control: no-store`。
 
@@ -119,7 +119,7 @@ DATABASE_URL=postgresql://a500:password@127.0.0.1:5432/a500
   "calculated_at": "2026-11-05T10:35:01+00:00",
   "holdings": [],
   "classification": "user-entered; not broker-verified",
-  "reason": "quote_stale"
+  "reason": "quote_future"
 }
 ```
 
