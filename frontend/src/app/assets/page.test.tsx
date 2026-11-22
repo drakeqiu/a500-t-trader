@@ -2,10 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as Client from "@/lib/a500-client";
-const { getNav, getSnapshot, saveSnapshot } = vi.hoisted(() => ({
+const { getNav, getSnapshot, saveSnapshot, beginSilentAuthorization } = vi.hoisted(() => ({
   getNav: vi.fn(),
   getSnapshot: vi.fn(),
   saveSnapshot: vi.fn(),
+  beginSilentAuthorization: vi.fn(),
 }));
 vi.mock("@/lib/a500-client", async (importOriginal) => ({
   ...(await importOriginal<typeof Client>()),
@@ -13,7 +14,12 @@ vi.mock("@/lib/a500-client", async (importOriginal) => ({
   getSnapshot,
   saveSnapshot,
 }));
-vi.mock("@/lib/oidc", () => ({ configurationReady: true, beginAuthorization: vi.fn() }));
+vi.mock("@/lib/oidc", () => ({
+  configurationReady: true,
+  beginAuthorization: vi.fn(),
+  beginSilentAuthorization,
+  silentAuthorizationKey: "a500.oidc.silent-attempt",
+}));
 
 import { ApiError, type AccountSnapshot, type SnapshotResult } from "@/lib/a500-client";
 import { clearAccessToken, setAccessToken } from "@/lib/session";
@@ -55,6 +61,17 @@ function fillPosition(row = 1) {
 }
 
 describe("assets route", () => {
+  it("silently restores an existing identity session on page entry", async () => {
+    beginSilentAuthorization.mockRejectedValue(new Error("network unavailable"));
+    clearAccessToken();
+    render(<AssetsPage />);
+
+    await waitFor(() => expect(beginSilentAuthorization).toHaveBeenCalledOnce());
+    expect(document.querySelector(".app-session button")?.textContent).toBe("安全连接");
+    expect(sessionStorage.getItem("a500.oidc.silent-attempt")).toBeNull();
+    expect(sessionStorage.getItem("a500.auth.return")).toBeNull();
+  });
+
   it("shows saved positions as a labeled table instead of raw JSON", async () => {
     getSnapshot.mockResolvedValue(stored);
     render(<AssetsPage />);

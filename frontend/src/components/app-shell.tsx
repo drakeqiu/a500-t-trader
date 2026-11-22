@@ -1,7 +1,11 @@
+"use client";
+
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { beginSilentAuthorization, configurationReady, silentAuthorizationKey } from "@/lib/oidc";
 import { clearAccessToken } from "@/lib/session";
 
+const returnKey = "a500.auth.return";
 const navigation = [
   { href: "/signals", label: "策略信号" },
   { href: "/assets", label: "资产管理" },
@@ -20,6 +24,28 @@ export function AppShell({
   connected: boolean;
   onConnect: () => void;
 }) {
+  useEffect(() => {
+    if (connected || !configurationReady || sessionStorage.getItem(silentAuthorizationKey)) return;
+    sessionStorage.setItem(silentAuthorizationKey, "1");
+    sessionStorage.setItem(returnKey, `${window.location.pathname}${window.location.search}`);
+    void beginSilentAuthorization()
+      .then((url) => window.location.assign(url))
+      .catch(() => {
+        sessionStorage.removeItem(silentAuthorizationKey);
+        sessionStorage.removeItem(returnKey);
+      });
+  }, [connected]);
+
+  const connectManually = () => {
+    sessionStorage.removeItem(silentAuthorizationKey);
+    onConnect();
+  };
+
+  const disconnect = () => {
+    sessionStorage.setItem(silentAuthorizationKey, "1");
+    clearAccessToken();
+  };
+
   return (
     <div className="app-frame">
       <header className="app-topbar">
@@ -47,11 +73,11 @@ export function AppShell({
           />
           <span>{connected ? "身份已连接" : "尚未连接"}</span>
           {connected ? (
-            <Link className="session-action" href="/signals" onClick={clearAccessToken}>
+            <Link className="session-action" href="/signals" onClick={disconnect}>
               断开
             </Link>
           ) : (
-            <button className="session-action" onClick={onConnect}>
+            <button className="session-action" onClick={connectManually}>
               安全连接
             </button>
           )}
