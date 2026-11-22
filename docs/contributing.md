@@ -34,8 +34,7 @@ uv run python -m a500_t_trader
 
 Ruff 启用 pycodestyle 的 `E`、`W` 规则，Python 代码行宽限制为 79 个字符。
 
-普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试，fixture 驱动的测试仍会正常运行。
-数据库相关 Python 测试需设置 `TEST_DATABASE_URL`，指向可用的 PostgreSQL 测试数据库；每个测试会创建并删除独立 schema。前端 Playwright 使用本地 OIDC 与内存 REST/SSE API mock，不启动业务后端，也不连接 PostgreSQL 或 Redis。
+普通 `uv run pytest` 会排除需要真实 provider 的 `live` 测试和完整历史回放 `slow` 测试。数据库测试使用 PostgreSQL 17：未设置 `TEST_DATABASE_URL` 时，需安装并运行 Podman；测试首次需要数据库 fixture 时会启动临时容器并在 pytest 结束时销毁。设置了 `TEST_DATABASE_URL` 时则复用指定的 PostgreSQL 测试库，不会启动或销毁它。每个测试仍使用独立 schema。前端 Playwright 使用本地 OIDC 与内存 REST/SSE API mock，不启动业务后端，也不连接 PostgreSQL 或 Redis。
 Starlette 测试客户端使用开发依赖 `httpx2`；`uv sync --locked` 会一并安装。
 在已配置 AmazingData 账号和连接权限的环境中，可显式运行实时连接、`563360` 快照和分钟线检查。将 `AD_USERNAME`、`AD_PASSWORD`、`AD_HOST`、`AD_PORT` 配置在受保护的环境或仓库外 `.env` 文件中后运行：
 
