@@ -116,8 +116,7 @@ def monitor_once(
     account_age = now - account.as_of.astimezone(SHANGHAI)
     if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
         print(
-            "Account snapshot is stale or future-dated; "
-            "no conditions evaluated.",
+            "Account snapshot is stale or future-dated; no conditions evaluated.",
         )
         return 0
 
@@ -134,16 +133,14 @@ def monitor_once(
             continue
         if not bars:
             print(
-                f"{rule.symbol}: no 1-minute bars available; "
-                "no condition evaluated.",
+                f"{rule.symbol}: no 1-minute bars available; no condition evaluated.",
             )
             continue
         latest_by_status: dict[bool, MinuteBar] = {}
         for bar in bars:
             if bar.symbol != rule.symbol or bar.interval_minutes != 1:
                 print(
-                    f"{rule.symbol}: provider returned an unexpected "
-                    "normalized bar.",
+                    f"{rule.symbol}: provider returned an unexpected normalized bar.",
                 )
                 continue
             current = latest_by_status.get(bar.is_completed)
@@ -226,8 +223,7 @@ def _triggers(
             "user review required"
             if bar.is_completed
             else (
-                "provisional while the minute bar is unfinished; "
-                "user review required"
+                "provisional while the minute bar is unfinished; user review required"
             )
         )
         found.append(
@@ -247,8 +243,7 @@ def _triggers(
             "user review required"
             if bar.is_completed
             else (
-                "provisional while the minute bar is unfinished; "
-                "user review required"
+                "provisional while the minute bar is unfinished; user review required"
             )
         )
         found.append(

@@ -623,9 +623,8 @@ def run_intraday_backtest(
                         }:
                             pair_ledger.append(
                                 {
-                                    "sell_timestamp": (
-                                        bar.timestamp.isoformat()
-                                    ),
+                                    "pair_id": str(pair_sequence),
+                                    "sell_timestamp": (bar.timestamp.isoformat()),
                                     "sell_price": str(fill_price),
                                     "sell_quantity": quantity,
                                     "sell_gross": str(notional),
@@ -636,9 +635,9 @@ def run_intraday_backtest(
                                     ),
                                     "sell_intent": str(order.signal.intent),
                                     "sell_fees": str(fees),
+                                    "realized_net_pnl": None,
                                     "buyback_gross": "0",
                                     "buyback_fees": "0",
-                                    "realized_net_pnl": None,
                                     "buyback_quantity": 0,
                                     "remaining_quantity": quantity,
                                     "status": "open",

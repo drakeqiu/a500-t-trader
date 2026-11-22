@@ -161,7 +161,7 @@ def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -
 
 def test_security_price_bands_are_explicit_configuration(tmp_path: Path) -> None:
     document = _complete_config()
-    del document["securities"]["510300"]["upper_price_limit"]  # type: ignore[index]
+    del document["securities"]["510300"]["upper_price_limit"]
 
     with pytest.raises(ValueError, match="securities.510300.upper_price_limit"):
         load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
@@ -229,7 +229,7 @@ def test_fingerprint_changes_when_any_strategy_input_changes(tmp_path: Path) -> 
         _write_config(tmp_path / "first.json", _complete_config())
     )
     changed = _complete_config()
-    changed["parameters"]["signals"]["buy_threshold"] = 73  # type: ignore[index]
+    changed["parameters"]["signals"]["buy_threshold"] = 73
     second = load_intraday_v1_config(_write_config(tmp_path / "second.json", changed))
 
     assert first.fingerprint != second.fingerprint

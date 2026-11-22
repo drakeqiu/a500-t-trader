@@ -182,22 +182,16 @@ def handle(args: argparse.Namespace) -> int:
                     "fixed_quantity_sell_slots_at_start": 3,
                 },
                 "limitations": [
-                    "no fills, P&L, position updates, T+1 or "
-                    "sell-capacity checks",
-                    "starting account snapshot is informational, not a "
-                    "signal gate",
-                    "grid tick uses the SSE ETF minimum increment of "
-                    "0.001 yuan",
-                    "0.5 bps commission, 0.1 yuan minimum; "
-                    "no slippage is modeled",
+                    "no fills, P&L, position updates, T+1 or sell-capacity checks",
+                    "starting account snapshot is informational, not a signal gate",
+                    "grid tick uses the SSE ETF minimum increment of 0.001 yuan",
+                    "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
                     "missing history is not synthesized",
-                    "grid-level cooldown is absent; repeated "
-                    "candidates may occur",
+                    "grid-level cooldown is absent; repeated candidates may occur",
                     "fixed-share technical replay is research only and "
                     "excluded from RSI comparison and certification "
                     "evidence",
-                    "daily bar completeness has not been independently "
-                    "audited",
+                    "daily bar completeness has not been independently audited",
                 ],
             }
             return _print_result(result, args.output)

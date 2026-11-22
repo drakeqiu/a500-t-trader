@@ -243,8 +243,7 @@ class JobRepository:
                 ),
             ).fetchone()
             db.execute(
-                "INSERT INTO daily_history_job_outbox "
-                "(id, job_id) VALUES (%s, %s)",
+                "INSERT INTO daily_history_job_outbox (id, job_id) VALUES (%s, %s)",
                 (uuid.uuid4(), identifier),
             )
         assert row is not None
@@ -310,8 +309,7 @@ class JobRepository:
             return None
         with self._connect() as db:
             row = db.execute(
-                f"SELECT {_COLUMNS} FROM daily_history_jobs "
-                "WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return _job(row)
@@ -362,6 +360,7 @@ class JobRepository:
                     AND NOT EXISTS (
                         SELECT 1 FROM daily_history_job_outbox o
                         WHERE o.job_id=j.id
+                    )
                 ON CONFLICT (job_id) DO NOTHING
                 RETURNING job_id"""
             ).fetchall()
@@ -439,8 +438,7 @@ class JobRepository:
             ).fetchall()
             for cancelled_row in cancelled:
                 db.execute(
-                    "DELETE FROM daily_history_job_fetched_bars "
-                    "WHERE job_id=%s",
+                    "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
                     (cancelled_row["id"],),
                 )
             _LOG.info("History claim candidate query starting job_id=%s", job_id)
@@ -489,6 +487,7 @@ class JobRepository:
                 WHERE id=%s AND status='running' AND lease_token=%s
                     AND lease_until > now() AND NOT cancel_requested
                     RETURNING id""",
+                (_LEASE_SECONDS, job_id, token),
             ).fetchone()
         return row is not None
 
@@ -499,6 +498,7 @@ class JobRepository:
                 WHERE id=%s AND status='running' AND lease_token=%s
                     AND lease_until > now() AND NOT cancel_requested
                     RETURNING id""",
+                (stage, job_id, token),
             ).fetchone()
         return row is not None
 
@@ -786,17 +786,10 @@ def _run_job(
                         )
                         if category != "network" or attempt + 1 == _MAX_ATTEMPTS:
                             message = {
-                                "network": (
-                                    "Daily history provider network "
-                                    "unavailable"
-                                ),
-                                "authentication": (
-                                    "Provider authentication failed"
-                                ),
+                                "network": "Daily history provider network unavailable",
+                                "authentication": ("Provider authentication failed"),
                                 "permission": "Provider permission denied",
-                                "configuration": (
-                                    "Provider configuration invalid"
-                                ),
+                                "configuration": ("Provider configuration invalid"),
                             }.get(category, "Daily history retrieval failed")
                             repository.finish(job_id, token, message)
                             return
