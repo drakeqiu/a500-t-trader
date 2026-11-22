@@ -411,8 +411,7 @@ class IntradayStrategyStateStore:
                     ).fetchall()[0][0]
                     if allocated + fill.quantity > sellable_quantity:
                         raise ValueError(
-                            "sell fill exceeds unallocated initial sellable "
-                            "inventory"
+                            "sell fill exceeds unallocated initial sellable inventory"
                         )
                     db.execute(
                         "INSERT INTO strategy_trade_pairs "
@@ -463,8 +462,7 @@ class IntradayStrategyStateStore:
                     if buy_fill is not None:
                         if buy_qty < sell_qty + fill.quantity:
                             raise ValueError(
-                                "sell fill exceeds linked strategy buy "
-                                "quantity"
+                                "sell fill exceeds linked strategy buy quantity"
                             )
                     else:
                         if buy_qty > 0:

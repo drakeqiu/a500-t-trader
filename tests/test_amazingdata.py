@@ -1,6 +1,8 @@
+import sys
 from datetime import date, datetime
 from decimal import Decimal
 from importlib import import_module
+from types import ModuleType
 from zoneinfo import ZoneInfo
 
 import pandas as pd  # type: ignore[import-untyped]
@@ -249,7 +251,7 @@ def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
 def test_vendor_login_false_after_successful_forced_retry_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tgw_login = import_module("AmazingData.login.tgw_login")
+    import_module("AmazingData.login.tgw_login")
 
     import a500_t_trader.market_data.providers.amazingdata as provider_module
 
