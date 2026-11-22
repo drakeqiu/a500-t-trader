@@ -39,14 +39,17 @@ def _realized_exit_metrics(
     initial_quantity: int,
     initial_cost: Decimal,
 ) -> dict[str, object]:
-    """Report realized risk exits without conflating them with paired trades."""
+    """Report realized risk exits without conflating them with paired
+    trades."""
     lots: list[list[Decimal | int]] = []
     if initial_quantity:
         lots.append([initial_quantity, initial_cost])
     pnl_by_signal: dict[datetime, Decimal] = {}
     for fill in fills:
         if fill.side == "buy":
-            lots.append([fill.quantity, fill.fill_price + fill.fees / fill.quantity])
+            lots.append(
+                [fill.quantity, fill.fill_price + fill.fees / fill.quantity]
+            )
             continue
         remaining = fill.quantity
         allocated_cost = Decimal(0)
@@ -74,13 +77,16 @@ def _realized_exit_metrics(
     return {
         "closed_exit_trades": len(pnl_values),
         "realized_exit_net_pnl": str(total),
-        "average_exit_net_pnl": str(total / len(pnl_values)) if pnl_values else None,
+        "average_exit_net_pnl": str(total / len(pnl_values))
+        if pnl_values
+        else None,
         "exit_profit_factor": str(wins / losses) if losses else None,
     }
 
 
 def _int_value(value: object) -> int:
-    """Convert the integer-valued fields of simulator state and replay results."""
+    """Convert the integer-valued fields of simulator state and replay
+    results."""
     return int(str(value))
 
 
@@ -89,7 +95,8 @@ def _ohlcv_spread_proxy_eligible(
     reference_price: Decimal,
     tick_size: Decimal,
 ) -> bool:
-    """Use half the prior completed bar's range as a spread proxy, not a quote."""
+    """Use half the prior completed bar's range as a spread proxy, not a
+    quote."""
     if (
         prior_bar is None
         or not prior_bar.is_completed
@@ -100,12 +107,17 @@ def _ohlcv_spread_proxy_eligible(
     ):
         return False
     proxy = (prior_bar.high - prior_bar.low) / (Decimal(2) * reference_price)
-    return proxy <= max(Decimal("0.0015"), Decimal(2) * tick_size / reference_price)
+    return proxy <= max(
+        Decimal("0.0015"), Decimal(2) * tick_size / reference_price
+    )
 
 
 ZERO_SLIPPAGE_ASSUMPTION = {
     "bps_per_side": "0",
-    "source": "exploratory baseline assumption recorded in docs/backtest-563360-v1.md",
+    "source": (
+        "exploratory baseline assumption recorded in "
+        "docs/backtest-563360-v1.md"
+    ),
     "recorded_on": "2026-11-03",
     "context": (
         "idealized next-available-bar-open baseline; not observed fill or "
@@ -171,7 +183,9 @@ class _SequentialV1Signals:
         self._last_fill_by_side: dict[str, dict[str, object]] = {}
         self._daily_start_nav: Decimal | None = None
         self._day = (
-            pre_start[-1].timestamp.astimezone(SHANGHAI).date() if pre_start else None
+            pre_start[-1].timestamp.astimezone(SHANGHAI).date()
+            if pre_start
+            else None
         )
         self._day_amount = Decimal(0)
         daily_bars: dict[date, list[MinuteBar]] = {}
@@ -187,7 +201,11 @@ class _SequentialV1Signals:
                 self._completed_daily_amounts.append(amount)
         if self._day is not None:
             self._day_amount = sum(
-                (bar.amount for bar in daily_bars[self._day] if bar.amount is not None),
+                (
+                    bar.amount
+                    for bar in daily_bars[self._day]
+                    if bar.amount is not None
+                ),
                 Decimal(0),
             )
         self._last_close: Decimal | None = None
@@ -226,7 +244,9 @@ class _SequentialV1Signals:
                     if remaining == 0:
                         break
                 self._lots = [
-                    lot for lot in self._lots if _int_value(lot["quantity"]) > 0
+                    lot
+                    for lot in self._lots
+                    if _int_value(lot["quantity"]) > 0
                 ]
                 if fill["grid_level"]:
                     self._used_levels.add(str(fill["grid_level"]))
@@ -280,7 +300,9 @@ class _SequentialV1Signals:
                 {
                     "date": session_date.isoformat(),
                     "previous_close_nav": (
-                        str(self._last_nav) if self._last_nav is not None else str(nav)
+                        str(self._last_nav)
+                        if self._last_nav is not None
+                        else str(nav)
                     ),
                     "first_decision_nav": str(nav),
                     "daily_start_nav": str(self._daily_start_nav),
@@ -316,7 +338,9 @@ class _SequentialV1Signals:
             and pair["status"] == "open"
             and _int_value(pair["remaining_quantity"]) > 0
         ]
-        active_lots = [lot for lot in self._lots if _int_value(lot["quantity"]) > 0]
+        active_lots = [
+            lot for lot in self._lots if _int_value(lot["quantity"]) > 0
+        ]
 
         def analyze_at_cost(rate: Decimal) -> IntradayTechnicalAnalysis:
             paired_state: dict[str, object] = {}
@@ -335,7 +359,8 @@ class _SequentialV1Signals:
                 entry = Decimal(str(lot["entry_price"]))
                 lot_grid = Decimal(str(lot["grid_step"]))
                 paired_state["take_profit"] = {
-                    "target_price": entry + max(lot_grid, Decimal(3) * rate * entry),
+                    "target_price": entry
+                    + max(lot_grid, Decimal(3) * rate * entry),
                     "quantity": _int_value(lot["quantity"]),
                 }
             grid_context = {
@@ -364,10 +389,14 @@ class _SequentialV1Signals:
             candidate = analysis.candidate
             grid_step = analysis.grid_step or Decimal(0)
             atr_value = analysis.indicators.get("atr_14")
-            atr_value = atr_value if isinstance(atr_value, Decimal) else Decimal(0)
+            atr_value = (
+                atr_value if isinstance(atr_value, Decimal) else Decimal(0)
+            )
             quantity = 0
             if candidate in {"BUY", "BUYBACK"} and not pending:
-                quantity = self._ordinary_quantity(nav, price, atr_value, grid_step)
+                quantity = self._ordinary_quantity(
+                    nav, price, atr_value, grid_step
+                )
                 if candidate == "BUYBACK" and open_pairs:
                     pair = open_pairs[0]
                     pair_limit = _int_value(pair["remaining_quantity"])
@@ -389,7 +418,10 @@ class _SequentialV1Signals:
                     )
                     if (
                         _int_value(account_state["daily_addition_count"]) >= 3
-                        or _int_value(account_state["remaining_daily_additions"]) <= 0
+                        or _int_value(
+                            account_state["remaining_daily_additions"]
+                        )
+                        <= 0
                     ):
                         quantity = 0
                 elif candidate == "BUYBACK":
@@ -405,7 +437,10 @@ class _SequentialV1Signals:
                     )
                 quantity = min(
                     quantity,
-                    int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                    int(
+                        Decimal(str(account_state["remaining_daily_turnover"]))
+                        / price
+                    )
                     // 100
                     * 100,
                 )
@@ -419,7 +454,9 @@ class _SequentialV1Signals:
                     max(0, min(sellable, holdings - floor)),
                     self._ordinary_quantity(nav, price, atr_value, grid_step),
                     int(
-                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        Decimal(
+                            str(account_state["remaining_daily_sell_notional"])
+                        )
                         / price
                     )
                     // 100
@@ -432,12 +469,17 @@ class _SequentialV1Signals:
                     _int_value(active_lots[0]["quantity"]),
                     _int_value(account_state["sellable"]),
                     int(
-                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        Decimal(
+                            str(account_state["remaining_daily_sell_notional"])
+                        )
                         / price
                     ),
                 )
             quantity = min(quantity, self._liquidity_quantity(bar))
-            if quantity >= 100 and len(self._liquidity_quantity_examples) < 100:
+            if (
+                quantity >= 100
+                and len(self._liquidity_quantity_examples) < 100
+            ):
                 self._liquidity_quantity_examples.append(
                     {
                         "quantity": quantity,
@@ -457,7 +499,10 @@ class _SequentialV1Signals:
                 else Decimal(0),
             )
             conservative_rate = next_rate
-            if candidate == previous_candidate and quantity == previous_quantity:
+            if (
+                candidate == previous_candidate
+                and quantity == previous_quantity
+            ):
                 cost_rate = next_rate
                 converged = True
                 break
@@ -476,7 +521,11 @@ class _SequentialV1Signals:
         anchor = anchor if isinstance(anchor, Decimal) else None
         if anchor is not None:
             side = 1 if price > anchor else -1 if price < anchor else 0
-            if self._anchor_side is not None and side and side != self._anchor_side:
+            if (
+                self._anchor_side is not None
+                and side
+                and side != self._anchor_side
+            ):
                 self._opposite_anchor_closes += 1
             elif side:
                 self._opposite_anchor_closes = 0
@@ -494,10 +543,14 @@ class _SequentialV1Signals:
         sellable = _int_value(account_state["sellable"])
         holdings = _int_value(account_state["holdings"])
         start_nav = self._daily_start_nav or nav
-        daily_return = (nav - start_nav) / start_nav if start_nav else Decimal(0)
+        daily_return = (
+            (nav - start_nav) / start_nav if start_nav else Decimal(0)
+        )
         risk_exit_quantity = 0
         for lot in active_lots:
-            lot["highest_close"] = max(Decimal(str(lot["highest_close"])), price)
+            lot["highest_close"] = max(
+                Decimal(str(lot["highest_close"])), price
+            )
             entry = Decimal(str(lot["entry_price"]))
             lot_atr = Decimal(str(lot["atr"]))
             lot_grid = Decimal(str(lot["grid_step"]))
@@ -516,7 +569,9 @@ class _SequentialV1Signals:
                 )
             if price <= stop:
                 risk_exit_quantity += _int_value(lot["quantity"])
-        if (daily_return <= Decimal("-0.012") or risk_exit_quantity) and sellable:
+        if (
+            daily_return <= Decimal("-0.012") or risk_exit_quantity
+        ) and sellable:
             quantity = min(
                 min(sellable, holdings, risk_exit_quantity or sellable),
                 self._liquidity_quantity(bar),
@@ -546,7 +601,10 @@ class _SequentialV1Signals:
                 return ()
         signal_side = "buy" if candidate in {"BUY", "BUYBACK"} else "sell"
         last_fill = self._last_fill_by_side.get(signal_side)
-        if candidate in {"BUY", "BUYBACK", "SELL", "TAKE_PROFIT"} and last_fill:
+        if (
+            candidate in {"BUY", "BUYBACK", "SELL", "TAKE_PROFIT"}
+            and last_fill
+        ):
             elapsed = bar.timestamp - datetime.fromisoformat(
                 str(last_fill["fill_timestamp"])
             )
@@ -556,7 +614,9 @@ class _SequentialV1Signals:
             pair = open_pairs[0]
             pair_limit = _int_value(pair["remaining_quantity"])
             if analysis.trend == "BEAR":
-                pair_limit = min(pair_limit, _int_value(pair["sell_quantity"]) // 4)
+                pair_limit = min(
+                    pair_limit, _int_value(pair["sell_quantity"]) // 4
+                )
             max_affordable = _max_affordable_quantity(
                 Decimal(str(account_state["free_cash"])),
                 price,
@@ -570,7 +630,10 @@ class _SequentialV1Signals:
                     nav, price, atr or Decimal(0), grid or Decimal(0)
                 ),
                 max_affordable,
-                int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                int(
+                    Decimal(str(account_state["remaining_daily_turnover"]))
+                    / price
+                )
                 // 100
                 * 100,
             )
@@ -590,7 +653,9 @@ class _SequentialV1Signals:
                         atr,
                         grid,
                         spread_eligible=_ohlcv_spread_proxy_eligible(
-                            self._history[-2] if len(self._history) > 1 else None,
+                            self._history[-2]
+                            if len(self._history) > 1
+                            else None,
                             price,
                             Decimal("0.001"),
                         ),
@@ -604,7 +669,9 @@ class _SequentialV1Signals:
                     _int_value(lot["quantity"]),
                     sellable,
                     int(
-                        Decimal(str(account_state["remaining_daily_sell_notional"]))
+                        Decimal(
+                            str(account_state["remaining_daily_sell_notional"])
+                        )
                         / price
                     ),
                     self._liquidity_quantity(bar),
@@ -642,7 +709,10 @@ class _SequentialV1Signals:
                     self._impact_rate,
                     self._minimum_commission,
                 ),
-                int(Decimal(str(account_state["remaining_daily_turnover"])) / price)
+                int(
+                    Decimal(str(account_state["remaining_daily_turnover"]))
+                    / price
+                )
                 // 100
                 * 100,
             )
@@ -695,7 +765,10 @@ class _SequentialV1Signals:
                 sellable,
                 self._ordinary_quantity(nav, price, atr, grid),
                 int(
-                    Decimal(str(account_state["remaining_daily_sell_notional"])) / price
+                    Decimal(
+                        str(account_state["remaining_daily_sell_notional"])
+                    )
+                    / price
                 ),
             )
             quantity = quantity // 100 * 100
@@ -716,7 +789,9 @@ class _SequentialV1Signals:
 
 def _walk_forward_gate(run: dict[str, object]) -> dict[str, object]:
     profit_factor = run["profit_factor"]
-    enough_samples = _int_value(run["closed_pairs"]) > 0 and profit_factor is not None
+    enough_samples = (
+        _int_value(run["closed_pairs"]) > 0 and profit_factor is not None
+    )
     if not enough_samples:
         return {
             "status": "undefined",
@@ -753,7 +828,9 @@ def _run_walk_forward(
         test_days = trading_days[boundaries[5 + index] : boundaries[6 + index]]
         if not train_days or not test_days:
             continue
-        train_start = datetime.combine(trading_days[0], time.min, tzinfo=SHANGHAI)
+        train_start = datetime.combine(
+            trading_days[0], time.min, tzinfo=SHANGHAI
+        )
         train_end = datetime.combine(train_days[-1], time.max, tzinfo=SHANGHAI)
         test_start = datetime.combine(test_days[0], time.min, tzinfo=SHANGHAI)
         test_end = datetime.combine(test_days[-1], time.max, tzinfo=SHANGHAI)
@@ -781,14 +858,18 @@ def _run_walk_forward(
                 "training_run": {
                     "decision_bar_count": train_run["decision_bar_count"],
                     "closed_pairs": train_run["closed_pairs"],
-                    "paired_realized_net_pnl": train_run["paired_realized_net_pnl"],
+                    "paired_realized_net_pnl": train_run[
+                        "paired_realized_net_pnl"
+                    ],
                     "profit_factor": train_run["profit_factor"],
                 },
                 "training_gate": _walk_forward_gate(train_run),
                 "test_run": {
                     "decision_bar_count": test_run["decision_bar_count"],
                     "closed_pairs": test_run["closed_pairs"],
-                    "paired_realized_net_pnl": test_run["paired_realized_net_pnl"],
+                    "paired_realized_net_pnl": test_run[
+                        "paired_realized_net_pnl"
+                    ],
                     "profit_factor": test_run["profit_factor"],
                 },
                 "test_gate": _walk_forward_gate(test_run),
@@ -800,9 +881,14 @@ def _run_walk_forward(
         assert isinstance(gate, dict)
         test_gates.append(gate)
     assessed = sum(bool(gate["assessed"]) for gate in test_gates)
-    passed = assessed >= 4 and sum(bool(gate["passed"]) for gate in test_gates) >= 4
+    passed = (
+        assessed >= 4 and sum(bool(gate["passed"]) for gate in test_gates) >= 4
+    )
     return {
-        "method": "five expanding training prefixes with contiguous later test blocks",
+        "method": (
+            "five expanding training prefixes with contiguous later test "
+            "blocks"
+        ),
         "assessed": assessed == len(windows) and len(windows) == 5,
         "passed": passed,
         "windows": windows,
@@ -819,7 +905,9 @@ def _run_chronological_split(
     training_days = trading_days[:split_index]
     test_days = trading_days[split_index:]
     if not training_days or not test_days:
-        raise ValueError("70/30 chronological split requires at least two days")
+        raise ValueError(
+            "70/30 chronological split requires at least two days"
+        )
     training_run = _run_issue85_sequential_replay(
         bars,
         initial_cash=initial_cash,
@@ -827,14 +915,20 @@ def _run_chronological_split(
             START,
             datetime.combine(training_days[0], time.min, tzinfo=SHANGHAI),
         ),
-        decision_end=datetime.combine(training_days[-1], time.max, tzinfo=SHANGHAI),
+        decision_end=datetime.combine(
+            training_days[-1], time.max, tzinfo=SHANGHAI
+        ),
         include_walk_forward=False,
     )
     test_run = _run_issue85_sequential_replay(
         bars,
         initial_cash=initial_cash,
-        decision_start=datetime.combine(test_days[0], time.min, tzinfo=SHANGHAI),
-        decision_end=datetime.combine(test_days[-1], time.max, tzinfo=SHANGHAI),
+        decision_start=datetime.combine(
+            test_days[0], time.min, tzinfo=SHANGHAI
+        ),
+        decision_end=datetime.combine(
+            test_days[-1], time.max, tzinfo=SHANGHAI
+        ),
         include_walk_forward=False,
     )
 
@@ -880,7 +974,9 @@ def _run_issue85_sequential_replay(
     pre_start = tuple(bar for bar in ordered if bar.timestamp < decision_start)
     warmup = pre_start[-180:]
     decisions = tuple(
-        bar for bar in ordered if decision_start <= bar.timestamp <= decision_end
+        bar
+        for bar in ordered
+        if decision_start <= bar.timestamp <= decision_end
     )
     if len(warmup) != 180 or not decisions:
         raise ValueError(
@@ -954,7 +1050,9 @@ def _run_issue85_sequential_replay(
         return {
             "closed_pairs": len(selected),
             "paired_realized_net_pnl": str(sum(pnl, Decimal(0))),
-            "average_net_pnl": str(sum(pnl, Decimal(0)) / len(pnl)) if pnl else None,
+            "average_net_pnl": str(sum(pnl, Decimal(0)) / len(pnl))
+            if pnl
+            else None,
             "profit_factor": str(positive / negative) if negative else None,
         }
 
@@ -987,7 +1085,9 @@ def _run_issue85_sequential_replay(
         "final_nav": str(result.strategy_final_value),
         "net_pnl": str(result.strategy_final_value - result.initial_cash),
         "return": str(result.strategy_return),
-        "max_drawdown": str(_max_drawdown(result.account_states, initial_cash)),
+        "max_drawdown": str(
+            _max_drawdown(result.account_states, initial_cash)
+        ),
         **_realized_exit_metrics(
             result.fills,
             initial_quantity=account.holdings.get(SYMBOL, 0),
@@ -1010,7 +1110,9 @@ def _run_issue85_sequential_replay(
             "fee_bps": str(execution_params.fee_bps),
             "minimum_commission": str(execution_params.minimum_commission),
             "slippage_bps": str(execution_params.slippage_bps),
-            "impact_bps": str(Decimal("0.0002") * cost_multiplier * Decimal(10000)),
+            "impact_bps": str(
+                Decimal("0.0002") * cost_multiplier * Decimal(10000)
+            ),
             "cost_multiplier": str(cost_multiplier),
         },
         "daily_reset_examples": signals._daily_reset_examples,
@@ -1042,9 +1144,13 @@ def _run_issue85_sequential_replay(
                 "observed": False,
             },
             "impact": {
-                "value": str(Decimal("0.0002") * cost_multiplier * Decimal(10000)),
+                "value": str(
+                    Decimal("0.0002") * cost_multiplier * Decimal(10000)
+                ),
                 "unit": "bps per side",
-                "source": "modeled cost-grid assumption in the Issue 85 replay",
+                "source": (
+                    "modeled cost-grid assumption in the Issue 85 replay"
+                ),
                 "context": "used to estimate candidate cost only; not applied "
                 "again to simulated fill prices",
                 "observed": False,
@@ -1058,12 +1164,19 @@ def _run_issue85_sequential_replay(
             },
             "zero_slippage_assumption": ZERO_SLIPPAGE_ASSUMPTION,
             "spread_proxy": {
-                "formula": "0.5 * (previous completed bar high - low) / decision price",
-                "eligibility_limit": "max(0.0015, 2 * tick_size / decision price)",
+                "formula": (
+                    "0.5 * (previous completed bar high - low) / decision "
+                    "price"
+                ),
+                "eligibility_limit": (
+                    "max(0.0015, 2 * tick_size / decision price)"
+                ),
                 "tick_size": "0.001",
                 "source": "user-approved OHLCV modeling substitute",
-                "context": "proxy only; not observed historical bid/ask spread "
-                "or execution evidence",
+                "context": (
+                    "proxy only; not observed historical bid/ask spread "
+                    "or execution evidence"
+                ),
                 "observed": False,
             },
         },
@@ -1096,7 +1209,10 @@ def run_issue85_sequential_replay(
     threshold_stresses: dict[str, object] = {}
     for name in ("buy", "sell", "take_profit", "buyback", "direction_delta"):
         original = int(score_parameters[name])
-        for direction, factor in (("minus_10_percent", 0.9), ("plus_10_percent", 1.1)):
+        for direction, factor in (
+            ("minus_10_percent", 0.9),
+            ("plus_10_percent", 1.1),
+        ):
             value = int(original * factor + 0.5)
             stress = _run_issue85_sequential_replay(
                 bars,
@@ -1135,7 +1251,9 @@ def run_issue85_sequential_replay(
             and cost["profit_factor"] is not None
             and Decimal(str(cost["profit_factor"])) > 1,
         },
-        "individual_score_thresholds_plus_minus_10_percent": threshold_stresses,
+        "individual_score_thresholds_plus_minus_10_percent": (
+            threshold_stresses
+        ),
     }
     return baseline
 

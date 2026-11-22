@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Expose the development stack to LAN clients, optionally using trusted HTTPS."""
+"""Expose the development stack to LAN clients, optionally using trusted
+HTTPS."""
 
 import argparse
 import ipaddress
@@ -30,11 +31,16 @@ def validate_hostname(value: str) -> str:
             or len(label) > 63
             or not label[0].isalnum()
             or not label[-1].isalnum()
-            or any(not (character.isalnum() or character == "-") for character in label)
+            or any(
+                not (character.isalnum() or character == "-")
+                for character in label
+            )
             for label in labels
         )
     ):
-        raise ValueError("hostname must be a valid DNS name with at least two labels")
+        raise ValueError(
+            "hostname must be a valid DNS name with at least two labels"
+        )
     try:
         ipaddress.ip_address(hostname)
     except ValueError:
@@ -45,7 +51,8 @@ def validate_hostname(value: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "host", help="host machine's IPv4 address reachable by the intended clients"
+        "host",
+        help="host machine's IPv4 address reachable by the intended clients",
     )
     parser.add_argument(
         "action",
@@ -55,7 +62,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--hostname",
-        help="DNS name clients use; it must resolve to the supplied LAN IPv4 address",
+        help=(
+            "DNS name clients use; it must resolve to the supplied LAN IPv4 "
+            "address"
+        ),
     )
     parser.add_argument(
         "--tls-cert",
@@ -81,22 +91,32 @@ def main() -> int:
         parser.error(str(error))
     if args.action == "up" and not args.hostname:
         parser.error(
-            "--hostname is required for up; Rauthy requires a DNS name, not an IP RP ID"
+            "--hostname is required for up; Rauthy requires a DNS name, "
+            "not an IP RP ID"
         )
     try:
-        hostname = validate_hostname(args.hostname) if args.hostname else str(host)
+        hostname = (
+            validate_hostname(args.hostname) if args.hostname else str(host)
+        )
     except ValueError as error:
         parser.error(str(error))
     try:
         env = LOCAL["local_environment"]()
         env.update(MARKET_DATA_MODE="replay")
-        LOCAL["check_configuration"](env)
         tls_enabled = args.tls_cert is not None
-        if tls_enabled:
-            cert = Path(args.tls_cert).expanduser().resolve()
-            key = Path(args.tls_key).expanduser().resolve()
+        cert = (
+            Path(args.tls_cert).expanduser().resolve()
+            if args.tls_cert
+            else None
+        )
+        key = (
+            Path(args.tls_key).expanduser().resolve() if args.tls_key else None
+        )
+        if cert is not None and key is not None:
             if not cert.is_file() or not key.is_file():
-                raise ValueError("--tls-cert and --tls-key must name existing files")
+                raise ValueError(
+                    "--tls-cert and --tls-key must name existing files"
+                )
         scheme = "https" if tls_enabled else "http"
         gateway_port = "8443" if tls_enabled else "8080"
         issuer_port = "8444" if tls_enabled else "8081"
@@ -118,7 +138,7 @@ def main() -> int:
             OIDC_JWKS_URI="http://rauthy:8080/auth/v1/oidc/certs",
             RABBITMQ_BIND_HOST="127.0.0.1",
         )
-        if tls_enabled:
+        if cert is not None and key is not None:
             env.update(
                 LAN_TLS="1",
                 RAUTHY_LISTEN_SCHEME="http_https",
@@ -145,21 +165,30 @@ def main() -> int:
             )
             deadline = time.monotonic() + args.timeout
             discovery_url = (
-                "https://localhost:8444/auth/v1/.well-known/openid-configuration"
+                "https://localhost:8444/auth/v1/"
+                ".well-known/openid-configuration"
                 if tls_enabled
-                else "http://127.0.0.1:8081/auth/v1/.well-known/openid-configuration"
+                else (
+                    "http://127.0.0.1:8081/auth/v1/"
+                    ".well-known/openid-configuration"
+                )
             )
             while True:
                 try:
                     with urlopen(discovery_url, timeout=2) as response:
-                        if json.load(response).get("issuer") == env["OIDC_ISSUER"]:
+                        if (
+                            json.load(response).get("issuer")
+                            == env["OIDC_ISSUER"]
+                        ):
                             break
                 except OSError:
                     pass
                 except ValueError:
                     pass
                 if time.monotonic() >= deadline:
-                    raise ValueError("Rauthy readiness timed out; inspect logs")
+                    raise ValueError(
+                        "Rauthy readiness timed out; inspect logs"
+                    )
                 time.sleep(1)
             for path, expected in (
                 ("/", 200),
@@ -169,7 +198,8 @@ def main() -> int:
                 while True:
                     try:
                         with urlopen(
-                            f"{scheme}://localhost:{gateway_port}{path}", timeout=2
+                            f"{scheme}://localhost:{gateway_port}{path}",
+                            timeout=2,
                         ) as response:
                             status = response.status
                     except HTTPError as error:
@@ -179,7 +209,9 @@ def main() -> int:
                     if status == expected:
                         break
                     if time.monotonic() >= deadline:
-                        raise ValueError(f"Gateway readiness timed out: {path}")
+                        raise ValueError(
+                            f"Gateway readiness timed out: {path}"
+                        )
                     time.sleep(1)
             LOCAL["set_client_audience"](env)
             LOCAL["set_browser_origin"](env)
@@ -188,8 +220,8 @@ def main() -> int:
                 print("Client browsers must trust the certificate authority.")
             else:
                 print(
-                    "HTTP provides no confidentiality or integrity; use only with "
-                    "accepted risk."
+                    "HTTP provides no confidentiality or integrity; use "
+                    "only with accepted risk."
                 )
         elif args.action == "replay":
             subprocess.run(

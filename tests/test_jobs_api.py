@@ -12,10 +12,14 @@ from a500_t_trader.jobs_api import create_app
 from a500_t_trader.market_data import SHANGHAI, DailyBar
 
 
-def test_jobs_are_private_and_completed_dates_required(postgres_url: str) -> None:
+def test_jobs_are_private_and_completed_dates_required(
+    postgres_url: str,
+) -> None:
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     yesterday = (today - timedelta(days=1)).isoformat()
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         alice = {"Authorization": "Bearer alice"}
         bob = {"Authorization": "Bearer bob"}
@@ -31,23 +35,30 @@ def test_jobs_are_private_and_completed_dates_required(postgres_url: str) -> Non
         job_id = created.json()["id"]
         assert client.get(f"/v1/jobs/{job_id}", headers=bob).status_code == 404
         assert (
-            client.get(f"/v1/jobs/{job_id}/results", headers=alice).status_code == 404
+            client.get(f"/v1/jobs/{job_id}/results", headers=alice).status_code
+            == 404
         )
         assert (
-            client.post(f"/v1/jobs/{job_id}/cancel", headers=alice).status_code == 200
+            client.post(f"/v1/jobs/{job_id}/cancel", headers=alice).status_code
+            == 200
         )
         assert (
             client.get(f"/v1/jobs/{job_id}", headers=alice).json()["status"]
             == "cancelled"
         )
         payload["end_date"] = today.isoformat()
-        assert client.post("/v1/jobs", json=payload, headers=alice).status_code == 422
+        assert (
+            client.post("/v1/jobs", json=payload, headers=alice).status_code
+            == 422
+        )
 
 
 def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
     postgres_url: str,
 ) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         alice = {"Authorization": "Bearer alice"}
         bob = {"Authorization": "Bearer bob"}
@@ -58,8 +69,12 @@ def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
             "end_date": "2020-12-31",
         }
         assert client.get("/v1/jobs").status_code == 401
-        alice_first = client.post("/v1/jobs", json=payload, headers=alice).json()
-        alice_second = client.post("/v1/jobs", json=payload, headers=alice).json()
+        alice_first = client.post(
+            "/v1/jobs", json=payload, headers=alice
+        ).json()
+        alice_second = client.post(
+            "/v1/jobs", json=payload, headers=alice
+        ).json()
         bob_job = client.post("/v1/jobs", json=payload, headers=bob).json()
 
         alice_jobs = client.get("/v1/jobs?limit=30&offset=0", headers=alice)
@@ -75,8 +90,12 @@ def test_recent_jobs_are_listed_for_the_authenticated_subject_only(
     assert [job["id"] for job in bob_jobs.json()["jobs"]] == [bob_job["id"]]
 
 
-def test_job_list_pagination_and_subject_scoped_deletion(postgres_url: str) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+def test_job_list_pagination_and_subject_scoped_deletion(
+    postgres_url: str,
+) -> None:
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         alice = {"Authorization": "Bearer alice"}
         bob = {"Authorization": "Bearer bob"}
@@ -94,7 +113,9 @@ def test_job_list_pagination_and_subject_scoped_deletion(postgres_url: str) -> N
             client.post(f"/v1/jobs/{job['id']}/cancel", headers=alice)
 
         page = client.get("/v1/jobs?limit=2&offset=0", headers=alice).json()
-        next_page = client.get("/v1/jobs?limit=2&offset=2", headers=alice).json()
+        next_page = client.get(
+            "/v1/jobs?limit=2&offset=2", headers=alice
+        ).json()
         assert len(page["jobs"]) == 2
         assert page["total"] == 3
         assert page["has_more"] is True
@@ -102,19 +123,31 @@ def test_job_list_pagination_and_subject_scoped_deletion(postgres_url: str) -> N
         assert next_page["has_more"] is False
 
         assert (
-            client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=bob).status_code == 404
+            client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=bob).status_code
+            == 404
         )
         assert (
-            client.delete(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code == 204
+            client.delete(
+                f"/v1/jobs/{jobs[0]['id']}", headers=alice
+            ).status_code
+            == 204
         )
-        assert client.get(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code == 404
         assert (
-            client.get("/v1/jobs?limit=30&offset=0", headers=alice).json()["total"] == 2
+            client.get(f"/v1/jobs/{jobs[0]['id']}", headers=alice).status_code
+            == 404
+        )
+        assert (
+            client.get("/v1/jobs?limit=30&offset=0", headers=alice).json()[
+                "total"
+            ]
+            == 2
         )
 
 
 def test_active_job_cannot_be_deleted(postgres_url: str) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         created = client.post(
             "/v1/jobs",
@@ -136,7 +169,9 @@ def test_active_job_cannot_be_deleted(postgres_url: str) -> None:
 
 
 def test_submission_requires_persistence_permission(postgres_url: str) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=False)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=False
+    )
     with TestClient(app) as client:
         response = client.post(
             "/v1/jobs",
@@ -154,7 +189,9 @@ def test_submission_requires_persistence_permission(postgres_url: str) -> None:
 def test_submission_persists_queued_job_with_pending_outbox(
     postgres_url: str,
 ) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         response = client.post(
             "/v1/jobs",
@@ -186,7 +223,9 @@ def test_job_uses_clipped_calendar_quarters_for_creation_and_worker_progress(
 ) -> None:
     ranges: list[tuple[date, date]] = []
     progress_at_query: list[int] = []
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     repository = JobRepository(postgres_url)
 
@@ -196,7 +235,9 @@ def test_job_uses_clipped_calendar_quarters_for_creation_and_worker_progress(
         ) -> tuple[DailyBar, ...]:
             ranges.append((start_date, end_date))
             if len(ranges) == 2:
-                current = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+                current = client.get(
+                    f"/v1/jobs/{job['id']}", headers=headers
+                ).json()
                 progress_at_query.append(current["completed_chunks"])
             return ()
 
@@ -229,7 +270,9 @@ def test_job_uses_clipped_calendar_quarters_for_creation_and_worker_progress(
     assert status["completed_chunks"] == status["total_chunks"] == 6
 
 
-def test_single_quarter_job_requests_only_its_clipped_dates(postgres_url: str) -> None:
+def test_single_quarter_job_requests_only_its_clipped_dates(
+    postgres_url: str,
+) -> None:
     ranges: list[tuple[date, date]] = []
 
     class Provider:
@@ -239,7 +282,9 @@ def test_single_quarter_job_requests_only_its_clipped_dates(postgres_url: str) -
             ranges.append((start_date, end_date))
             return ()
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -273,7 +318,9 @@ def test_job_splits_adjacent_quarter_boundary_dates(
             ranges.append((start_date, end_date))
             return ()
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -320,9 +367,9 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
             return (
                 DailyBar(
                     symbol=symbol,
-                    timestamp=datetime.combine(bar_date, datetime.min.time()).replace(
-                        tzinfo=SHANGHAI
-                    ),
+                    timestamp=datetime.combine(
+                        bar_date, datetime.min.time()
+                    ).replace(tzinfo=SHANGHAI),
                     open=close,
                     high=close,
                     low=close,
@@ -333,7 +380,9 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
 
     provider = Provider()
     repository = JobRepository(postgres_url)
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -373,14 +422,19 @@ def test_worker_resumes_after_quarter_checkpoint_and_publishes_full_history(
                     "DROP TRIGGER IF EXISTS fail_test_quarter_checkpoint "
                     "ON daily_history_job_fetched_bars"
                 )
-                db.execute("DROP FUNCTION IF EXISTS fail_test_quarter_checkpoint()")
+                db.execute(
+                    "DROP FUNCTION IF EXISTS fail_test_quarter_checkpoint()"
+                )
 
-        interrupted = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+        interrupted = client.get(
+            f"/v1/jobs/{job['id']}", headers=headers
+        ).json()
         assert interrupted["status"] == "running"
         assert interrupted["completed_chunks"] == 1
         with psycopg.connect(postgres_url) as db:
             db.execute(
-                """UPDATE daily_history_jobs SET lease_until=now() - interval '1 second'
+                """UPDATE daily_history_jobs
+                SET lease_until=now() - interval '1 second'
                 WHERE id=%s""",
                 (job["id"],),
             )
@@ -448,10 +502,11 @@ def test_legacy_annual_checkpoint_migrates_before_quarterly_resume(
     with pytest.raises(psycopg.errors.CheckViolation):
         with psycopg.connect(postgres_url) as db:
             db.execute(
-                """INSERT INTO daily_history_jobs
-                (id, subject, symbol, start_date, end_date, status, total_chunks)
-                VALUES (gen_random_uuid(), 'old-api', '563360', '2023-01-01',
-                    '2024-12-31', 'queued', 2)"""
+                "INSERT INTO daily_history_jobs "
+                "(id, subject, symbol, start_date, end_date, status, "
+                "total_chunks) "
+                "VALUES (gen_random_uuid(), 'old-api', '563360', "
+                "'2023-01-01', '2024-12-31', 'queued', 2)"
             )
     assert process_one(migrated_repository, lambda: Provider())
     with psycopg.connect(postgres_url) as db:
@@ -489,7 +544,9 @@ def test_job_publishes_shared_history_without_result_endpoint(
                 ),
             )
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -509,7 +566,9 @@ def test_job_publishes_shared_history_without_result_endpoint(
         assert not {"symbol", "start_date", "end_date"} & status.keys()
         assert not any("result" in key or "bar" in key for key in status)
         assert (
-            client.get(f"/v1/jobs/{job['id']}/results", headers=headers).status_code
+            client.get(
+                f"/v1/jobs/{job['id']}/results", headers=headers
+            ).status_code
             == 404
         )
 
@@ -570,7 +629,9 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
             return tuple(bars)
 
     provider = Provider()
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     body = {
         "type": "daily_history",
@@ -586,7 +647,9 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         assert failed["completed_chunks"] == 4
         assert "secret" not in failed["error"]
         assert (
-            client.get(f"/v1/jobs/{first['id']}/results", headers=headers).status_code
+            client.get(
+                f"/v1/jobs/{first['id']}/results", headers=headers
+            ).status_code
             == 404
         )
         from a500_t_trader.backtest import BacktestRepository
@@ -610,7 +673,9 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
         second = client.post("/v1/jobs", headers=headers, json=body).json()
         assert process_one(JobRepository(postgres_url), lambda: provider)
         assert (
-            client.get(f"/v1/jobs/{second['id']}/results", headers=headers).status_code
+            client.get(
+                f"/v1/jobs/{second['id']}/results", headers=headers
+            ).status_code
             == 404
         )
     from a500_t_trader.backtest import BacktestRepository
@@ -626,7 +691,8 @@ def test_failed_job_discards_partial_staging_and_resubmission_reuses_cache(
     ]
     with psycopg.connect(postgres_url) as db:
         staged_row = db.execute(
-            "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+            "SELECT count(*) FROM daily_history_job_fetched_bars "
+            "WHERE job_id=%s",
             (first["id"],),
         ).fetchone()
     assert staged_row is not None
@@ -649,7 +715,9 @@ def test_running_job_reports_query_stage_and_cooperative_cancellation(
             assert release.wait(5)
             return ()
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -663,12 +731,15 @@ def test_running_job_reports_query_stage_and_cooperative_cancellation(
             },
         ).json()
         worker = threading.Thread(
-            target=process_one, args=(JobRepository(postgres_url), lambda: Provider())
+            target=process_one,
+            args=(JobRepository(postgres_url), lambda: Provider()),
         )
         worker.start()
         try:
             assert entered.wait(5)
-            status = client.get(f"/v1/jobs/{job['id']}", headers=headers).json()
+            status = client.get(
+                f"/v1/jobs/{job['id']}", headers=headers
+            ).json()
             assert status["status"] == "running"
             assert status["stage"] == "querying"
             cancelled = client.post(
@@ -690,7 +761,9 @@ def test_failed_publication_rolls_back_status_coverage_and_staging(
     from a500_t_trader.backtest import BacktestRepository
 
     BacktestRepository(postgres_url)
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
 
     class Provider:
@@ -723,7 +796,8 @@ def test_failed_publication_rolls_back_status_coverage_and_staging(
         with psycopg.connect(postgres_url) as db:
             db.execute(
                 """CREATE FUNCTION reject_history_publish() RETURNS trigger
-                LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'blocked'; END $$"""
+                LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'blocked'; END $$"""
             )
             db.execute(
                 """CREATE TRIGGER reject_history_publish BEFORE INSERT ON
@@ -746,17 +820,21 @@ def test_failed_publication_rolls_back_status_coverage_and_staging(
                 ("563360",),
             ).fetchone()
             staged_row = db.execute(
-                "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                "SELECT count(*) FROM daily_history_job_fetched_bars "
+                "WHERE job_id=%s",
                 (job["id"],),
             ).fetchone()
             assert published_row is not None
             assert staged_row is not None
             published = published_row[0]
             staged = staged_row[0]
-            db.execute("DROP TRIGGER reject_history_publish ON shared_daily_bars")
+            db.execute(
+                "DROP TRIGGER reject_history_publish ON shared_daily_bars"
+            )
             db.execute("DROP FUNCTION reject_history_publish()")
             db.execute(
-                "UPDATE daily_history_jobs SET lease_until=now()-interval '1 second' "
+                "UPDATE daily_history_jobs "
+                "SET lease_until=now()-interval '1 second' "
                 "WHERE id=%s",
                 (job["id"],),
             )

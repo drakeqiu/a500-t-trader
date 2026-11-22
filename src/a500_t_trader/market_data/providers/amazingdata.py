@@ -40,9 +40,12 @@ class AmazingDataProvider:
         self._clock = clock
         vendor_login = login_fn is None
         if login_fn is None:
-            from AmazingData.login.tgw_login import login  # type: ignore[import-untyped]
+            from AmazingData.login import tgw_login  # type: ignore[import-untyped]
+
+            login = tgw_login.login
 
             login_fn = login
+        assert login_fn is not None
         _LOG.info("AmazingData provider initialization stage=login_start")
         try:
             authenticated = login_fn(
@@ -50,20 +53,28 @@ class AmazingDataProvider:
             )
         except Exception as error:
             _LOG.warning(
-                "AmazingData provider initialization stage=login_failed error_type=%s",
+                (
+                    "AmazingData provider initialization "
+                    "stage=login_failed error_type=%s"
+                ),
                 type(error).__name__,
             )
             raise CapabilityUnavailableError(
                 f"AmazingData login failed: {error}"
             ) from error
         # AmazingData 1.1.17 returns the initial Login result even when its
-        # forced relogin succeeds; a returned False therefore means retry success.
+        # forced relogin succeeds; a returned False therefore means retry
+        # success.
         if not authenticated and not vendor_login:
-            _LOG.warning("AmazingData provider initialization stage=login_rejected")
+            _LOG.warning(
+                "AmazingData provider initialization stage=login_rejected"
+            )
             raise CapabilityUnavailableError("AmazingData login was rejected")
         _LOG.info("AmazingData provider initialization stage=login_succeeded")
         if market_data is None:
-            _LOG.info("AmazingData provider initialization stage=market_data_start")
+            _LOG.info(
+                "AmazingData provider initialization stage=market_data_start"
+            )
             try:
                 market_data = _make_market_data()
             except Exception as error:
@@ -75,7 +86,10 @@ class AmazingDataProvider:
                 raise CapabilityUnavailableError(
                     f"AmazingData market-data initialization failed: {error}"
                 ) from error
-            _LOG.info("AmazingData provider initialization stage=market_data_ready")
+            _LOG.info(
+                "AmazingData provider initialization stage=market_data_ready"
+            )
+        assert market_data is not None
         self._market_data = market_data
 
     def get_snapshot(self, symbol: str) -> Snapshot:
@@ -88,7 +102,8 @@ class AmazingDataProvider:
             )
         except Exception as error:
             raise CapabilityUnavailableError(
-                f"AmazingData snapshot query unavailable or unauthorized: {error}"
+                "AmazingData snapshot query unavailable or "
+                f"unauthorized: {error}"
             ) from error
         rows = _snapshot_rows(raw, code, session_date)
         if not rows:
@@ -118,7 +133,8 @@ class AmazingDataProvider:
             )
         except (KeyError, TypeError, ValueError, InvalidOperation) as error:
             raise CapabilityUnavailableError(
-                f"AmazingData snapshot query returned invalid data for {code}: {error}"
+                "AmazingData snapshot query returned invalid data "
+                f"for {code}: {error}"
             ) from error
         return snapshot
 
@@ -173,7 +189,9 @@ class AmazingDataProvider:
                     f"{interval_minutes} minutes: {timestamp}"
                 )
             if not start_date <= timestamp.date() <= end_date:
-                raise ValueError(f"bar timestamp outside requested dates: {timestamp}")
+                raise ValueError(
+                    f"bar timestamp outside requested dates: {timestamp}"
+                )
             if timestamp in seen:
                 raise ValueError(f"duplicate bar timestamp: {timestamp}")
             if previous_time is not None and timestamp < previous_time:
@@ -208,7 +226,9 @@ class AmazingDataProvider:
                     close=close,
                     volume=volume,
                     amount=amount,
-                    is_completed=timestamp + timedelta(minutes=interval_minutes) <= now,
+                    is_completed=timestamp
+                    + timedelta(minutes=interval_minutes)
+                    <= now,
                     source="AmazingData",
                 )
             )
@@ -221,7 +241,9 @@ class AmazingDataProvider:
             raise ValueError("start_date must be on or before end_date")
         code = normalize_symbol(symbol)
         try:
-            from AmazingData.query_api.market_data import Period  # type: ignore[import-untyped]
+            from AmazingData.query_api import market_data  # type: ignore[import-untyped]
+
+            Period = market_data.Period
 
             period = int(Period.day.value)
             raw = self._market_data.query_kline(
@@ -246,7 +268,9 @@ class AmazingDataProvider:
             if day < start_date or day > end_date:
                 raise ValueError(f"daily bar outside requested dates: {day}")
             if day in seen or (previous is not None and day < previous):
-                raise ValueError("daily bars must be unique and ordered ascending")
+                raise ValueError(
+                    "daily bars must be unique and ordered ascending"
+                )
             opening = _required_decimal(row, "open")
             high = _required_decimal(row, "high")
             low = _required_decimal(row, "low")
@@ -289,15 +313,23 @@ class AmazingDataProvider:
 
 
 def _make_market_data() -> Any:
-    from AmazingData.query_api.base_data import BaseData  # type: ignore[import-untyped]
-    from AmazingData.query_api.market_data import MarketData
+    query_api = cast(Any, import_module("AmazingData.query_api"))
+    base_data = query_api.base_data
+    market_data_api = query_api.market_data
+
+    BaseData = base_data.BaseData
+    MarketData = market_data_api.MarketData
 
     _LOG.info("AmazingData provider initialization stage=calendar_start")
     calendar = BaseData().get_calendar(market="SH")
     _LOG.info("AmazingData provider initialization stage=calendar_ready")
-    _LOG.info("AmazingData provider initialization stage=market_data_client_start")
+    _LOG.info(
+        "AmazingData provider initialization stage=market_data_client_start"
+    )
     market_data = MarketData(calendar)
-    _LOG.info("AmazingData provider initialization stage=market_data_client_ready")
+    _LOG.info(
+        "AmazingData provider initialization stage=market_data_client_ready"
+    )
     return market_data
 
 
@@ -318,7 +350,9 @@ def _period_value(interval_minutes: int) -> int:
 
     market_data = import_module("AmazingData.query_api.market_data")
     Period = market_data.Period
-    return int(Period.min1.value if interval_minutes == 1 else Period.min5.value)
+    return int(
+        Period.min1.value if interval_minutes == 1 else Period.min5.value
+    )
 
 
 def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
@@ -339,7 +373,9 @@ def _kline_rows(raw: Any, symbol: str) -> list[Mapping[str, Any]]:
     return _records(frame)
 
 
-def _snapshot_rows(raw: Any, symbol: str, session_date: int) -> list[Mapping[str, Any]]:
+def _snapshot_rows(
+    raw: Any, symbol: str, session_date: int
+) -> list[Mapping[str, Any]]:
     if not isinstance(raw, Mapping):
         return []
     dated = raw.get(str(session_date), raw.get(session_date))
@@ -402,7 +438,9 @@ def _vendor_time(value: Any) -> datetime:
         pattern = patterns.get(len(value))
         if pattern is not None:
             try:
-                return datetime.strptime(value, pattern).replace(tzinfo=SHANGHAI)
+                return datetime.strptime(value, pattern).replace(
+                    tzinfo=SHANGHAI
+                )
             except ValueError:
                 pass
     raise ValueError(f"invalid AmazingData timestamp: {value!r}")

@@ -16,7 +16,9 @@ class DailyIndicators:
     rsi_14: Decimal | None
 
 
-def calculate_indicators(bars: tuple[DailyBar, ...]) -> tuple[DailyIndicators, ...]:
+def calculate_indicators(
+    bars: tuple[DailyBar, ...],
+) -> tuple[DailyIndicators, ...]:
     """Calculate close-based SMA(5), SMA(20), and Wilder RSI(14).
 
     Warm-up values are None until the complete observation window exists. Every
@@ -59,6 +61,8 @@ def calculate_indicators(bars: tuple[DailyBar, ...]) -> tuple[DailyIndicators, .
                         Decimal(1) + average_gain / average_loss
                     )
         sma_5 = sum(closes[-5:], Decimal(0)) / 5 if len(closes) >= 5 else None
-        sma_20 = sum(closes[-20:], Decimal(0)) / 20 if len(closes) >= 20 else None
+        sma_20 = (
+            sum(closes[-20:], Decimal(0)) / 20 if len(closes) >= 20 else None
+        )
         rows.append(DailyIndicators(bar, sma_5, sma_20, rsi))
     return tuple(rows)

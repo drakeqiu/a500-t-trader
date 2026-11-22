@@ -31,7 +31,9 @@ def register_commands(
     fill_record = commands.add_parser(
         "manual-fill", help="record a user-entered manual fill"
     )
-    fill_record.add_argument("--timestamp", required=True, type=datetime.fromisoformat)
+    fill_record.add_argument(
+        "--timestamp", required=True, type=datetime.fromisoformat
+    )
     fill_record.add_argument("--symbol", required=True)
     fill_record.add_argument("--side", required=True, choices=("buy", "sell"))
     fill_record.add_argument("--quantity", required=True, type=int)
@@ -46,7 +48,9 @@ def register_commands(
     fill_import = commands.add_parser(
         "import-fills", help="preview or import Galaxy Securities CSV fills"
     )
-    fill_import.add_argument("--file", required=True, help="GB18030 Galaxy CSV file")
+    fill_import.add_argument(
+        "--file", required=True, help="GB18030 Galaxy CSV file"
+    )
     fill_import.add_argument(
         "--database",
         default=os.environ.get("DATABASE_URL"),
@@ -54,7 +58,9 @@ def register_commands(
         help="PostgreSQL connection URL",
     )
     fill_import.add_argument(
-        "--confirm", action="store_true", help="persist valid new imported fills"
+        "--confirm",
+        action="store_true",
+        help="persist valid new imported fills",
     )
     ledger_show = commands.add_parser(
         "account-ledger", help="show saved account snapshots and fills"
@@ -70,7 +76,9 @@ def register_commands(
 def handle(args: argparse.Namespace) -> int:
     if args.command == "import-fills":
         try:
-            report = import_galaxy_fills(args.database, args.file, confirm=args.confirm)
+            report = import_galaxy_fills(
+                args.database, args.file, confirm=args.confirm
+            )
         except Exception:
             print(
                 "Unable to import Galaxy fills: ledger operation failed.",
@@ -85,7 +93,9 @@ def handle(args: argparse.Namespace) -> int:
                 load_account(args.account)
             )
         except Exception as error:
-            print(f"Unable to record account snapshot: {error}", file=sys.stderr)
+            print(
+                f"Unable to record account snapshot: {error}", file=sys.stderr
+            )
             return 2
         print(
             json.dumps(
@@ -113,7 +123,9 @@ def handle(args: argparse.Namespace) -> int:
             json.dumps(
                 {
                     "id": identifier,
-                    "classification": "user-entered manual fill; not broker-verified",
+                    "classification": (
+                        "user-entered manual fill; not broker-verified"
+                    ),
                 }
             )
         )

@@ -75,7 +75,9 @@ class FixedCalendar:
 
 
 def _service(source: DeterministicSource) -> MarketDataService:
-    return MarketDataService(source, calendar=TradingCalendarService(FixedCalendar()))
+    return MarketDataService(
+        source, calendar=TradingCalendarService(FixedCalendar())
+    )
 
 
 def test_service_normalizes_symbols_and_preserves_snapshot_fields() -> None:
@@ -102,7 +104,9 @@ def test_service_normalizes_symbols_and_preserves_snapshot_fields() -> None:
     assert source.calls == [("snapshot", "563360")]
 
 
-def test_service_defaults_symbol_and_returns_empty_bar_and_trade_results() -> None:
+def test_service_defaults_symbol_and_returns_empty_bar_and_trade_results() -> (
+    None
+):
     source = DeterministicSource()
     service = MarketDataService(source)
 
@@ -116,7 +120,7 @@ def test_service_defaults_symbol_and_returns_empty_bar_and_trade_results() -> No
     ]
 
 
-def test_service_preserves_units_precision_and_optional_bar_and_trade_fields() -> None:
+def test_service_preserves_precision_and_optional_market_data_fields() -> None:
     source = DeterministicSource()
     timestamp = datetime(2026, 11, 1, 9, 31, tzinfo=SHANGHAI)
     bar = MinuteBar(
@@ -149,7 +153,9 @@ def test_service_preserves_units_precision_and_optional_bar_and_trade_fields() -
     assert trade.side is None
 
 
-def test_models_normalize_exchange_suffix_and_convert_times_to_shanghai() -> None:
+def test_models_normalize_exchange_suffix_and_convert_times_to_shanghai() -> (
+    None
+):
     timestamp = datetime(2026, 11, 1, 1, 30, tzinfo=UTC)
 
     bar = MinuteBar(
@@ -179,7 +185,9 @@ def test_models_normalize_exchange_suffix_and_convert_times_to_shanghai() -> Non
     assert bar.amount is None
 
 
-def test_models_reject_naive_timestamps_and_unsupported_bar_intervals() -> None:
+def test_models_reject_naive_timestamps_and_unsupported_bar_intervals() -> (
+    None
+):
     with pytest.raises(ValueError, match="timezone-aware"):
         Trade(
             symbol="563360",
@@ -213,4 +221,7 @@ def test_unavailable_capability_is_distinct_from_empty_result() -> None:
 def test_market_data_service_exposes_injected_calendar_status() -> None:
     service = _service(DeterministicSource())
 
-    assert service.session_status(date(2026, 11, 2)) == (SessionState.TRADING, False)
+    assert service.session_status(date(2026, 11, 2)) == (
+        SessionState.TRADING,
+        False,
+    )

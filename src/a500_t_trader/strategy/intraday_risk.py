@@ -7,8 +7,11 @@ _GRID_STOP_MULTIPLIER = Decimal("1.2")
 _MINIMUM_STOP_PRICE_RATIO = Decimal("0.004")
 
 
-def v1_stop_distance(atr: Decimal, grid_step: Decimal, price: Decimal) -> Decimal:
-    """Return the V1 risk distance without changing caller-specific sizing rules."""
+def v1_stop_distance(
+    atr: Decimal, grid_step: Decimal, price: Decimal
+) -> Decimal:
+    """Return the V1 risk distance without changing caller-specific sizing
+    rules."""
     return max(
         _ATR_STOP_MULTIPLIER * atr,
         _GRID_STOP_MULTIPLIER * grid_step,

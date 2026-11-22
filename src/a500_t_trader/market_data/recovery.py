@@ -8,14 +8,17 @@ from .events import MarketEvent
 
 
 class LatestStatePublisher:
-    """Retain only latest snapshot/bar per configured symbol during publish failures.
+    """Retain only latest snapshot/bar per configured symbol during
+    publish failures.
 
     Trades are never retained. State is memory-only and scoped to this object;
     successful broker publication is at least once, so repeats are possible.
     Consumers, not this adapter, determine whether event timestamps are fresh.
     """
 
-    def __init__(self, publisher: Publisher, *, symbols: tuple[str, ...]) -> None:
+    def __init__(
+        self, publisher: Publisher, *, symbols: tuple[str, ...]
+    ) -> None:
         if not symbols:
             raise ValueError("at least one configured symbol is required")
         self._publisher = publisher
@@ -41,7 +44,9 @@ class LatestStatePublisher:
 
     def _retain(self, event: MarketEvent) -> None:
         if isinstance(event, (Snapshot, MinuteBar)):
-            event_type = "snapshot" if isinstance(event, Snapshot) else "minute_bar"
+            event_type = (
+                "snapshot" if isinstance(event, Snapshot) else "minute_bar"
+            )
             self._pending[(event_type, event.symbol)] = event
 
     def _flush(self) -> None:

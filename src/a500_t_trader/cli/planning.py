@@ -35,7 +35,9 @@ def register_premarket(
     premarket = commands.add_parser(
         "premarket", help="generate an advisory pre-market plan"
     )
-    premarket.add_argument("--config", required=True, help="local ETF/rule JSON file")
+    premarket.add_argument(
+        "--config", required=True, help="local ETF/rule JSON file"
+    )
     premarket.add_argument(
         "--account", required=True, help="user-entered account snapshot JSON"
     )
@@ -55,7 +57,9 @@ def register_monitor_review(
     monitor = commands.add_parser(
         "monitor", help="start foreground intraday advisory monitoring"
     )
-    monitor.add_argument("--config", required=True, help="local ETF/rule JSON file")
+    monitor.add_argument(
+        "--config", required=True, help="local ETF/rule JSON file"
+    )
     monitor.add_argument(
         "--account", required=True, help="user-entered account snapshot JSON"
     )
@@ -66,7 +70,10 @@ def register_monitor_review(
         help="PostgreSQL connection URL",
     )
     monitor.add_argument(
-        "--poll-seconds", type=float, default=5.0, help="foreground polling interval"
+        "--poll-seconds",
+        type=float,
+        default=5.0,
+        help="foreground polling interval",
     )
     monitor.add_argument(
         "--once", action="store_true", help="evaluate one pass and exit"
@@ -75,7 +82,10 @@ def register_monitor_review(
         "postmarket", help="review a saved plan and daily evidence"
     )
     review_parser.add_argument(
-        "--date", required=True, type=date.fromisoformat, help="reviewed trading date"
+        "--date",
+        required=True,
+        type=date.fromisoformat,
+        help="reviewed trading date",
     )
     review_parser.add_argument(
         "--plan", required=True, help="saved pre-market plan JSON"
@@ -89,7 +99,9 @@ def register_monitor_review(
 
 
 def handle(
-    args: argparse.Namespace, market_data: MarketData | None, as_of: datetime | None
+    args: argparse.Namespace,
+    market_data: MarketData | None,
+    as_of: datetime | None,
 ) -> int:
     if args.command == "postmarket":
         try:
@@ -109,7 +121,10 @@ def handle(
             print(review_json(review))
             return 0
         except Exception as error:
-            print(f"Unable to generate post-market review: {error}", file=sys.stderr)
+            print(
+                f"Unable to generate post-market review: {error}",
+                file=sys.stderr,
+            )
             return 2
     if args.command == "monitor":
         try:
@@ -127,15 +142,22 @@ def handle(
                 as_of=as_of,
             )
         except KeyboardInterrupt:
-            print("Intraday monitoring stopped; no background process remains.")
+            print(
+                "Intraday monitoring stopped; no background process remains."
+            )
         except CapabilityUnavailableError as error:
             print(
-                f"Required monitoring capability unavailable or unauthorized: {error}",
+                (
+                    "Required monitoring capability unavailable or "
+                    f"unauthorized: {error}"
+                ),
                 file=sys.stderr,
             )
             return 2
         except Exception as error:
-            print(f"Unable to run intraday monitoring: {error}", file=sys.stderr)
+            print(
+                f"Unable to run intraday monitoring: {error}", file=sys.stderr
+            )
             return 2
         return 0
     try:
@@ -168,11 +190,16 @@ def handle(
         try:
             snapshot_id = AccountLedger(args.database).record_snapshot(account)
             print(
-                f"Account snapshot saved to PostgreSQL ledger (id {snapshot_id}).",
+                (
+                    "Account snapshot saved to PostgreSQL ledger "
+                    f"(id {snapshot_id})."
+                ),
                 file=sys.stderr,
             )
         except Exception as error:
-            print(f"Unable to persist account snapshot: {error}", file=sys.stderr)
+            print(
+                f"Unable to persist account snapshot: {error}", file=sys.stderr
+            )
             return 2
     print(plan_json(plan))
     return 0

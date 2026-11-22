@@ -40,9 +40,10 @@ dev = [
   "pytest>=8.3.5",
   "ruff>=0.11.0",
   "yamllint>=1.37.1",
-  "fakeredis>=2.31.0",
+  "basedpyright>=1.29.1",
   "httpx2>=2.0.0",
-  "playwright>=1.55.0,<2.0.0",
+  "fakeredis>=2.23.0",
+  "playwright>=1.51.0",
 ]
 
 [tool.uv.sources]
@@ -51,15 +52,20 @@ AmazingData = { path = "wheels/AmazingData-1.1.17-cp314-none-any.whl" }
 
 [tool.ruff]
 target-version = "py314"
-line-length = 88
+line-length = 79
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "W", "F", "I", "UP", "B"]
 
 [tool.mypy]
 python_version = "3.14"
 strict = true
 files = ["src", "tests"]
+
+[tool.basedpyright]
+include = ["src", "tests", "scripts"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

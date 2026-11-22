@@ -26,7 +26,9 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 AS_OF = datetime(2026, 11, 2, 10, 0, tzinfo=SHANGHAI)
 
 
-def _bars(timestamp: datetime = AS_OF - timedelta(minutes=5)) -> tuple[MinuteBar, ...]:
+def _bars(
+    timestamp: datetime = AS_OF - timedelta(minutes=5),
+) -> tuple[MinuteBar, ...]:
     start = datetime(2026, 10, 30, 9, 30, tzinfo=SHANGHAI)
     rows = []
     for index in range(179):
@@ -122,7 +124,10 @@ def _config(
         "intraday-etf-t-v1-rsi",
         "V1.0",
         "commit:test",
-        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
+        (
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
+        ),
         RULE_SOURCE_SHA256,
         parameters,
         {
@@ -248,11 +253,36 @@ def _candidate_analysis(
     ("candidate", "current_rsi", "previous_rsi", "expected_reason"),
     (
         ("BUY", None, Decimal("29"), "RSI_NOT_READY"),
-        ("BUY", Decimal("30"), Decimal("29"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
-        ("BUY", Decimal("35"), Decimal("35"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
-        ("BUYBACK", Decimal("25"), Decimal("22"), "RSI_BUY_MOMENTUM_NOT_CONFIRMED"),
-        ("SELL", Decimal("70"), Decimal("71"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
-        ("SELL", Decimal("65"), Decimal("65"), "RSI_SELL_MOMENTUM_NOT_CONFIRMED"),
+        (
+            "BUY",
+            Decimal("30"),
+            Decimal("29"),
+            "RSI_BUY_MOMENTUM_NOT_CONFIRMED",
+        ),
+        (
+            "BUY",
+            Decimal("35"),
+            Decimal("35"),
+            "RSI_BUY_MOMENTUM_NOT_CONFIRMED",
+        ),
+        (
+            "BUYBACK",
+            Decimal("25"),
+            Decimal("22"),
+            "RSI_BUY_MOMENTUM_NOT_CONFIRMED",
+        ),
+        (
+            "SELL",
+            Decimal("70"),
+            Decimal("71"),
+            "RSI_SELL_MOMENTUM_NOT_CONFIRMED",
+        ),
+        (
+            "SELL",
+            Decimal("65"),
+            Decimal("65"),
+            "RSI_SELL_MOMENTUM_NOT_CONFIRMED",
+        ),
         ("SELL", None, Decimal("71"), "RSI_NOT_READY"),
     ),
 )
@@ -382,7 +412,11 @@ def _paired_api_result(
                 pair_type: {
                     "target_price": "4.00",
                     "quantity": 100,
-                    **({"trade_pair_id": pair_id} if pair_id is not None else {}),
+                    **(
+                        {"trade_pair_id": pair_id}
+                        if pair_id is not None
+                        else {}
+                    ),
                 }
             }
         },
@@ -439,7 +473,13 @@ def _assert_blocked(result: dict[str, object], *reasons_to_check: str) -> None:
 def test_api_returns_separate_technical_candidate_and_risk_veto() -> None:
     result = _evaluate()["510300"]
 
-    assert set(result) == {"signal", "position", "execution", "risk", "reasons"}
+    assert set(result) == {
+        "signal",
+        "position",
+        "execution",
+        "risk",
+        "reasons",
+    }
     signal = result["signal"]
     assert isinstance(signal, dict)
     assert signal["candidate"] == "WAIT"
@@ -449,9 +489,7 @@ def test_api_returns_separate_technical_candidate_and_risk_veto() -> None:
     _assert_blocked(result)
 
 
-def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason() -> (
-    None
-):
+def test_missing_or_stale_upstream_input_blocks_action_with_reason() -> None:
     stale = AS_OF - timedelta(hours=1)
     cases = (
         (
@@ -483,7 +521,9 @@ def test_each_missing_or_stale_upstream_input_blocks_action_with_specific_reason
         _assert_blocked(result, reason)
 
 
-def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> None:
+def test_api_is_deterministic_and_does_not_turn_unknowns_into_quantity() -> (
+    None
+):
     first = _evaluate()["510300"]
     second = _evaluate()["510300"]
 
@@ -529,7 +569,10 @@ def test_paired_targets_do_not_bypass_source_candidate_rules() -> None:
     (("TAKE_PROFIT", "buy"), ("BUYBACK", "sell")),
 )
 def test_valid_open_pair_id_is_returned_for_candidate(
-    postgres_url: str, monkeypatch: pytest.MonkeyPatch, candidate: str, first_side: str
+    postgres_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate: str,
+    first_side: str,
 ) -> None:
     store = IntradayStrategyStateStore(postgres_url)
     pair_id = f"open-{candidate.lower()}"
@@ -580,7 +623,8 @@ def test_invalid_pair_provenance_or_status_blocks_pair_id(
     assert "trade_pair_id" not in signal
     _assert_blocked(
         result,
-        "paired intent does not match an open persisted pair with eligible fills",
+        "paired intent does not match an open persisted pair "
+        "with eligible fills",
     )
 
 
@@ -597,11 +641,14 @@ def test_missing_or_unknown_pair_id_fails_closed(
     assert "trade_pair_id" not in signal
     _assert_blocked(
         result,
-        "paired intent does not match an open persisted pair with eligible fills",
+        "paired intent does not match an open persisted pair "
+        "with eligible fills",
     )
 
 
-def test_evaluation_requires_existing_persistent_state(postgres_url: str) -> None:
+def test_evaluation_requires_existing_persistent_state(
+    postgres_url: str,
+) -> None:
     store = IntradayStrategyStateStore(postgres_url)
     result = _evaluate(state_store=store)["510300"]
 

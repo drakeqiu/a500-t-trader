@@ -47,7 +47,9 @@ def _galaxy_csv(*rows: str) -> bytes:
     ).encode("gb18030")
 
 
-def test_trade_import_preview_requires_authentication(postgres_url: str) -> None:
+def test_trade_import_preview_requires_authentication(
+    postgres_url: str,
+) -> None:
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.post(
             "/v1/trade-imports/previews",
@@ -93,7 +95,9 @@ def test_trade_import_preview_is_owner_scoped_and_does_not_write_fills(
     assert all("PRIVATE-ACCOUNT" not in records for _, records in batch)
 
 
-def test_trade_import_preview_sanitizes_validation_errors(postgres_url: str) -> None:
+def test_trade_import_preview_sanitizes_validation_errors(
+    postgres_url: str,
+) -> None:
     content = _galaxy_csv("1001").replace(b",8000,1.264,", b",0,1.264,")
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.post(
@@ -115,13 +119,19 @@ def test_trade_import_preview_rejects_large_upload_and_unsupported_header(
         oversized = client.post(
             "/v1/trade-imports/previews",
             headers=headers,
-            files={"file": ("fills.csv", b"x" * (5 * 1024 * 1024 + 1), "text/csv")},
+            files={
+                "file": ("fills.csv", b"x" * (5 * 1024 * 1024 + 1), "text/csv")
+            },
         )
         unsupported = client.post(
             "/v1/trade-imports/previews",
             headers=headers,
             files={
-                "file": ("fills.csv", b"account,password\nsecret,hidden\n", "text/csv")
+                "file": (
+                    "fills.csv",
+                    b"account,password\nsecret,hidden\n",
+                    "text/csv",
+                )
             },
         )
     assert oversized.status_code == 413
@@ -208,7 +218,8 @@ def test_trade_import_expired_unconfirmed_batch_cannot_be_queried_or_confirmed(
         url = f"/v1/trade-imports/previews/{preview['batch_id']}"
         with psycopg.connect(database) as db:
             db.execute(
-                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=%s",
+                "UPDATE trade_import_batches SET expires_at=0 "
+                "WHERE batch_id=%s",
                 (preview["batch_id"],),
             )
         assert client.get(url, headers=alice).status_code == 404
@@ -254,7 +265,10 @@ def test_account_nav_returns_exact_cash_for_zero_holdings_without_quotes(
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["nav"] == "125.5000"
-    assert response.json()["classification"] == "user-entered; not broker-verified"
+    assert (
+        response.json()["classification"]
+        == "user-entered; not broker-verified"
+    )
     assert response.json()["holdings"] == []
     assert response.headers["cache-control"] == "no-store"
 
@@ -380,7 +394,9 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
                 symbol=symbol,
                 timestamp=timestamp,
                 received_at=now,
-                last_price=(None if self.failure == "no_price" else Decimal("2.00")),
+                last_price=(
+                    None if self.failure == "no_price" else Decimal("2.00")
+                ),
             )
 
     for failure in ("missing", "no_price", "unavailable", "stale", "future"):
@@ -394,7 +410,8 @@ def test_account_nav_rejects_any_missing_unavailable_stale_or_future_quote(
             )
         ) as client:
             response = client.get(
-                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+                "/v1/account-nav",
+                headers={"Authorization": "Bearer alice-token"},
             )
         assert response.status_code == 200
         assert response.json()["status"] == "unavailable"
@@ -590,7 +607,8 @@ def test_account_nav_marks_stale_or_future_snapshot_unavailable(
                 },
             )
             response = client.get(
-                "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+                "/v1/account-nav",
+                headers={"Authorization": "Bearer alice-token"},
             )
             assert response.status_code == 200
             assert response.json()["status"] == "unavailable"
@@ -613,11 +631,18 @@ def test_account_nav_read_does_not_change_snapshot_or_history(
     store.save_snapshot("alice", snapshot)
     before = store.get_snapshot("alice"), store.history_for_subject("alice")
     with TestClient(create_app(database, TestAuthenticator())) as client:
-        client.get("/v1/account-nav", headers={"Authorization": "Bearer alice-token"})
-    assert (store.get_snapshot("alice"), store.history_for_subject("alice")) == before
+        client.get(
+            "/v1/account-nav", headers={"Authorization": "Bearer alice-token"}
+        )
+    assert (
+        store.get_snapshot("alice"),
+        store.history_for_subject("alice"),
+    ) == before
 
 
-def test_account_nav_zero_holdings_requires_no_quotes(postgres_url: str) -> None:
+def test_account_nav_zero_holdings_requires_no_quotes(
+    postgres_url: str,
+) -> None:
     from datetime import UTC, datetime
 
     from a500_t_trader.market_data import MarketDataService
@@ -669,11 +694,13 @@ def test_trade_import_expired_confirmed_batch_retains_result_without_records(
         confirmed = client.post(confirm_url, headers=alice)
         with psycopg.connect(database) as db:
             records = db.execute(
-                "SELECT records_json FROM trade_import_batches WHERE batch_id=%s",
+                "SELECT records_json FROM trade_import_batches "
+                "WHERE batch_id=%s",
                 (batch_id,),
             ).fetchone()
             db.execute(
-                "UPDATE trade_import_batches SET expires_at=0 WHERE batch_id=%s",
+                "UPDATE trade_import_batches SET expires_at=0 "
+                "WHERE batch_id=%s",
                 (batch_id,),
             )
 
@@ -708,12 +735,15 @@ def test_trade_import_confirmation_rejects_validation_error_preview(
     assert AccountLedger(database).imported_fills() == []
 
 
-def test_account_snapshot_requires_bearer_credentials(postgres_url: str) -> None:
+def test_account_snapshot_requires_bearer_credentials(
+    postgres_url: str,
+) -> None:
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         assert client.get("/v1/account-snapshot").status_code == 401
         assert (
             client.get(
-                "/v1/account-snapshot", headers={"Authorization": "Bearer invalid"}
+                "/v1/account-snapshot",
+                headers={"Authorization": "Bearer invalid"},
             ).status_code
             == 401
         )
@@ -739,9 +769,14 @@ def test_account_snapshot_is_private_and_reports_user_entered_status(
         assert response.json()["as_of"] == SNAPSHOT["as_of"]
         assert response.json()["holdings"] == {"510300": 100}
         assert response.json()["updated_at"]
-        assert response.json()["classification"] == "user-entered; not broker-verified"
+        assert (
+            response.json()["classification"]
+            == "user-entered; not broker-verified"
+        )
         assert response.headers["etag"]
-        assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
+        assert (
+            client.get("/v1/account-snapshot", headers=bob).status_code == 404
+        )
 
 
 def test_account_snapshot_returns_404_when_no_snapshot_exists(
@@ -772,16 +807,21 @@ def test_account_snapshot_storage_is_isolated_by_database_schema(
     postgres_url: str, postgres_url_other: str
 ) -> None:
     AccountSnapshotStore(postgres_url).save_snapshot("alice", SNAPSHOT)
-    with TestClient(create_app(postgres_url_other, TestAuthenticator())) as client:
+    with TestClient(
+        create_app(postgres_url_other, TestAuthenticator())
+    ) as client:
         assert (
             client.get(
-                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+                "/v1/account-snapshot",
+                headers={"Authorization": "Bearer alice-token"},
             ).status_code
             == 404
         )
 
 
-def test_put_requires_create_precondition_and_returns_etag(postgres_url: str) -> None:
+def test_put_requires_create_precondition_and_returns_etag(
+    postgres_url: str,
+) -> None:
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         headers = {"Authorization": "Bearer alice-token"}
         assert (
@@ -849,7 +889,10 @@ def test_put_requires_matching_etag_and_keeps_successful_history(
             == 412
         )
         history = store.history_for_subject("alice")
-        assert [record["snapshot"] for record in history] == [SNAPSHOT, changed]
+        assert [record["snapshot"] for record in history] == [
+            SNAPSHOT,
+            changed,
+        ]
         assert all(
             record["classification"] == "user-entered; not broker-verified"
             for record in history
@@ -857,7 +900,7 @@ def test_put_requires_matching_etag_and_keeps_successful_history(
         assert all(record["updated_at"] for record in history)
 
 
-def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
+def test_put_empty_holdings_and_missing_match_precondition_failure(
     postgres_url: str,
 ) -> None:
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
@@ -885,7 +928,10 @@ def test_put_empty_holdings_are_valid_and_missing_match_is_precondition_failure(
         )
         assert created.status_code == 201
         assert created.json()["holdings"] == {}
-        assert client.delete("/v1/account-snapshot", headers=headers).status_code == 405
+        assert (
+            client.delete("/v1/account-snapshot", headers=headers).status_code
+            == 405
+        )
 
 
 def test_put_rejects_invalid_json_with_problem_400(postgres_url: str) -> None:
@@ -908,7 +954,9 @@ def test_put_rejects_invalid_json_with_problem_400(postgres_url: str) -> None:
             assert response.json()["errors"][0]["code"] == "invalid_json"
 
 
-def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
+def test_put_rejects_invalid_contract_as_problem_422(
+    postgres_url: str,
+) -> None:
     database = postgres_url
     store = AccountSnapshotStore(database)
     with TestClient(create_app(database, TestAuthenticator())) as client:
@@ -932,7 +980,11 @@ def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
                 "available_cash",
                 "missing_field",
             ),
-            ({**SNAPSHOT, "available_cash": None}, "available_cash", "invalid_type"),
+            (
+                {**SNAPSHOT, "available_cash": None},
+                "available_cash",
+                "invalid_type",
+            ),
             (
                 {**SNAPSHOT, "as_of": "2026-11-04 09:30:00+08:00"},
                 "as_of",
@@ -969,7 +1021,11 @@ def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
                 "sellable.510300",
                 "quantity_inconsistent",
             ),
-            ({**SNAPSHOT, "sellable": {}}, "sellable.510300", "quantity_key_mismatch"),
+            (
+                {**SNAPSHOT, "sellable": {}},
+                "sellable.510300",
+                "quantity_key_mismatch",
+            ),
             ({**SNAPSHOT, "cost_basis": []}, "cost_basis", "invalid_type"),
             (
                 {**SNAPSHOT, "cost_basis": {"510300": None}},
@@ -981,8 +1037,16 @@ def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
                 "cost_basis.510300",
                 "invalid_decimal",
             ),
-            ({**SNAPSHOT, "available_cash": "-1"}, "available_cash", "invalid_decimal"),
-            ({**SNAPSHOT, "available_cash": " 1"}, "available_cash", "invalid_decimal"),
+            (
+                {**SNAPSHOT, "available_cash": "-1"},
+                "available_cash",
+                "invalid_decimal",
+            ),
+            (
+                {**SNAPSHOT, "available_cash": " 1"},
+                "available_cash",
+                "invalid_decimal",
+            ),
             (
                 {**SNAPSHOT, "cost_basis": {"510301": "3.85"}},
                 "cost_basis.510301",
@@ -1011,7 +1075,8 @@ def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
             assert response.json()["errors"][0]["code"] == code
         assert (
             client.get(
-                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+                "/v1/account-snapshot",
+                headers={"Authorization": "Bearer alice-token"},
             ).status_code
             == 404
         )
@@ -1030,7 +1095,8 @@ def test_put_rejects_invalid_contract_as_problem_422(postgres_url: str) -> None:
         assert invalid_update.status_code == 422
         assert (
             client.get(
-                "/v1/account-snapshot", headers={"Authorization": "Bearer alice-token"}
+                "/v1/account-snapshot",
+                headers={"Authorization": "Bearer alice-token"},
             ).json()["holdings"]
             == SNAPSHOT["holdings"]
         )
@@ -1052,21 +1118,32 @@ def test_put_accepts_backdated_rfc3339_and_normalizes_symbols(
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,
-            headers={"Authorization": "Bearer alice-token", "If-None-Match": "*"},
+            headers={
+                "Authorization": "Bearer alice-token",
+                "If-None-Match": "*",
+            },
         )
     assert response.status_code == 201
     assert response.json()["as_of"] == snapshot["as_of"]
     assert response.json()["holdings"] == {"510300": 100}
-    assert response.json()["classification"] == "user-entered; not broker-verified"
+    assert (
+        response.json()["classification"]
+        == "user-entered; not broker-verified"
+    )
 
 
-def test_put_accepts_rfc3339_leap_second_through_api(postgres_url: str) -> None:
+def test_put_accepts_rfc3339_leap_second_through_api(
+    postgres_url: str,
+) -> None:
     snapshot = {**SNAPSHOT, "as_of": "2016-12-31T23:59:60Z"}
     with TestClient(create_app(postgres_url, TestAuthenticator())) as client:
         response = client.put(
             "/v1/account-snapshot",
             json=snapshot,
-            headers={"Authorization": "Bearer alice-token", "If-None-Match": "*"},
+            headers={
+                "Authorization": "Bearer alice-token",
+                "If-None-Match": "*",
+            },
         )
     assert response.status_code == 201
     assert response.json()["as_of"] == snapshot["as_of"]

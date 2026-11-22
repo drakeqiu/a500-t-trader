@@ -38,7 +38,8 @@ def _shanghai_time(value: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
-    """Point-in-time quote; prices are CNY per share, volume shares, amount CNY."""
+    """Point-in-time quote; prices are CNY per share, volume shares,
+    amount CNY."""
 
     symbol: str
     timestamp: datetime
@@ -60,7 +61,9 @@ class Snapshot:
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", normalize_symbol(self.symbol))
         object.__setattr__(self, "timestamp", _shanghai_time(self.timestamp))
-        object.__setattr__(self, "received_at", _shanghai_time(self.received_at))
+        object.__setattr__(
+            self, "received_at", _shanghai_time(self.received_at)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +110,8 @@ class DailyBar:
 
 @dataclass(frozen=True, slots=True)
 class Trade:
-    """One source-reported execution; quantity is shares, monetary values CNY."""
+    """One source-reported execution; quantity is shares, monetary values
+    CNY."""
 
     symbol: str
     timestamp: datetime
@@ -127,7 +131,8 @@ class CapabilityUnavailableError(RuntimeError):
 
 
 class MarketDataSource(Protocol):
-    """Replaceable query source; implementations expose no vendor types here."""
+    """Replaceable query source; implementations expose no vendor types
+    here."""
 
     def get_snapshot(self, symbol: str) -> Snapshot | None: ...
 
@@ -161,7 +166,9 @@ class MarketDataService:
     ) -> None:
         self._source = source
         self._default_symbol = normalize_symbol(default_symbol)
-        self._calendar = calendar if calendar is not None else TradingCalendarService()
+        self._calendar = (
+            calendar if calendar is not None else TradingCalendarService()
+        )
 
     def get_snapshot(self, symbol: str | None = None) -> Snapshot | None:
         return self._source.get_snapshot(self._symbol(symbol))
@@ -171,7 +178,9 @@ class MarketDataService:
     ) -> tuple[MinuteBar, ...]:
         if interval_minutes not in (1, 5):
             raise ValueError("interval_minutes must be 1 or 5")
-        return self._source.get_intraday_bars(self._symbol(symbol), interval_minutes)
+        return self._source.get_intraday_bars(
+            self._symbol(symbol), interval_minutes
+        )
 
     def get_daily_history(
         self, symbol: str | None, start_date: date, end_date: date
@@ -180,7 +189,9 @@ class MarketDataService:
             raise ValueError("start_date must be on or before end_date")
         query = getattr(self._source, "get_daily_history", None)
         if query is None:
-            raise CapabilityUnavailableError("daily-history capability is unavailable")
+            raise CapabilityUnavailableError(
+                "daily-history capability is unavailable"
+            )
         return tuple(query(self._symbol(symbol), start_date, end_date))
 
     def get_history_bars(
@@ -207,4 +218,8 @@ class MarketDataService:
         return self._calendar.session_status(session_date)
 
     def _symbol(self, symbol: str | None) -> str:
-        return self._default_symbol if symbol is None else normalize_symbol(symbol)
+        return (
+            self._default_symbol
+            if symbol is None
+            else normalize_symbol(symbol)
+        )

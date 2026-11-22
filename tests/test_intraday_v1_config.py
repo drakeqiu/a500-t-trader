@@ -38,7 +38,10 @@ def _complete_config() -> dict[str, Any]:
                 "max_daily_fills": "8",
             },
             "liquidity": {"minimum_amount": "30000000"},
-            "timing": {"bar_interval_minutes": 5, "max_input_age_seconds": 7200},
+            "timing": {
+                "bar_interval_minutes": 5,
+                "max_input_age_seconds": 7200,
+            },
         },
         "certification": {
             "net_return_minimum": "0",
@@ -103,7 +106,8 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
     assert config.strategy_id == "intraday-etf-t-v1-rsi"
     assert config.rule_version == "V1.0"
     assert config.rule_source == (
-        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
+        "docs/strategy/intraday-etf-t-v1/"
+        "intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         config.rule_source_sha256
@@ -120,7 +124,9 @@ def test_loads_explicit_v1_configuration_with_auditable_fingerprint(
 def test_live_yaml_requires_full_score_threshold_above_start(
     tmp_path: Path, start: str, full: str
 ) -> None:
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     path = tmp_path / "signals.yaml"
     path.write_text(
@@ -136,15 +142,23 @@ def test_live_yaml_requires_full_score_threshold_above_start(
         load_live_signal_config(path)
 
 
-def test_missing_configuration_is_reported_by_exact_field_path(tmp_path: Path) -> None:
+def test_missing_configuration_is_reported_by_exact_field_path(
+    tmp_path: Path,
+) -> None:
     document = _complete_config()
     del document["fees"]
 
-    with pytest.raises(ValueError, match="missing required configuration: fees"):
-        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+    with pytest.raises(
+        ValueError, match="missing required configuration: fees"
+    ):
+        load_intraday_v1_config(
+            _write_config(tmp_path / "rules.json", document)
+        )
 
 
-def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -> None:
+def test_no_fee_example_or_security_category_inference_is_used(
+    tmp_path: Path,
+) -> None:
     document = _complete_config()
     fees = document["fees"]
     securities = document["securities"]
@@ -156,15 +170,23 @@ def test_no_fee_example_or_security_category_inference_is_used(tmp_path: Path) -
     del security["t_plus"]
 
     with pytest.raises(ValueError, match="fees.minimum_commission"):
-        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+        load_intraday_v1_config(
+            _write_config(tmp_path / "rules.json", document)
+        )
 
 
-def test_security_price_bands_are_explicit_configuration(tmp_path: Path) -> None:
+def test_security_price_bands_are_explicit_configuration(
+    tmp_path: Path,
+) -> None:
     document = _complete_config()
     del document["securities"]["510300"]["upper_price_limit"]
 
-    with pytest.raises(ValueError, match="securities.510300.upper_price_limit"):
-        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+    with pytest.raises(
+        ValueError, match="securities.510300.upper_price_limit"
+    ):
+        load_intraday_v1_config(
+            _write_config(tmp_path / "rules.json", document)
+        )
 
 
 def test_v1_rule_source_is_versioned_with_its_auditable_sha256() -> None:
@@ -187,7 +209,9 @@ def test_rule_source_must_have_verifiable_sha256(tmp_path: Path) -> None:
     document["rule_source_sha256"] = "unversioned"
 
     with pytest.raises(ValueError, match="rule_source_sha256"):
-        load_intraday_v1_config(_write_config(tmp_path / "rules.json", document))
+        load_intraday_v1_config(
+            _write_config(tmp_path / "rules.json", document)
+        )
 
 
 def test_legacy_schema_is_rejected_without_migration(tmp_path: Path) -> None:
@@ -195,7 +219,9 @@ def test_legacy_schema_is_rejected_without_migration(tmp_path: Path) -> None:
     del document["schema_version"]
 
     with pytest.raises(ValueError, match="schema_version"):
-        load_intraday_v1_config(_write_config(tmp_path / "legacy.json", document))
+        load_intraday_v1_config(
+            _write_config(tmp_path / "legacy.json", document)
+        )
 
 
 def test_unsupported_major_schema_is_rejected(tmp_path: Path) -> None:
@@ -203,7 +229,9 @@ def test_unsupported_major_schema_is_rejected(tmp_path: Path) -> None:
     document["schema_version"] = "1.0"
 
     with pytest.raises(ValueError, match="unsupported schema_version"):
-        load_intraday_v1_config(_write_config(tmp_path / "old-major.json", document))
+        load_intraday_v1_config(
+            _write_config(tmp_path / "old-major.json", document)
+        )
 
 
 @pytest.mark.parametrize(
@@ -221,16 +249,22 @@ def test_ruleset_identity_mismatches_fail_closed(
     document[field] = value
 
     with pytest.raises(ValueError, match=reason):
-        load_intraday_v1_config(_write_config(tmp_path / "mismatch.json", document))
+        load_intraday_v1_config(
+            _write_config(tmp_path / "mismatch.json", document)
+        )
 
 
-def test_fingerprint_changes_when_any_strategy_input_changes(tmp_path: Path) -> None:
+def test_fingerprint_changes_when_any_strategy_input_changes(
+    tmp_path: Path,
+) -> None:
     first = load_intraday_v1_config(
         _write_config(tmp_path / "first.json", _complete_config())
     )
     changed = _complete_config()
     changed["parameters"]["signals"]["buy_threshold"] = 73
-    second = load_intraday_v1_config(_write_config(tmp_path / "second.json", changed))
+    second = load_intraday_v1_config(
+        _write_config(tmp_path / "second.json", changed)
+    )
 
     assert first.fingerprint != second.fingerprint
 
@@ -249,7 +283,8 @@ def test_cli_validates_and_reports_auditable_configuration(
     assert output["rule_version"] == "V1.0"
     assert output["implementation_version"] == "commit:abc123"
     assert output["rule_source"] == (
-        "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
+        "docs/strategy/intraday-etf-t-v1/"
+        "intraday_etf_t_quantitative_strategy_v1.0.md"
     )
     assert (
         output["rule_source_sha256"]

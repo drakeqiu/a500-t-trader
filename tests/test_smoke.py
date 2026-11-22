@@ -4,7 +4,9 @@ import subprocess
 import sys
 
 
-def test_module_entry_point_exposes_premarket_and_monitoring_workflows() -> None:
+def test_module_entry_point_exposes_premarket_and_monitoring_workflows() -> (
+    None
+):
     result = subprocess.run(
         [sys.executable, "-m", "a500_t_trader", "--help"],
         check=False,

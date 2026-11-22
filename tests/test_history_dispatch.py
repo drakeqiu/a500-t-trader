@@ -53,10 +53,13 @@ def test_confirmed_dispatch_marks_outbox_published(postgres_url: str) -> None:
         ("queue", HISTORY_QUEUE),
         ("binding", HISTORY_EXCHANGE),
     ]
-    assert channel.messages == [(HISTORY_EXCHANGE, "job", {"job_id": job["id"]})]
+    assert channel.messages == [
+        (HISTORY_EXCHANGE, "job", {"job_id": job["id"]})
+    ]
     with psycopg.connect(postgres_url) as db:
         row = db.execute(
-            "SELECT published_at, attempts, last_error FROM daily_history_job_outbox "
+            "SELECT published_at, attempts, last_error "
+            "FROM daily_history_job_outbox "
             "WHERE job_id=%s",
             (job["id"],),
         ).fetchone()
@@ -90,7 +93,9 @@ def test_failed_outbox_insert_rolls_back_task(postgres_url: str) -> None:
     assert result is not None and result[0] == 0
 
 
-def test_failed_dispatch_remains_pending_and_backlog_visible(postgres_url: str) -> None:
+def test_failed_dispatch_remains_pending_and_backlog_visible(
+    postgres_url: str,
+) -> None:
     repository = JobRepository(postgres_url)
     job = repository.create("alice", "563360", "2020-01-01", "2020-12-31")
 
@@ -156,8 +161,12 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     repository = JobRepository(postgres_url)
 
     notified = repository.create("alice", "563360", "2020-01-01", "2020-12-31")
-    second_notified = repository.create("alice", "563362", "2020-01-01", "2020-12-31")
-    unrelated = repository.create("alice", "563361", "2020-01-01", "2020-12-31")
+    second_notified = repository.create(
+        "alice", "563362", "2020-01-01", "2020-12-31"
+    )
+    unrelated = repository.create(
+        "alice", "563361", "2020-01-01", "2020-12-31"
+    )
 
     factory_calls = 0
 
@@ -175,7 +184,9 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     class Connection:
         is_open = True
 
-        def add_callback_threadsafe(self, callback: Callable[[], None]) -> None:
+        def add_callback_threadsafe(
+            self, callback: Callable[[], None]
+        ) -> None:
             callback()
 
     class Channel:
@@ -252,7 +263,8 @@ def test_consumer_processes_only_notified_job_and_acks_duplicate(
     assert factory_calls == 1
     with psycopg.connect(postgres_url) as db:
         statuses = db.execute(
-            "SELECT id, status FROM daily_history_jobs WHERE id IN (%s, %s, %s)",
+            "SELECT id, status FROM daily_history_jobs "
+            "WHERE id IN (%s, %s, %s)",
             (notified["id"], second_notified["id"], unrelated["id"]),
         ).fetchall()
 
@@ -317,7 +329,8 @@ def test_consumer_requeues_queued_job_when_claim_is_locked(
     consumer = HistoryConsumer(repository, channel=channel)
     with psycopg.connect(postgres_url) as db:
         db.execute(
-            "SELECT id FROM daily_history_jobs WHERE id=%s FOR SHARE", (job["id"],)
+            "SELECT id FROM daily_history_jobs WHERE id=%s FOR SHARE",
+            (job["id"],),
         )
         consumer._on_message(
             channel,
@@ -345,7 +358,9 @@ def test_running_job_without_lease_is_recovered_as_legacy_state(
             (job["id"],),
         )
 
-    assert job["id"] in [str(identifier) for identifier in repository.expired_job_ids()]
+    assert job["id"] in [
+        str(identifier) for identifier in repository.expired_job_ids()
+    ]
     recovered = repository.claim(job["id"])
     assert recovered is not None
     assert recovered["lease_token"] != first_lease["lease_token"]

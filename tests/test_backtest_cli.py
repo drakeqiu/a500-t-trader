@@ -18,13 +18,19 @@ class HistoricalData:
         self.request: tuple[str, date, date, int] | None = None
 
     def get_history_bars(
-        self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int,
     ) -> tuple[MinuteBar, ...]:
         self.request = (symbol, start_date, end_date, interval_minutes)
         return self.bars
 
 
-def bar(day: int, minute: int, price: str, *, completed: bool = True) -> MinuteBar:
+def bar(
+    day: int, minute: int, price: str, *, completed: bool = True
+) -> MinuteBar:
 
     value = Decimal(price)
     return MinuteBar(
@@ -99,16 +105,31 @@ def test_backtest_cli_records_snapshot_constraints_baseline_and_assumptions(
     assert '"baseline"' in output and '"strategy"' in output
     assert '"snapshot_id"' in output
     assert '"simulated_fills"' in output
-    assert data.request == ("510300", date(2026, 10, 30), date(2026, 10, 31), 1)
+    assert data.request == (
+        "510300",
+        date(2026, 10, 30),
+        date(2026, 10, 31),
+        1,
+    )
     result = json.loads(output)
     assert result["minimum_commission"] == "0.1"
-    sells = [fill for fill in result["simulated_fills"] if fill["side"] == "sell"]
+    sells = [
+        fill for fill in result["simulated_fills"] if fill["side"] == "sell"
+    ]
     assert [fill["quantity"] for fill in sells] == [1000, 1000]
     assert result["initial_account_snapshot"]["sellable"]["510300"] == 1000
-    assert result["initial_account_snapshot"]["as_of"] == "2026-10-29T15:00:00+08:00"
+    assert (
+        result["initial_account_snapshot"]["as_of"]
+        == "2026-10-29T15:00:00+08:00"
+    )
     assert result["final_holdings"] == 100
-    assert result["simulated_fills"][0]["status"] == "simulated; not an actual trade"
-    assert result["strategy"]["final_value"] != result["baseline"]["final_value"]
+    assert (
+        result["simulated_fills"][0]["status"]
+        == "simulated; not an actual trade"
+    )
+    assert (
+        result["strategy"]["final_value"] != result["baseline"]["final_value"]
+    )
 
 
 def test_backtest_reuses_exactly_covered_shared_history(
@@ -147,9 +168,15 @@ def test_backtest_reuses_exactly_covered_shared_history(
 
     class UnavailableData:
         def get_history_bars(
-            self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+            self,
+            symbol: str,
+            start_date: date,
+            end_date: date,
+            interval_minutes: int,
         ) -> tuple[MinuteBar, ...]:
-            raise AssertionError("cached history should satisfy the exact request")
+            raise AssertionError(
+                "cached history should satisfy the exact request"
+            )
 
     assert main(args, market_data=UnavailableData()) == 0
     assert json.loads(capsys.readouterr().out)["snapshot_id"]
@@ -173,12 +200,18 @@ def test_backtest_cli_reports_unavailable_minute_history_without_fabricating(
 
     class Unavailable:
         def get_history_bars(
-            self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+            self,
+            symbol: str,
+            start_date: date,
+            end_date: date,
+            interval_minutes: int,
         ) -> tuple[MinuteBar, ...]:
 
             from a500_t_trader.market_data import CapabilityUnavailableError
 
-            raise CapabilityUnavailableError("minute history permission missing")
+            raise CapabilityUnavailableError(
+                "minute history permission missing"
+            )
 
     args = [
         "backtest",
@@ -230,7 +263,10 @@ def test_cleanup_preserves_backtest_referenced_minute_snapshot(
     ]
     assert main(args, market_data=data) == 0
     run = json.loads(capsys.readouterr().out)
-    assert main(["history-cleanup", "--database", postgres_url], market_data=data) == 0
+    assert (
+        main(["history-cleanup", "--database", postgres_url], market_data=data)
+        == 0
+    )
     assert '"deleted_shared_bars": 2' in capsys.readouterr().out
     assert (
         main(

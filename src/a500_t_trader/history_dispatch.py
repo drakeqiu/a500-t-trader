@@ -22,7 +22,9 @@ HISTORY_QUEUE = "daily-history.worker"
 class HistoryPublisher:
     """Publisher for durable daily-history dispatch messages."""
 
-    def __init__(self, *, url: str | None = None, channel: Any | None = None) -> None:
+    def __init__(
+        self, *, url: str | None = None, channel: Any | None = None
+    ) -> None:
         self._connection: Any | None = None
         self._properties: Any | None = None
         if channel is None:
@@ -31,12 +33,15 @@ class HistoryPublisher:
             rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
                 raise ValueError("RABBITMQ_URL is required")
-            self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
+            self._connection = pika.BlockingConnection(
+                pika.URLParameters(rabbit_url)
+            )
             channel = self._connection.channel()
             self._properties = pika.BasicProperties(
                 content_type="application/json", delivery_mode=2
             )
-        self._channel = channel
+        assert channel is not None
+        self._channel: Any = channel
         channel.exchange_declare(
             exchange=HISTORY_EXCHANGE, exchange_type="direct", durable=True
         )
@@ -52,9 +57,13 @@ class HistoryPublisher:
         confirmed = self._channel.basic_publish(
             exchange=HISTORY_EXCHANGE,
             routing_key="job",
-            body=json.dumps({"job_id": job_id}, separators=(",", ":")).encode(),
+            body=json.dumps(
+                {"job_id": job_id}, separators=(",", ":")
+            ).encode(),
             properties=self._properties
-            or pika.BasicProperties(content_type="application/json", delivery_mode=2),
+            or pika.BasicProperties(
+                content_type="application/json", delivery_mode=2
+            ),
             mandatory=True,
         )
         if confirmed is False:
@@ -91,8 +100,11 @@ class HistoryConsumer:
             rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
                 raise ValueError("RABBITMQ_URL is required")
-            self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
+            self._connection = pika.BlockingConnection(
+                pika.URLParameters(rabbit_url)
+            )
             channel = self._connection.channel()
+        assert channel is not None
         self._channel = channel
         channel.exchange_declare(
             exchange=HISTORY_EXCHANGE, exchange_type="direct", durable=True
@@ -127,7 +139,9 @@ class HistoryConsumer:
                 raise ValueError("job_id must be a string")
             job_id = str(uuid.UUID(job_id))
         except ValueError, TypeError, KeyError, json.JSONDecodeError:
-            channel.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
+            channel.basic_reject(
+                delivery_tag=method.delivery_tag, requeue=False
+            )
             return
 
         delivery_tag = method.delivery_tag
@@ -141,12 +155,17 @@ class HistoryConsumer:
                 _LOG.info("History processing started job_id=%s", job_id)
                 claimed = self._process(job_id)
                 _LOG.info(
-                    "History processing finished job_id=%s claimed=%s elapsed_ms=%d",
+                    (
+                        "History processing finished job_id=%s claimed=%s "
+                        "elapsed_ms=%d"
+                    ),
                     job_id,
                     claimed,
                     int((time.monotonic() - started) * 1000),
                 )
-                queued = not claimed and self.repository.status(job_id) == "queued"
+                queued = (
+                    not claimed and self.repository.status(job_id) == "queued"
+                )
                 ack = not queued
             except Exception as error:
                 _LOG.error(
@@ -166,7 +185,9 @@ class HistoryConsumer:
                     return
                 if ack:
                     channel.basic_ack(delivery_tag=delivery_tag)
-                    _LOG.info("History delivery acknowledged job_id=%s", job_id)
+                    _LOG.info(
+                        "History delivery acknowledged job_id=%s", job_id
+                    )
                 else:
                     channel.basic_nack(delivery_tag=delivery_tag, requeue=True)
                     _LOG.info("History delivery requeued job_id=%s", job_id)
@@ -176,7 +197,10 @@ class HistoryConsumer:
                 _LOG.debug("History settlement scheduled job_id=%s", job_id)
             else:
                 _LOG.warning(
-                    "History settlement unavailable: connection closed job_id=%s",
+                    (
+                        "History settlement unavailable: connection closed "
+                        "job_id=%s"
+                    ),
                     job_id,
                 )
 
@@ -221,8 +245,9 @@ class HistoryConsumer:
             on_message_callback=self._on_message,
             auto_ack=False,
         )
-        # 补偿已确认投递后 worker 崩溃的任务；只扫描租约已过期的运行任务。
-        self._channel.connection.call_later(30, self._recover_expired)
+        connection = self._channel.connection
+        assert connection is not None
+        connection.call_later(30, self._recover_expired)
         self._channel.start_consuming()
 
 
@@ -245,7 +270,9 @@ def publisher_main() -> None:
             if count == 0:
                 time.sleep(2)
         except Exception:
-            _LOG.exception("History dispatch failed; outbox entries remain retryable")
+            _LOG.exception(
+                "History dispatch failed; outbox entries remain retryable"
+            )
             time.sleep(2)
         finally:
             if publisher is not None:

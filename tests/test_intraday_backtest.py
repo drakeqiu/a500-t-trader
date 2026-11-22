@@ -21,7 +21,9 @@ TZ = ZoneInfo("Asia/Shanghai")
 
 
 def test_ohlcv_spread_proxy_uses_half_of_prior_completed_bar_range() -> None:
-    from a500_t_trader.backtest.issue85_replay import _ohlcv_spread_proxy_eligible
+    from a500_t_trader.backtest.issue85_replay import (
+        _ohlcv_spread_proxy_eligible,
+    )
 
     tight = MinuteBar(
         "510300",
@@ -45,9 +47,15 @@ def test_ohlcv_spread_proxy_uses_half_of_prior_completed_bar_range() -> None:
     )
 
     assert _ohlcv_spread_proxy_eligible(tight, Decimal("10"), Decimal("0.001"))
-    assert not _ohlcv_spread_proxy_eligible(wide, Decimal("10"), Decimal("0.001"))
-    assert not _ohlcv_spread_proxy_eligible(None, Decimal("10"), Decimal("0.001"))
-    assert not _ohlcv_spread_proxy_eligible(tight, Decimal("0"), Decimal("0.001"))
+    assert not _ohlcv_spread_proxy_eligible(
+        wide, Decimal("10"), Decimal("0.001")
+    )
+    assert not _ohlcv_spread_proxy_eligible(
+        None, Decimal("10"), Decimal("0.001")
+    )
+    assert not _ohlcv_spread_proxy_eligible(
+        tight, Decimal("0"), Decimal("0.001")
+    )
 
     incomplete = MinuteBar(
         "510300",
@@ -60,7 +68,9 @@ def test_ohlcv_spread_proxy_uses_half_of_prior_completed_bar_range() -> None:
         tight.volume,
         is_completed=False,
     )
-    assert not _ohlcv_spread_proxy_eligible(incomplete, Decimal("10"), Decimal("0.001"))
+    assert not _ohlcv_spread_proxy_eligible(
+        incomplete, Decimal("10"), Decimal("0.001")
+    )
 
 
 def bar(day: int, minute: int, price: str, volume: int = 1000) -> MinuteBar:
@@ -90,20 +100,27 @@ def account() -> AccountSnapshot:
 def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
     class Provider:
         observed: list[
-            tuple[datetime, object, tuple[MinuteBar, ...], Mapping[str, object]]
+            tuple[
+                datetime, object, tuple[MinuteBar, ...], Mapping[str, object]
+            ]
         ] = []
 
         def signals_at(
             self,
             symbol: str,
-            history: tuple[MinuteBar, ...],
-            state: Mapping[str, object],
+            bars: tuple[MinuteBar, ...],
+            account_state: Mapping[str, object],
         ) -> tuple[BarSignal, ...]:
             self.observed.append(
-                (history[-1].timestamp, state["holdings"], history, dict(state))
+                (
+                    bars[-1].timestamp,
+                    account_state["holdings"],
+                    bars,
+                    dict(account_state),
+                )
             )
-            if len(history) == 1:
-                return (BarSignal(history[-1].timestamp, "buy", 100),)
+            if len(bars) == 1:
+                return (BarSignal(bars[-1].timestamp, "buy", 100),)
             return ()
 
     bars = (bar(30, 0, "10"), bar(30, 1, "10"), bar(30, 2, "10"))
@@ -118,7 +135,9 @@ def test_event_provider_observes_prior_bar_fills_before_signaling() -> None:
         params=IntradayBacktestParams(participation_rate=Decimal(1)),
     )
 
-    assert [item[0] for item in provider.observed] == [item.timestamp for item in bars]
+    assert [item[0] for item in provider.observed] == [
+        item.timestamp for item in bars
+    ]
     assert [item[1] for item in provider.observed] == [0, 100, 100]
     assert all(item[2][-1].timestamp == item[0] for item in provider.observed)
     first_state = provider.observed[0][3]
@@ -166,7 +185,9 @@ def test_partial_fills_costs_t1_and_hold_baseline() -> None:
         Decimal("0.1"),
     ]
     assert [fill.quantity for fill in result.fills] == [100, 100]
-    assert all(fill.signal_timestamp == bars[0].timestamp for fill in result.fills)
+    assert all(
+        fill.signal_timestamp == bars[0].timestamp for fill in result.fills
+    )
     assert result.final_holdings == 400
     assert result.baseline_final_value == Decimal("12400")
     assert result.snapshot_bar_count == 4
@@ -209,12 +230,21 @@ def test_public_simulation_releases_unfilled_reserve() -> None:
 
     assert [fill.quantity for fill in result.fills] == [100]
     assert result.cancellations[0]["unfilled_quantity"] == 100
-    assert result.cancellations[0]["reserved_cash_released"] == Decimal("1000.0")
+    assert result.cancellations[0]["reserved_cash_released"] == Decimal(
+        "1000.0"
+    )
 
 
 def test_public_simulation_enforces_t_plus_one_for_new_inventory() -> None:
-    bars = (bar(30, 0, "10"), bar(30, 1, "10"), bar(31, 0, "10"), bar(31, 1, "10"))
-    empty_account = AccountSnapshot(account().as_of, {}, {}, {}, Decimal("10000"))
+    bars = (
+        bar(30, 0, "10"),
+        bar(30, 1, "10"),
+        bar(31, 0, "10"),
+        bar(31, 1, "10"),
+    )
+    empty_account = AccountSnapshot(
+        account().as_of, {}, {}, {}, Decimal("10000")
+    )
     result = run_intraday_backtest(
         symbol="510300",
         account=empty_account,
@@ -304,7 +334,9 @@ def test_v1_dynamic_buy_keeps_the_35_percent_nav_cash_reserve() -> None:
         symbol="510300",
         account=starting,
         bars=bars,
-        signals=(BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),),
+        signals=(
+            BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),
+        ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
             dynamic_sizing=True,
@@ -317,7 +349,9 @@ def test_v1_dynamic_buy_keeps_the_35_percent_nav_cash_reserve() -> None:
     assert result.account_states[13]["pending_orders"] == []
 
 
-def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> None:
+def test_v1_dynamic_sizing_uses_risk_capacity_and_reports_each_bar_state() -> (
+    None
+):
     bars = tuple(
         MinuteBar(
             "510300",
@@ -399,7 +433,9 @@ def test_v1_dynamic_buy_rechecks_position_capacity_at_fill_price() -> None:
         symbol="510300",
         account=starting,
         bars=bars,
-        signals=(BarSignal(bars[13].timestamp, "buy", 1_600, spread_eligible=True),),
+        signals=(
+            BarSignal(bars[13].timestamp, "buy", 1_600, spread_eligible=True),
+        ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
             dynamic_sizing=True,
@@ -442,7 +478,9 @@ def test_v1_dynamic_cost_grid_uses_risk_sized_order_not_one_lot() -> None:
         symbol="510300",
         account=starting,
         bars=bars,
-        signals=(BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),),
+        signals=(
+            BarSignal(bars[13].timestamp, "buy", 100, spread_eligible=True),
+        ),
         params=IntradayBacktestParams(
             participation_rate=Decimal(1),
             dynamic_sizing=True,
@@ -485,10 +523,18 @@ def test_v1_pair_ledger_closes_only_paired_buyback_quantity() -> None:
         signals=(
             BarSignal(bars[13].timestamp, "sell", 3_000),
             BarSignal(
-                bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True
+                bars[14].timestamp,
+                "buy",
+                3_000,
+                "buyback",
+                spread_eligible=True,
             ),
             BarSignal(
-                bars[14].timestamp, "buy", 3_000, "buyback", spread_eligible=True
+                bars[14].timestamp,
+                "buy",
+                3_000,
+                "buyback",
+                spread_eligible=True,
             ),
         ),
         params=IntradayBacktestParams(
@@ -621,7 +667,10 @@ def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
     )
     signals = (
         BarSignal(bars[13].timestamp, "sell", 10_000, SignalIntent.RISK_EXIT),
-        *(BarSignal(bars[index].timestamp, "buy", 2_000) for index in range(14, 24)),
+        *(
+            BarSignal(bars[index].timestamp, "buy", 2_000)
+            for index in range(14, 24)
+        ),
     )
     result = run_intraday_backtest(
         symbol="510300",
@@ -637,9 +686,9 @@ def test_v1_daily_turnover_is_enforced_at_fill_time() -> None:
         implementation_version="test-v1",
     )
 
-    assert Decimal(str(result.account_states[24]["daily_turnover"])) <= Decimal(
-        "150000"
-    )
+    assert Decimal(
+        str(result.account_states[24]["daily_turnover"])
+    ) <= Decimal("150000")
 
 
 def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
@@ -670,28 +719,28 @@ def test_v1_dynamic_sizing_does_not_sell_protected_inventory() -> None:
 
 
 def test_public_simulation_accepts_strategy_signal_provider() -> None:
-    bars = (bar(30, 0, "10"), bar(30, 1, "10"))
+    expected_bars = (bar(30, 0, "10"), bar(30, 1, "10"))
 
     class Provider:
         def signals(
-            self, symbol: str, supplied_bars: tuple[MinuteBar, ...]
+            self, symbol: str, bars: tuple[MinuteBar, ...]
         ) -> tuple[BarSignal, ...]:
             assert symbol == "510300"
-            assert supplied_bars == bars
-            return (BarSignal(bars[0].timestamp, "buy", 100),)
+            assert bars == expected_bars
+            return (BarSignal(expected_bars[0].timestamp, "buy", 100),)
 
     result = run_intraday_backtest(
         symbol="510300",
         account=account(),
-        bars=bars,
+        bars=expected_bars,
         signals=Provider(),
         params=IntradayBacktestParams(),
         strategy_parameters={},
         implementation_version="test-v1",
     )
 
-    assert result.fills[0].signal_timestamp == bars[0].timestamp
-    assert result.fills[0].fill_timestamp == bars[1].timestamp
+    assert result.fills[0].signal_timestamp == expected_bars[0].timestamp
+    assert result.fills[0].fill_timestamp == expected_bars[1].timestamp
 
 
 def test_technical_provider_fails_closed_without_sufficient_history() -> None:
@@ -712,9 +761,11 @@ def test_technical_provider_fails_closed_without_sufficient_history() -> None:
 
     class QuantityResolver:
         def quantity_for(
-            self, symbol: str, analysis: object, history: tuple[MinuteBar, ...]
+            self, symbol: str, analysis: object, bars: tuple[MinuteBar, ...]
         ) -> int:
-            pytest.fail("blocked technical candidates must not reach quantity sizing")
+            pytest.fail(
+                "blocked technical candidates must not reach quantity sizing"
+            )
 
     provider = TechnicalAnalysisSignalProvider(quantity_for=QuantityResolver())
 

@@ -31,7 +31,9 @@ from urllib.request import (
 )
 
 
-def _email_update_payload(user: dict[str, object], new_email: str) -> dict[str, object]:
+def _email_update_payload(
+    user: dict[str, object], new_email: str
+) -> dict[str, object]:
     updated = dict(user)
     updated["email"] = new_email
     return updated
@@ -46,13 +48,19 @@ def _change_user_email(
     )
     headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
     endpoint = issuer.rstrip("/") + f"/users/{old_email}"
-    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+    with opener.open(
+        Request(endpoint, headers=headers), timeout=10
+    ) as response:
         user = json.load(response)
     if not isinstance(user, dict) or user.get("email") != old_email:
-        raise AssertionError("Rauthy did not return the expected disposable user")
+        raise AssertionError(
+            "Rauthy did not return the expected disposable user"
+        )
     user_id = user.get("id")
     if not isinstance(user_id, str) or not user_id:
-        raise AssertionError("Rauthy user response did not contain a stable subject id")
+        raise AssertionError(
+            "Rauthy user response did not contain a stable subject id"
+        )
     request = Request(
         endpoint,
         data=json.dumps(_email_update_payload(user, new_email)).encode(),
@@ -69,8 +77,13 @@ def _change_user_email(
         timeout=10,
     ) as response:
         updated_user = json.load(response)
-    if updated_user.get("email") != new_email or updated_user.get("id") != user_id:
-        raise AssertionError("Rauthy email update changed or lost the user's subject")
+    if (
+        updated_user.get("email") != new_email
+        or updated_user.get("id") != user_id
+    ):
+        raise AssertionError(
+            "Rauthy email update changed or lost the user's subject"
+        )
     return user_id
 
 
@@ -107,7 +120,9 @@ def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
     )
     for client_id in (CLIENT_ID, DEVICE_CLIENT_ID):
         endpoint = issuer.rstrip("/") + f"/clients/{client_id}"
-        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        with opener.open(
+            Request(endpoint, headers=headers), timeout=10
+        ) as response:
             client = json.load(response)
         update = {field: client.get(field) for field in fields}
         update["default_aud"] = [AUDIENCE]
@@ -120,12 +135,17 @@ def _set_client_audience(issuer: str, key_name: str, key_secret: str) -> None:
         with opener.open(request, timeout=10) as response:
             if response.status not in (200, 204):
                 raise RuntimeError(
-                    f"Rauthy client audience update returned HTTP {response.status}"
+                    "Rauthy client audience update returned HTTP "
+                    f"{response.status}"
                 )
-        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        with opener.open(
+            Request(endpoint, headers=headers), timeout=10
+        ) as response:
             configured = json.load(response)
         if configured.get("default_aud") != [AUDIENCE]:
-            raise AssertionError("Rauthy did not persist the client's default_aud")
+            raise AssertionError(
+                "Rauthy did not persist the client's default_aud"
+            )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -193,7 +213,8 @@ def _device_grant(
     from playwright.sync_api import sync_playwright
 
     opener = build_opener(
-        ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context())
+        ProxyHandler({}),
+        HTTPSHandler(context=ssl._create_unverified_context()),
     )
     endpoint = issuer + "oidc/"
 
@@ -207,7 +228,9 @@ def _device_grant(
             },
         )
         if status != 200:
-            raise AssertionError(f"Device authorization returned HTTP {status}")
+            raise AssertionError(
+                f"Device authorization returned HTTP {status}"
+            )
         return response
 
     def poll(code: str) -> tuple[int, dict[str, object]]:
@@ -242,19 +265,23 @@ def _device_grant(
                     username_input.wait_for(state="visible", timeout=10_000)
                     username_input.fill(username)
                     _submit_password_step(page, password)
-                    user_code_input = page.get_by_label("User Code", exact=True)
+                    user_code_input = page.get_by_label(
+                        "User Code", exact=True
+                    )
                     user_code_input.wait_for(state="visible", timeout=10_000)
                     user_code_input.fill(user_code)
-                    page.get_by_role("button", name="Submit", exact=True).click()
+                    page.get_by_role(
+                        "button", name="Submit", exact=True
+                    ).click()
 
                     names = (
                         r"accept|approve|allow|confirm|authorize|批准|允许"
                         if accept
                         else r"decline|deny|拒绝"
                     )
-                    page.get_by_role("button", name=re.compile(names, re.I)).click(
-                        timeout=30_000
-                    )
+                    page.get_by_role(
+                        "button", name=re.compile(names, re.I)
+                    ).click(timeout=30_000)
                     message = (
                         r"The request has been accepted"
                         if accept
@@ -283,7 +310,10 @@ def _device_grant(
     if verify_lifecycle:
         time.sleep(interval + 1)
         status, response = poll(code)
-        if status != 400 or protocol_error(response) != "authorization_pending":
+        if (
+            status != 400
+            or protocol_error(response) != "authorization_pending"
+        ):
             raise AssertionError(
                 "Expected authorization_pending before browser approval"
             )
@@ -296,7 +326,9 @@ def _device_grant(
     decision(approved, True)
     status, response = poll(code)
     if status != 200 or not isinstance(response.get("access_token"), str):
-        raise AssertionError(f"Device approval failed: {protocol_error(response)}")
+        raise AssertionError(
+            f"Device approval failed: {protocol_error(response)}"
+        )
     token = str(response["access_token"])
     id_token = response.get("id_token")
     if not isinstance(id_token, str):
@@ -322,7 +354,8 @@ def _device_grant(
     # reports expired_token.
     if status != 400 or denial_error != "expired_token":
         raise AssertionError(
-            f"Denied device authorization returned HTTP {status}: {denial_error}"
+            "Denied device authorization returned HTTP "
+            f"{status}: {denial_error}"
         )
     print("Device protocol: user denial terminated without a token.")
 
@@ -331,9 +364,13 @@ def _device_grant(
         expired.get("device_code"),
         expired.get("expires_in"),
     )
-    if not isinstance(expired_code, str) or not isinstance(expired_lifetime, int):
+    if not isinstance(expired_code, str) or not isinstance(
+        expired_lifetime, int
+    ):
         raise AssertionError("Malformed expiry device authorization response")
-    print(f"Device protocol: waiting for natural expiry ({expired_lifetime}s).")
+    print(
+        f"Device protocol: waiting for natural expiry ({expired_lifetime}s)."
+    )
     time.sleep(expired_lifetime + 1)
     status, response = poll(expired_code)
     if status != 400 or protocol_error(response) != "expired_token":
@@ -342,11 +379,15 @@ def _device_grant(
     fresh = start()
     fresh_code = fresh.get("device_code")
     if not isinstance(fresh_code, str):
-        raise AssertionError("Malformed post-expiry device authorization response")
+        raise AssertionError(
+            "Malformed post-expiry device authorization response"
+        )
     decision(fresh, True)
     fresh_interval = fresh.get("interval", 5)
     if not isinstance(fresh_interval, (int, float)):
-        raise AssertionError("Malformed post-expiry device authorization interval")
+        raise AssertionError(
+            "Malformed post-expiry device authorization interval"
+        )
     time.sleep(float(fresh_interval))
     status, response = poll(fresh_code)
     if status != 200 or not isinstance(response.get("access_token"), str):
@@ -359,7 +400,9 @@ def _device_grant(
         raise AssertionError("Device grant returned no ID token")
     verify_access_token(token, issuer)
     _device_public_api(gateway, token, create_snapshot=False)
-    print("Device protocol: fresh approved token verified after expiry checks.")
+    print(
+        "Device protocol: fresh approved token verified after expiry checks."
+    )
     return token, id_token
 
 
@@ -372,7 +415,9 @@ def _device_public_api(
         Request(gateway + "/api/v1/signals", headers=headers), timeout=20
     ) as response:
         if response.status != 200:
-            raise AssertionError(f"Public signal API returned HTTP {response.status}")
+            raise AssertionError(
+                f"Public signal API returned HTTP {response.status}"
+            )
     snapshot = {
         "as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "holdings": {"510300": 100},
@@ -398,7 +443,8 @@ def _device_public_api(
                     f"Public snapshot creation returned HTTP {response.status}"
                 )
     with opener.open(
-        Request(gateway + "/api/v1/account-snapshot", headers=headers), timeout=20
+        Request(gateway + "/api/v1/account-snapshot", headers=headers),
+        timeout=20,
     ) as response:
         if response.status != 200:
             raise AssertionError(
@@ -437,7 +483,9 @@ def _device_public_api(
         ) as response:
             saved = json.load(response)
         if saved.get("available_cash") != "126.50":
-            raise AssertionError("Public snapshot write was not visible to its owner")
+            raise AssertionError(
+                "Public snapshot write was not visible to its owner"
+            )
     request = Request(
         gateway + "/api/v1/signals/stream?symbols=563360", headers=headers
     )
@@ -453,7 +501,9 @@ def _device_public_api(
 
 def _decode(part: str) -> dict[str, object]:
     try:
-        value = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        value = json.loads(
+            base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+        )
     except (ValueError, json.JSONDecodeError) as exc:
         raise AssertionError("Malformed JWT") from exc
     if not isinstance(value, dict):
@@ -461,7 +511,9 @@ def _decode(part: str) -> dict[str, object]:
     return value
 
 
-def verify_access_token(token: str, issuer: str, *, now: int | None = None) -> None:
+def verify_access_token(
+    token: str, issuer: str, *, now: int | None = None
+) -> None:
     parts = token.split(".")
     if len(parts) != 3:
         raise AssertionError("Expected compact JWT")
@@ -523,18 +575,30 @@ def _compose_bootstrap_override(
                             "HQL_SECRET_RAFT": raft_secret,
                             "HQL_SECRET_API": api_secret,
                             "HQL_NODE_ID": "1",
-                            "ENC_KEYS": f"{encryption_key_id}/{encryption_key}",
+                            "ENC_KEYS": (
+                                f"{encryption_key_id}/{encryption_key}"
+                            ),
                             "ENC_KEY_ACTIVE": encryption_key_id,
                             "RP_ID": "localhost",
                             "RP_ORIGIN": rp_origin,
                         },
-                        "volumes": [f"{directory / 'bootstrap'}:/app/bootstrap:ro,U"],
+                        "volumes": [
+                            f"{directory / 'bootstrap'}:/app/bootstrap:ro,U"
+                        ],
                     },
                     "account-api": {
-                        "command": ["python", "/app/account-api-mock-market.py"],
+                        "command": [
+                            "python",
+                            "/app/account-api-mock-market.py",
+                        ],
                         "volumes": [
-                            f"{ROOT / 'scripts/fixtures/account-api-mock-market.py'}:"
-                            "/app/account-api-mock-market.py:ro"
+                            (
+                                str(
+                                    ROOT / "scripts/fixtures/"
+                                    "account-api-mock-market.py"
+                                )
+                                + ":/app/account-api-mock-market.py:ro"
+                            )
                         ],
                     },
                 },
@@ -635,7 +699,9 @@ def _write_bootstrap(
             "name": client_name,
             "secret": None,
             "enabled": True,
-            "redirect_uris": [gateway + "/"] if redirect else ["http://localhost/"],
+            "redirect_uris": [gateway + "/"]
+            if redirect
+            else ["http://localhost/"],
             "allowed_origins": [gateway] if redirect else [],
             "flows_enabled": flows,
             "access_token_alg": "RS256",
@@ -664,7 +730,10 @@ def _write_bootstrap(
     client_access = [{"group": "Clients", "access_rights": ["read", "update"]}]
     if username is None and not include_user_key:
         client_access = [
-            {"group": "Clients", "access_rights": ["read", "create", "update"]},
+            {
+                "group": "Clients",
+                "access_rights": ["read", "create", "update"],
+            },
             {"group": "Users", "access_rights": ["read", "update"]},
         ]
     api_keys = [
@@ -683,7 +752,9 @@ def _write_bootstrap(
                 "name": "a500-user-acceptance",
                 "secret": {"Plain": user_api_secret},
                 "exp": int(time.time()) + 1800,
-                "access": [{"group": "Users", "access_rights": ["read", "update"]}],
+                "access": [
+                    {"group": "Users", "access_rights": ["read", "update"]}
+                ],
             }
         )
     for filename, value in (
@@ -752,7 +823,9 @@ def _public_api_request(
         try:
             decoded = json.loads(payload) if payload else None
         except json.JSONDecodeError, UnicodeDecodeError:
-            raise AssertionError("Public API returned a non-JSON response") from None
+            raise AssertionError(
+                "Public API returned a non-JSON response"
+            ) from None
         status = int(getattr(response, "status", response.code))
         return (
             status,
@@ -774,7 +847,8 @@ def _multipart_csv(trade_number: int) -> tuple[bytes, str]:
     multipart = (
         (
             f"--{boundary}\r\n"
-            'Content-Disposition: form-data; name="file"; filename="fills.csv"\r\n'
+            'Content-Disposition: form-data; name="file"; '
+            'filename="fills.csv"\r\n'
             "Content-Type: text/csv\r\n\r\n"
         ).encode()
         + content
@@ -827,7 +901,9 @@ def _browser_flow_impl(
         ).first
         username_field.wait_for(state="visible", timeout=30_000)
         username_field.fill(username)
-        page.locator("form").get_by_role("button", name="Login", exact=True).click()
+        page.locator("form").get_by_role(
+            "button", name="Login", exact=True
+        ).click()
         stage[0] = "entering password"
         password_field = page.locator('input[type="password"]:visible')
         password_field.wait_for(state="visible", timeout=30_000)
@@ -856,7 +932,8 @@ def _browser_flow_impl(
             )
         stage[0] = "verifying token and gateway API access"
         page.wait_for_function(
-            "() => document.body.innerText.includes('策略信号')", timeout=60_000
+            "() => document.body.innerText.includes('策略信号')",
+            timeout=60_000,
         )
         verify_access_token(browser_token, issuer)
         status, _, api_error = _public_api_request(
@@ -871,7 +948,9 @@ def _browser_flow_impl(
         if create_snapshot:
             stage[0] = "opening account snapshot"
             page.get_by_role("link", name="资产管理", exact=True).click()
-            page.get_by_role("button", name="创建快照").wait_for(timeout=30_000)
+            page.get_by_role("button", name="创建快照").wait_for(
+                timeout=30_000
+            )
 
         if create_snapshot:
             stage[0] = "saving account snapshot"
@@ -889,9 +968,13 @@ def _browser_flow_impl(
                     and r.request.method == "PUT"
                 )
             ) as saved:
-                page.get_by_role("button", name="创建账户快照", exact=True).click()
+                page.get_by_role(
+                    "button", name="创建账户快照", exact=True
+                ).click()
             if saved.value.status not in (200, 201):
-                stage[0] = f"saving account snapshot (HTTP {saved.value.status})"
+                stage[0] = (
+                    f"saving account snapshot (HTTP {saved.value.status})"
+                )
                 raise AssertionError(
                     f"Snapshot write returned HTTP {saved.value.status}"
                 )
@@ -913,7 +996,8 @@ def _browser_flow_impl(
                 or readback["body"]["available_cash"] != cash
             ):
                 raise AssertionError(
-                    "Snapshot readback did not match browser-written business data"
+                    "Snapshot readback did not match browser-written "
+                    "business data"
                 )
         stage[0] = "closing browser"
         return browser_token, refresh_token
@@ -952,7 +1036,8 @@ def _browser_flow(
                 module = frame.tb_frame.f_globals.get("__name__", "")
                 if isinstance(module, str) and module.startswith("scripts."):
                     prior_error_location = (
-                        f"{module}.{frame.tb_frame.f_code.co_name}:{frame.tb_lineno}"
+                        f"{module}.{frame.tb_frame.f_code.co_name}:"
+                        f"{frame.tb_lineno}"
                     )
                 frame = frame.tb_next
         prior_error_suffix = (
@@ -985,17 +1070,23 @@ def _browser_flow(
         ) from None
 
 
-def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> None:
+def _disable_user(
+    issuer: str, key_name: str, key_secret: str, email: str
+) -> None:
     opener = build_opener(
         ProxyHandler({}),
         HTTPSHandler(context=ssl._create_unverified_context()),
     )
     headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
     endpoint = issuer.rstrip("/") + f"/users/{email}"
-    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+    with opener.open(
+        Request(endpoint, headers=headers), timeout=10
+    ) as response:
         user = json.load(response)
     if not isinstance(user, dict) or user.get("email") != email:
-        raise AssertionError("Rauthy did not return the expected disposable user")
+        raise AssertionError(
+            "Rauthy did not return the expected disposable user"
+        )
     user["enabled"] = False
     request = Request(
         endpoint,
@@ -1005,13 +1096,21 @@ def _disable_user(issuer: str, key_name: str, key_secret: str, email: str) -> No
     )
     with opener.open(request, timeout=10) as response:
         if response.status not in (200, 204):
-            raise RuntimeError(f"Rauthy user disable returned HTTP {response.status}")
-    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+            raise RuntimeError(
+                f"Rauthy user disable returned HTTP {response.status}"
+            )
+    with opener.open(
+        Request(endpoint, headers=headers), timeout=10
+    ) as response:
         if json.load(response).get("enabled") is not False:
-            raise AssertionError("Rauthy did not persist the disabled user state")
+            raise AssertionError(
+                "Rauthy did not persist the disabled user state"
+            )
 
 
-def _refresh_token(token_endpoint: str, client_id: str, refresh_token: str) -> int:
+def _refresh_token(
+    token_endpoint: str, client_id: str, refresh_token: str
+) -> int:
     request = Request(
         token_endpoint,
         data=urlencode(
@@ -1045,23 +1144,31 @@ def _new_login_rejected(
         page = browser.new_page(ignore_https_errors=True)
         try:
             page.goto(gateway + "/signals", wait_until="domcontentloaded")
-            page.get_by_role("button", name="安全连接", exact=True).first.click()
+            page.get_by_role(
+                "button", name="安全连接", exact=True
+            ).first.click()
             page.locator(
                 'input[autocomplete="username"], input[type="email"], '
                 'input[name="login"], input[type="text"]'
             ).first.fill(username)
-            page.locator("form").get_by_role("button", name="Login", exact=True).click()
-            page.locator('input[type="password"]:visible').wait_for(timeout=30_000)
+            page.locator("form").get_by_role(
+                "button", name="Login", exact=True
+            ).click()
+            page.locator('input[type="password"]:visible').wait_for(
+                timeout=30_000
+            )
             page.locator('input[type="password"]:visible').fill(password)
             page.locator('button[type="submit"]:visible').click()
             try:
                 page.wait_for_url(gateway + "/**", timeout=20_000)
                 return False
             except Exception:
-                # A rejected credential must leave the user on the IdP login page.
+                # A rejected credential must leave the user on the IdP login
+                # page.
                 return (
                     page.url.startswith(issuer)
-                    and page.locator('input[type="password"]:visible').count() > 0
+                    and page.locator('input[type="password"]:visible').count()
+                    > 0
                 )
         finally:
             browser.close()
@@ -1137,7 +1244,9 @@ def _cleanup_run(
                 command, check=True, capture_output=True, text=True, timeout=30
             )
         if result.stdout.strip():
-            raise RuntimeError(f"Test-created {resource} survived Compose teardown")
+            raise RuntimeError(
+                f"Test-created {resource} survived Compose teardown"
+            )
     result = subprocess.run(
         ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],
         check=True,
@@ -1151,10 +1260,14 @@ def _cleanup_run(
         if image.startswith(f"localhost/{project}_")
     ]
     for image in project_images:
-        subprocess.run(["podman", "image", "rm", image], check=True, timeout=30)
+        subprocess.run(
+            ["podman", "image", "rm", image], check=True, timeout=30
+        )
     for image in disposable_images:
         if _image_exists(image):
-            subprocess.run(["podman", "image", "rm", image], check=True, timeout=30)
+            subprocess.run(
+                ["podman", "image", "rm", image], check=True, timeout=30
+            )
     result = subprocess.run(
         ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}"],
         check=True,
@@ -1218,11 +1331,14 @@ def _rauthy_data_volume(env: dict[str, str], project: str) -> str:
         (mount for mount in mounts if mount.get("Destination") == "/app/data"),
         None,
     )
-    volume_name = data_mount.get("Name") if isinstance(data_mount, dict) else None
+    volume_name = (
+        data_mount.get("Name") if isinstance(data_mount, dict) else None
+    )
     expected_volume = f"{project}_rauthy-data"
     if not isinstance(volume_name, str) or volume_name != expected_volume:
         raise RuntimeError(
-            f"Rauthy data directory uses {volume_name!r}, expected named volume "
+            f"Rauthy data directory uses {volume_name!r}, "
+            "expected named volume "
             f"{expected_volume!r}"
         )
     return volume_name
@@ -1244,7 +1360,9 @@ def _safe_log_summary(service: str, line: str) -> str | None:
     return None
 
 
-def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None:
+def _safe_container_diagnostics(
+    project: str, services: tuple[str, ...]
+) -> None:
     for service in services:
         container = f"{project}_{service}_1"
         state = subprocess.run(
@@ -1260,7 +1378,10 @@ def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None
             text=True,
             timeout=30,
         )
-        print(f"Container {service} state: {state.stdout.strip() or 'unavailable'}")
+        print(
+            f"Container {service} state: "
+            f"{state.stdout.strip() or 'unavailable'}"
+        )
         logs = subprocess.run(
             ["podman", "logs", "--tail", "100", container],
             check=False,
@@ -1271,11 +1392,14 @@ def _safe_container_diagnostics(project: str, services: tuple[str, ...]) -> None
         summaries: set[str] = set()
         for raw_line in (*logs.stdout.splitlines(), *logs.stderr.splitlines()):
             line = raw_line.strip()
-            frame = re.search(r'^File "([^"]+)", line (\d+), in ([\w.< >]+)$', line)
+            frame = re.search(
+                r'^File "([^"]+)", line (\d+), in ([\w.< >]+)$', line
+            )
             if frame:
                 print(
                     f"Container {service} traceback: "
-                    f"{Path(frame.group(1)).name}:{frame.group(2)} in {frame.group(3)}"
+                    f"{Path(frame.group(1)).name}:{frame.group(2)} "
+                    f"in {frame.group(3)}"
                 )
                 continue
             error = re.match(
@@ -1305,7 +1429,9 @@ def _wait_for_account_api(gateway: str, timeout_seconds: float = 180) -> None:
         except OSError:
             pass
         time.sleep(2)
-    raise RuntimeError("Account API did not become ready through the public gateway")
+    raise RuntimeError(
+        "Account API did not become ready through the public gateway"
+    )
 
 
 def main() -> None:
@@ -1321,7 +1447,9 @@ def main() -> None:
     mailpit_image = "docker.io/axllent/mailpit:v1.27.8"
     rauthy_image = "ghcr.io/sebadob/rauthy:0.37.2"
     preexisting_images = {
-        image for image in (mailpit_image, rauthy_image) if _image_exists(image)
+        image
+        for image in (mailpit_image, rauthy_image)
+        if _image_exists(image)
     }
     ports = {
         name: str(_port())
@@ -1483,7 +1611,13 @@ def main() -> None:
                 "account-api",
             ):
                 logs = subprocess.run(
-                    ["podman", "logs", "--tail", "100", f"{project}_{service}_1"],
+                    [
+                        "podman",
+                        "logs",
+                        "--tail",
+                        "100",
+                        f"{project}_{service}_1",
+                    ],
                     check=False,
                     capture_output=True,
                     text=True,
@@ -1545,7 +1679,10 @@ def main() -> None:
         )
         _assert_token_rejected(gateway, device_id_token)
         for token in (None, "not.a.jwt"):
-            if _public_api_request(gateway, "/api/v1/signals", token)[0] != 401:
+            if (
+                _public_api_request(gateway, "/api/v1/signals", token)[0]
+                != 401
+            ):
                 raise AssertionError(
                     "Public API accepted an absent or malformed bearer token"
                 )
@@ -1556,7 +1693,8 @@ def main() -> None:
             not isinstance(browser_subject, str)
             or not isinstance(device_browser_subject, str)
             or not isinstance(admin_subject, str)
-            or len({browser_subject, device_browser_subject, admin_subject}) != 3
+            or len({browser_subject, device_browser_subject, admin_subject})
+            != 3
             or device_browser_subject != device_subject
         ):
             raise AssertionError(
@@ -1587,9 +1725,12 @@ def main() -> None:
             or device_cash != "126.50"
         ):
             raise AssertionError(
-                "Browser and device users did not retain isolated snapshot data: "
-                f"browser HTTP {browser_snapshot_status}, cash {browser_cash!r}; "
-                f"device HTTP {device_snapshot_status}, cash {device_cash!r}"
+                "Browser and device users did not retain isolated "
+                "snapshot data: "
+                f"browser HTTP {browser_snapshot_status}, "
+                f"cash {browser_cash!r}; "
+                f"device HTTP {device_snapshot_status}, "
+                f"cash {device_cash!r}"
             )
         original_subject = _decode(browser_token.split(".")[1]).get("sub")
         changed_email = "browser-renamed@example.test"
@@ -1615,12 +1756,18 @@ def main() -> None:
             create_snapshot=False,
         )
         if _decode(renamed_token.split(".")[1]).get("sub") != original_subject:
-            raise AssertionError("Email login changed the authenticated subject")
+            raise AssertionError(
+                "Email login changed the authenticated subject"
+            )
         if (
-            _public_api_request(gateway, "/api/v1/account-snapshot", renamed_token)[0]
+            _public_api_request(
+                gateway, "/api/v1/account-snapshot", renamed_token
+            )[0]
             != 200
         ):
-            raise AssertionError("Original business data was lost after email update")
+            raise AssertionError(
+                "Original business data was lost after email update"
+            )
         original_volume = _rauthy_data_volume(env, project)
         subprocess.run(
             [*prefix, "stop", "rauthy"],
@@ -1639,7 +1786,8 @@ def main() -> None:
         restarted_volume = _rauthy_data_volume(env, project)
         if restarted_volume != original_volume:
             raise AssertionError(
-                "Ordinary Rauthy restart did not reuse its original named data volume"
+                "Ordinary Rauthy restart did not reuse its original "
+                "named data volume"
             )
         discovery = _wait_discovery(issuer)
         persisted_token, _ = _browser_flow(
@@ -1672,9 +1820,9 @@ def main() -> None:
         browser_snapshot_status, _, browser_snapshot = _public_api_request(
             gateway, "/api/v1/account-snapshot", persisted_token
         )
-        persisted_device_subject = _decode(persisted_device_token.split(".")[1]).get(
-            "sub"
-        )
+        persisted_device_subject = _decode(
+            persisted_device_token.split(".")[1]
+        ).get("sub")
         device_cash = (
             device_snapshot.get("available_cash")
             if isinstance(device_snapshot, dict)
@@ -1696,8 +1844,8 @@ def main() -> None:
             or browser_cash != "125.50"
         ):
             raise AssertionError(
-                "Independent device client/user configuration or subject isolation "
-                "did not survive restart: "
+                "Independent device client/user configuration or subject "
+                "isolation did not survive restart: "
                 f"device_subject_matches="
                 f"{persisted_device_subject == device_subject}, "
                 f"subjects_are_distinct={device_subject != original_subject}, "
@@ -1708,14 +1856,16 @@ def main() -> None:
             )
         _assert_token_rejected(gateway, persisted_device_id_token)
         if (
-            _decode(persisted_token.split(".")[1]).get("sub") != original_subject
+            _decode(persisted_token.split(".")[1]).get("sub")
+            != original_subject
             or _public_api_request(
                 gateway, "/api/v1/account-snapshot", persisted_token
             )[0]
             != 200
         ):
             raise AssertionError(
-                "Rauthy identity or existing API data did not survive ordinary restart"
+                "Rauthy identity or existing API data did not survive "
+                "ordinary restart"
             )
         changed_email_token, _ = _browser_flow(
             gateway,
@@ -1725,8 +1875,13 @@ def main() -> None:
             user_password,
             create_snapshot=False,
         )
-        if _decode(changed_email_token.split(".")[1]).get("sub") != original_subject:
-            raise AssertionError("Email-update login changed the authenticated subject")
+        if (
+            _decode(changed_email_token.split(".")[1]).get("sub")
+            != original_subject
+        ):
+            raise AssertionError(
+                "Email-update login changed the authenticated subject"
+            )
         if (
             _public_api_request(
                 gateway, "/api/v1/account-snapshot", changed_email_token
@@ -1744,9 +1899,13 @@ def main() -> None:
             user_password,
             create_snapshot=False,
         )
-        if _decode(fresh_device_token.split(".")[1]).get("sub") != device_subject:
+        if (
+            _decode(fresh_device_token.split(".")[1]).get("sub")
+            != device_subject
+        ):
             raise AssertionError(
-                "Fresh login for the device user changed the authenticated subject"
+                "Fresh login for the device user changed the "
+                "authenticated subject"
             )
         device_token = fresh_device_token
         browser_token = changed_email_token
@@ -1770,7 +1929,9 @@ def main() -> None:
             )
         preview_path = f"/api/v1/trade-imports/previews/{batch_id}"
         if _public_api_request(gateway, preview_path, browser_token)[0] != 200:
-            raise AssertionError("Trade-import preview was not visible to its owner")
+            raise AssertionError(
+                "Trade-import preview was not visible to its owner"
+            )
         device_claims = _decode(device_token.split(".")[1])
         browser_claims = _decode(browser_token.split(".")[1])
         other_owner_status, _, other_owner_body = _public_api_request(
@@ -1797,7 +1958,8 @@ def main() -> None:
             != 404
         ):
             raise AssertionError(
-                "Second Rauthy user could confirm the first user's trade-import preview"
+                "Second Rauthy user could confirm the first user's "
+                "trade-import preview"
             )
         fresh_admin_token, _ = _browser_flow(
             gateway,
@@ -1807,8 +1969,13 @@ def main() -> None:
             user_password,
             create_snapshot=False,
         )
-        if _decode(fresh_admin_token.split(".")[1]).get("sub") != admin_subject:
-            raise AssertionError("Fresh administrator login changed its subject")
+        if (
+            _decode(fresh_admin_token.split(".")[1]).get("sub")
+            != admin_subject
+        ):
+            raise AssertionError(
+                "Fresh administrator login changed its subject"
+            )
         admin_token = fresh_admin_token
         if _public_api_request(gateway, preview_path, admin_token)[0] != 404:
             raise AssertionError(
@@ -1822,7 +1989,7 @@ def main() -> None:
             != 404
         ):
             raise AssertionError(
-                "Rauthy identity administrator could confirm the browser user's "
+                "Rauthy identity administrator could confirm the browser "
                 "trade-import preview"
             )
         browser_token, browser_refresh_token = _browser_flow(
@@ -1847,14 +2014,20 @@ def main() -> None:
         _disable_user(
             issuer, "a500-user-acceptance", user_api_key_secret, changed_email
         )
-        if _public_api_request(gateway, "/api/v1/signals", browser_token)[0] != 200:
+        if (
+            _public_api_request(gateway, "/api/v1/signals", browser_token)[0]
+            != 200
+        ):
             raise AssertionError(
-                "Previously issued token did not remain valid after user disable"
+                "Previously issued token did not remain valid after "
+                "user disable"
             )
         if _refresh_token(
             str(discovery["token_endpoint"]), CLIENT_ID, browser_refresh_token
         ) not in (400, 401):
-            raise AssertionError("Rauthy accepted refresh after the user was disabled")
+            raise AssertionError(
+                "Rauthy accepted refresh after the user was disabled"
+            )
         if not _new_login_rejected(
             gateway,
             issuer,
@@ -1862,7 +2035,8 @@ def main() -> None:
             user_password,
         ):
             raise AssertionError(
-                "Rauthy accepted a new browser login after the user was disabled"
+                "Rauthy accepted a new browser login after the user "
+                "was disabled"
             )
         expiry_device_token, _ = _device_grant(
             gateway,
@@ -1871,31 +2045,39 @@ def main() -> None:
             user_password,
             create_snapshot=False,
         )
-        if _decode(expiry_device_token.split(".")[1]).get("sub") != device_subject:
+        if (
+            _decode(expiry_device_token.split(".")[1]).get("sub")
+            != device_subject
+        ):
             raise AssertionError(
-                "Device-grant lifecycle checks changed the authenticated subject"
+                "Device-grant lifecycle checks changed the "
+                "authenticated subject"
             )
         wait_seconds = max(0, token_exp - int(time.time())) + 1
         print(
-            "Disabled disposable browser user: prior token remains locally valid; "
-            f"waiting at most {wait_seconds}s beyond the device-flow expiry wait."
+            "Disabled disposable browser user: prior token remains "
+            "locally valid; "
+            f"waiting at most {wait_seconds}s beyond the device-flow "
+            "expiry wait."
         )
         time.sleep(wait_seconds)
-        expiry_status = _public_api_request(gateway, "/api/v1/signals", browser_token)[
-            0
-        ]
+        expiry_status = _public_api_request(
+            gateway, "/api/v1/signals", browser_token
+        )[0]
         if expiry_status != 401:
             raise AssertionError(
                 "Previously issued access token returned "
                 f"HTTP {expiry_status} after expiry"
             )
         print(
-            "Verified disabled-user login and refresh rejection; prior access token "
-            "was accepted during its residual window and rejected after expiry."
+            "Verified disabled-user login and refresh rejection; prior "
+            "access token was accepted during its residual window and "
+            "rejected after expiry."
         )
         print(
-            "Verified real browser and device access tokens, ID-token rejection, "
-            "and public API snapshot/trade-import subject isolation."
+            "Verified real browser and device access tokens, ID-token "
+            "rejection, and public API snapshot/trade-import subject "
+            "isolation."
         )
     finally:
         try:

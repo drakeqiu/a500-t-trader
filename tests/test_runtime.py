@@ -60,7 +60,9 @@ def test_loads_existing_env_file_and_prepares_mdga_directory_before_sdk(
     home = tmp_path / "home"
     events: list[tuple[str, object]] = []
 
-    def sdk_factory(username: str, password: str, host: str, port: int) -> object:
+    def sdk_factory(
+        username: str, password: str, host: str, port: int
+    ) -> object:
         directory = home / "mdga_file"
         events.append(("sdk", (username, password, host, port)))
         assert directory.is_dir()
@@ -71,7 +73,9 @@ def test_loads_existing_env_file_and_prepares_mdga_directory_before_sdk(
         env={}, env_file=env_file, home=home, provider_factory=sdk_factory
     )
 
-    assert events == [("sdk", ("trader", "top-secret", "market.example", 9876))]
+    assert events == [
+        ("sdk", ("trader", "top-secret", "market.example", 9876))
+    ]
     assert result is not None
 
 
@@ -100,7 +104,9 @@ def test_process_ad_configuration_overrides_dotenv(tmp_path: Path) -> None:
         ),
     )
 
-    assert calls == [("process-user", "process-password", "process.example", 5678)]
+    assert calls == [
+        ("process-user", "process-password", "process.example", 5678)
+    ]
 
 
 def test_environment_overrides_env_file_without_exposing_credentials(
@@ -116,7 +122,9 @@ def test_environment_overrides_env_file_without_exposing_credentials(
         env=values,
         env_file=env_file,
         home=tmp_path / "home",
-        provider_factory=lambda username, password, host, port: calls.append(password),
+        provider_factory=lambda username, password, host, port: calls.append(
+            password
+        ),
     )
 
     assert calls == ["environment-secret"]
@@ -145,7 +153,9 @@ def test_invalid_configuration_is_categorized_before_sdk_initialization(
     assert calls == 0
 
 
-def test_mdga_directory_permission_failure_prevents_sdk_start(tmp_path: Path) -> None:
+def test_mdga_directory_permission_failure_prevents_sdk_start(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     blocked = home / "mdga_file"
@@ -158,12 +168,16 @@ def test_mdga_directory_permission_failure_prevents_sdk_start(tmp_path: Path) ->
         return object()
 
     with pytest.raises(PermissionDeniedError):
-        create_provider_from_env(env=_config(), home=home, provider_factory=sdk_factory)
+        create_provider_from_env(
+            env=_config(), home=home, provider_factory=sdk_factory
+        )
 
     assert calls == 0
 
 
-def test_authentication_and_permission_errors_are_not_retried(tmp_path: Path) -> None:
+def test_authentication_and_permission_errors_are_not_retried(
+    tmp_path: Path,
+) -> None:
     for error, error_type in (
         (RuntimeError("login was rejected"), AuthenticationError),
         (PermissionError("permission denied"), PermissionDeniedError),
@@ -185,7 +199,9 @@ def test_authentication_and_permission_errors_are_not_retried(tmp_path: Path) ->
         assert calls == 1
 
 
-def test_only_transient_network_errors_get_bounded_retries(tmp_path: Path) -> None:
+def test_only_transient_network_errors_get_bounded_retries(
+    tmp_path: Path,
+) -> None:
     calls = 0
     delays: list[float] = []
     provider = object()

@@ -56,8 +56,12 @@ def _bars(symbol: str = "510300", count: int = 180) -> tuple[MinuteBar, ...]:
 
 
 def test_indicator_warmups_use_exact_period_boundaries() -> None:
-    at_warmup = analyze_intraday_technical({"510300": _bars(count=60)})["510300"]
-    before_ema60 = analyze_intraday_technical({"510300": _bars(count=59)})["510300"]
+    at_warmup = analyze_intraday_technical({"510300": _bars(count=60)})[
+        "510300"
+    ]
+    before_ema60 = analyze_intraday_technical({"510300": _bars(count=59)})[
+        "510300"
+    ]
 
     assert at_warmup.indicators["ema_20"] is not None
     assert at_warmup.indicators["ema_60"] is not None
@@ -66,21 +70,21 @@ def test_indicator_warmups_use_exact_period_boundaries() -> None:
     assert at_warmup.indicators["atr_14"] is not None
     assert before_ema60.indicators["ema_60"] is None
     assert (
-        analyze_intraday_technical({"510300": _bars(count=20)})["510300"].indicators[
-            "bollinger_sigma"
-        ]
+        analyze_intraday_technical({"510300": _bars(count=20)})[
+            "510300"
+        ].indicators["bollinger_sigma"]
         is not None
     )
     assert (
-        analyze_intraday_technical({"510300": _bars(count=9)})["510300"].indicators[
-            "kdj_k"
-        ]
+        analyze_intraday_technical({"510300": _bars(count=9)})[
+            "510300"
+        ].indicators["kdj_k"]
         is not None
     )
     assert (
-        analyze_intraday_technical({"510300": _bars(count=15)})["510300"].indicators[
-            "atr_14"
-        ]
+        analyze_intraday_technical({"510300": _bars(count=15)})[
+            "510300"
+        ].indicators["atr_14"]
         is not None
     )
 
@@ -124,7 +128,8 @@ def test_flat_completed_history_keeps_range_baseline_scores_and_wait() -> None:
     assert analysis.candidate == "WAIT"
     assert analysis.risk_status == "BLOCKED"
     assert any(
-        "dynamic grid inputs unavailable" in reason for reason in analysis.reasons
+        "dynamic grid inputs unavailable" in reason
+        for reason in analysis.reasons
     )
 
 
@@ -133,8 +138,13 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
         strategy_id="intraday-etf-t-v1-rsi",
         rule_version="V1.0",
         implementation_version="commit:test",
-        rule_source="docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
-        rule_source_sha256="769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6",
+        rule_source=(
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
+        ),
+        rule_source_sha256=(
+            "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
+        ),
         parameters={
             **TECHNICAL_PARAMETERS,
             "indicators": {
@@ -155,7 +165,9 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
         securities={},
         fingerprint="a" * 64,
     )
-    analysis = analyze_intraday_technical({"510300": _bars()}, config=config)["510300"]
+    analysis = analyze_intraday_technical({"510300": _bars()}, config=config)[
+        "510300"
+    ]
 
     assert analysis.parameter_version == "intraday-etf-t-v1-rsi"
     assert analysis.parameter_hash == config.fingerprint
@@ -165,7 +177,10 @@ def test_scoring_emits_config_and_version_fingerprint() -> None:
     baseline = analyze_intraday_technical({"510300": _bars()})["510300"]
     assert analysis.score_breakdown is not None
     assert baseline.score_breakdown is not None
-    assert analysis.score_breakdown["ema_buy"] != baseline.score_breakdown["ema_buy"]
+    assert (
+        analysis.score_breakdown["ema_buy"]
+        != baseline.score_breakdown["ema_buy"]
+    )
 
 
 def test_timing_overrides_control_signal_windows() -> None:
@@ -248,7 +263,10 @@ def test_dynamic_grid_width_over_v1_limit_blocks_scoring_candidate() -> None:
 def test_normal_signal_window_closes_after_protection_only_cutoff() -> None:
     source = _bars()
     bars = source + (
-        replace(source[-1], timestamp=source[-1].timestamp.replace(hour=14, minute=50)),
+        replace(
+            source[-1],
+            timestamp=source[-1].timestamp.replace(hour=14, minute=50),
+        ),
     )
     analysis = analyze_intraday_technical(
         {"510300": bars},
@@ -269,7 +287,9 @@ def test_incomplete_bars_do_not_satisfy_180_bar_gate() -> None:
     bars = _bars(count=180)
     with_incomplete = bars[:-1] + (replace(bars[-1], is_completed=False),)
 
-    analysis = analyze_intraday_technical({"510300": with_incomplete})["510300"]
+    analysis = analyze_intraday_technical({"510300": with_incomplete})[
+        "510300"
+    ]
 
     assert analysis.candidate == "WAIT"
     assert "fewer than 180 completed valid 5-minute bars" in analysis.reasons
@@ -283,11 +303,16 @@ def test_invalid_history_isolated_per_symbol() -> None:
 
     assert results["510300"].indicators["ema_20"] is not None
     assert results["510500"].candidate == "WAIT"
-    assert "fewer than 180 completed valid 5-minute bars" in results["510500"].reasons
+    assert (
+        "fewer than 180 completed valid 5-minute bars"
+        in results["510500"].reasons
+    )
 
 
 def test_missing_0945_anchor_is_not_replaced_with_later_vwap() -> None:
-    bars = tuple(bar for bar in _bars() if bar.timestamp.strftime("%H:%M") != "09:45")
+    bars = tuple(
+        bar for bar in _bars() if bar.timestamp.strftime("%H:%M") != "09:45"
+    )
 
     analysis = analyze_intraday_technical({"510300": bars})["510300"]
 
@@ -310,8 +335,12 @@ def test_source_exact_paired_targets_emit_take_profit_and_buyback(
         "_grid",
         lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
     )
-    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, True))
-    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+    monkeypatch.setattr(
+        technical, "_confirmations", lambda *_args: (True, True)
+    )
+    monkeypatch.setattr(
+        technical, "_window_allows", lambda *_args: (True, True)
+    )
 
     for buy_score, sell_score, pair_key, target, expected in (
         (50.0, 80.0, "take_profit", Decimal("4.00"), "TAKE_PROFIT"),
@@ -366,8 +395,12 @@ def test_paired_target_does_not_override_ordinary_buy_candidate(
         "_grid",
         lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
     )
-    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, True))
-    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+    monkeypatch.setattr(
+        technical, "_confirmations", lambda *_args: (True, True)
+    )
+    monkeypatch.setattr(
+        technical, "_window_allows", lambda *_args: (True, True)
+    )
 
     analysis = analyze_intraday_technical(
         {"510300": _bars()},
@@ -435,14 +468,23 @@ def test_configured_signal_threshold_changes_candidate(
         "_grid",
         lambda *_args: (Decimal("0.01"), 0.0, 0.0, None, None),
     )
-    monkeypatch.setattr(technical, "_confirmations", lambda *_args: (True, False))
-    monkeypatch.setattr(technical, "_window_allows", lambda *_args: (True, True))
+    monkeypatch.setattr(
+        technical, "_confirmations", lambda *_args: (True, False)
+    )
+    monkeypatch.setattr(
+        technical, "_window_allows", lambda *_args: (True, True)
+    )
     config = IntradayV1Config(
         strategy_id="intraday-etf-t-v1-rsi",
         rule_version="V1.0",
         implementation_version="commit:test",
-        rule_source="docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md",
-        rule_source_sha256="769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6",
+        rule_source=(
+            "docs/strategy/intraday-etf-t-v1/"
+            "intraday_etf_t_quantitative_strategy_v1.0.md"
+        ),
+        rule_source_sha256=(
+            "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
+        ),
         parameters={
             **TECHNICAL_PARAMETERS,
             "signals": {"buy_threshold": 60, "sell_threshold": 68},
@@ -492,7 +534,8 @@ def test_wilder_rsi_uses_fourteen_change_seed_and_recursive_update() -> None:
     bars = list(_bars(count=16))
     closes = [Decimal("100")]
     closes.extend(
-        closes[-1] + Decimal(1 if index % 2 == 0 else -1) for index in range(14)
+        closes[-1] + Decimal(1 if index % 2 == 0 else -1)
+        for index in range(14)
     )
     closes.append(closes[-1] + Decimal(2))
     offset = len(bars) - len(closes)
@@ -555,7 +598,9 @@ def test_rsi_buy_and_sell_buckets_are_reported_in_public_analysis() -> None:
                 close=close,
                 amount=close * bars[index].volume,
             )
-        analysis = analyze_intraday_technical({"510300": tuple(bars)})["510300"]
+        analysis = analyze_intraday_technical({"510300": tuple(bars)})[
+            "510300"
+        ]
         assert analysis.score_breakdown is not None
         return analysis.score_breakdown
 

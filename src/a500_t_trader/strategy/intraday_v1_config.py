@@ -13,9 +13,12 @@ from typing import cast
 CONFIG_SCHEMA_VERSION = "2.0"
 STRATEGY_ID = "intraday-etf-t-v1-rsi"
 RULE_SOURCE = (
-    "docs/strategy/intraday-etf-t-v1/intraday_etf_t_quantitative_strategy_v1.0.md"
+    "docs/strategy/intraday-etf-t-v1/"
+    "intraday_etf_t_quantitative_strategy_v1.0.md"
 )
-RULE_SOURCE_SHA256 = "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
+RULE_SOURCE_SHA256 = (
+    "769e2cd8d259074d3165f7c7ced0128b9658fcf37a13e634faad5cc4b980b2c6"
+)
 _REQUIRED_TOP_LEVEL = (
     "schema_version",
     "strategy_id",
@@ -113,8 +116,11 @@ class LiveSignalConfig:
 DEFAULT_LIVE_CONFIG_PATH = Path("config/intraday-signals.yaml")
 
 
-def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignalConfig:
-    """Load optional ETF scope and parameter overrides over immutable V1 defaults."""
+def load_live_signal_config(
+    path: Path = DEFAULT_LIVE_CONFIG_PATH,
+) -> LiveSignalConfig:
+    """Load optional ETF scope and parameter overrides over immutable V1
+    defaults."""
     from copy import deepcopy
 
     from .intraday_technical import TECHNICAL_PARAMETERS
@@ -125,7 +131,9 @@ def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignal
     try:
         import yaml
     except ImportError as error:
-        raise ValueError("YAML configuration requires the PyYAML package") from error
+        raise ValueError(
+            "YAML configuration requires the PyYAML package"
+        ) from error
     if not path.exists():
         canonical = json.dumps(
             {"etfs": etfs, "parameters": parameters, "costs": costs},
@@ -159,7 +167,9 @@ def load_live_signal_config(path: Path = DEFAULT_LIVE_CONFIG_PATH) -> LiveSignal
             for item in raw_etfs
         )
     ):
-        raise ValueError("etfs must be a non-empty list of six-digit ETF codes")
+        raise ValueError(
+            "etfs must be a non-empty list of six-digit ETF codes"
+        )
     etfs = tuple(dict.fromkeys(str(item) for item in raw_etfs))
     if any(len(symbol) != 6 or not symbol.isdigit() for symbol in etfs):
         raise ValueError("etfs must contain only six-digit ETF codes")
@@ -202,13 +212,16 @@ def _parse_live_costs(
             raise ValueError(f"costs.{symbol} must name an ETF in etfs")
         if not isinstance(raw_values, dict) or set(raw_values) != expected:
             raise ValueError(
-                f"costs.{symbol} must define exactly {', '.join(sorted(expected))}"
+                f"costs.{symbol} must define exactly "
+                f"{', '.join(sorted(expected))}"
             )
         values: dict[str, object] = {}
         for key in ("tick_size", "commission_rate", "minimum_commission"):
             raw_value = raw_values[key]
             if isinstance(raw_value, bool):
-                raise ValueError(f"costs.{symbol}.{key} must be a decimal number")
+                raise ValueError(
+                    f"costs.{symbol}.{key} must be a decimal number"
+                )
             try:
                 value = Decimal(str(raw_value))
             except InvalidOperation, TypeError, ValueError:
@@ -230,7 +243,8 @@ def _parse_live_costs(
             or quantity % 100
         ):
             raise ValueError(
-                f"costs.{symbol}.reference_quantity must be a positive multiple of 100"
+                f"costs.{symbol}.reference_quantity must be a positive "
+                "multiple of 100"
             )
         values["reference_quantity"] = quantity
         costs[symbol] = values
@@ -294,7 +308,9 @@ def _validate_live_leaf(path: str, key: str, value: object) -> None:
     try:
         number = Decimal(str(value))
     except InvalidOperation, ValueError:
-        raise ValueError(f"{path} must be a non-negative finite number") from None
+        raise ValueError(
+            f"{path} must be a non-negative finite number"
+        ) from None
     if not number.is_finite() or number < 0:
         raise ValueError(f"{path} must be a non-negative finite number")
     if "indicators." in path and number <= 0:
@@ -353,11 +369,15 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     rule_source = _text(root["rule_source"], "rule_source")
     if rule_source != RULE_SOURCE:
         raise ValueError(f"rule_source must be {RULE_SOURCE!r}")
-    rule_source_sha256 = _text(root["rule_source_sha256"], "rule_source_sha256")
+    rule_source_sha256 = _text(
+        root["rule_source_sha256"], "rule_source_sha256"
+    )
     if len(rule_source_sha256) != 64 or any(
         char not in "0123456789abcdefABCDEF" for char in rule_source_sha256
     ):
-        raise ValueError("rule_source_sha256 must be a 64-character SHA-256 digest")
+        raise ValueError(
+            "rule_source_sha256 must be a 64-character SHA-256 digest"
+        )
     if rule_source_sha256.lower() != RULE_SOURCE_SHA256:
         raise ValueError(
             "rule_source_sha256 does not match the tracked RSI strategy source"
@@ -365,8 +385,13 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     parameters = _object(root["parameters"], "parameters")
     _require(parameters, _REQUIRED_PARAMETER_SECTIONS, "parameters")
     for section in _REQUIRED_PARAMETER_SECTIONS:
-        if not isinstance(parameters[section], dict) or not parameters[section]:
-            raise ValueError(f"parameters.{section} must contain explicit rule values")
+        if (
+            not isinstance(parameters[section], dict)
+            or not parameters[section]
+        ):
+            raise ValueError(
+                f"parameters.{section} must contain explicit rule values"
+            )
     certification = _object(root["certification"], "certification")
     _require(certification, _REQUIRED_CERTIFICATION_FIELDS, "certification")
     fees = _object(root["fees"], "fees")
@@ -382,11 +407,15 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     for symbol, position_value in positions.items():
         _symbol(symbol, f"account.positions.{symbol}")
         position = _object(position_value, f"account.positions.{symbol}")
-        _require(position, _REQUIRED_POSITION_FIELDS, f"account.positions.{symbol}")
+        _require(
+            position, _REQUIRED_POSITION_FIELDS, f"account.positions.{symbol}"
+        )
 
     securities_data = _object(root["securities"], "securities")
     if not securities_data:
-        raise ValueError("missing required configuration: securities (at least one)")
+        raise ValueError(
+            "missing required configuration: securities (at least one)"
+        )
     securities: dict[str, dict[str, object]] = {}
     for symbol, security_value in securities_data.items():
         _symbol(symbol, f"securities.{symbol}")
@@ -402,7 +431,9 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
     extra_positions = positions.keys() - securities.keys()
     if extra_positions:
         symbol = sorted(extra_positions)[0]
-        raise ValueError(f"missing required configuration: securities.{symbol}")
+        raise ValueError(
+            f"missing required configuration: securities.{symbol}"
+        )
 
     canonical = json.dumps(
         root, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -423,12 +454,16 @@ def load_intraday_v1_config(path: str | Path) -> IntradayV1Config:
 
 
 def _object(value: object, path: str) -> dict[str, object]:
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) for key in value
+    ):
         raise ValueError(f"{path} must be a JSON object")
     return cast(dict[str, object], value)
 
 
-def _require(data: dict[str, object], fields: tuple[str, ...], prefix: str) -> None:
+def _require(
+    data: dict[str, object], fields: tuple[str, ...], prefix: str
+) -> None:
     for field in fields:
         value = data.get(field)
         if value is None or value == "" or value == {} or value == []:
@@ -438,7 +473,9 @@ def _require(data: dict[str, object], fields: tuple[str, ...], prefix: str) -> N
 
 def _text(value: object, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{path} must be explicitly configured as non-empty text")
+        raise ValueError(
+            f"{path} must be explicitly configured as non-empty text"
+        )
     return value
 
 

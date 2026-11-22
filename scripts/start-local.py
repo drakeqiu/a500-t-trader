@@ -35,18 +35,27 @@ SERVICES = (
 )
 
 
-def configure_local_build_environment(environment: dict[str, str]) -> dict[str, str]:
-    """Fill local APT/PyPI build settings while preserving non-empty overrides."""
-    environment["APT_MIRROR"] = environment.get("APT_MIRROR") or "mirrors.bfsu.edu.cn"
-    environment["UV_INDEX_URL"] = (
-        environment.get("UV_INDEX_URL") or "https://mirrors.aliyun.com/pypi/simple/"
+def configure_local_build_environment(
+    environment: dict[str, str],
+) -> dict[str, str]:
+    """Fill local APT/PyPI build settings while preserving non-empty
+    overrides."""
+    environment["APT_MIRROR"] = (
+        environment.get("APT_MIRROR") or "mirrors.bfsu.edu.cn"
     )
-    environment["UV_HTTP_TIMEOUT"] = environment.get("UV_HTTP_TIMEOUT") or "180"
+    environment["UV_INDEX_URL"] = (
+        environment.get("UV_INDEX_URL")
+        or "https://mirrors.aliyun.com/pypi/simple/"
+    )
+    environment["UV_HTTP_TIMEOUT"] = (
+        environment.get("UV_HTTP_TIMEOUT") or "180"
+    )
     return environment
 
 
 def local_environment() -> dict[str, str]:
-    """Read literal dotenv values, never execute the user's configuration file."""
+    """Read literal dotenv values, never execute the user's configuration
+    file."""
     dotenv_environment: dict[str, str] = {}
     dotenv = ROOT / ".env"
     if dotenv.exists():
@@ -59,13 +68,19 @@ def local_environment() -> dict[str, str]:
             key, separator, value = line.partition("=")
             key = key.strip()
             if not separator or not key.isidentifier():
-                raise ValueError(f".env line {number}: expected NAME=literal-value")
+                raise ValueError(
+                    f".env line {number}: expected NAME=literal-value"
+                )
             try:
                 tokens = shlex.split(value, comments=True)
             except ValueError:
-                raise ValueError(f".env line {number}: invalid quoting") from None
+                raise ValueError(
+                    f".env line {number}: invalid quoting"
+                ) from None
             if len(tokens) > 1:
-                raise ValueError(f".env line {number}: quote values containing spaces")
+                raise ValueError(
+                    f".env line {number}: quote values containing spaces"
+                )
             dotenv_environment[key] = tokens[0] if tokens else ""
     environment = dict(dotenv_environment)
     environment.update(os.environ)
@@ -78,10 +93,13 @@ def local_environment() -> dict[str, str]:
     )
     environment.setdefault("RAUTHY_HOST_PORT", "8081")
     environment.setdefault(
-        "OIDC_ISSUER", f"http://localhost:{environment['RAUTHY_HOST_PORT']}/auth/v1/"
+        "OIDC_ISSUER",
+        f"http://localhost:{environment['RAUTHY_HOST_PORT']}/auth/v1/",
     )
     environment.setdefault("OIDC_AUDIENCE", "a500-api")
-    environment.setdefault("OIDC_JWKS_URI", "http://rauthy:8080/auth/v1/oidc/certs")
+    environment.setdefault(
+        "OIDC_JWKS_URI", "http://rauthy:8080/auth/v1/oidc/certs"
+    )
     environment.setdefault("OIDC_CLIENT_ID", "a500-browser-client")
     environment.setdefault("MAILPIT_HOST_PORT", "8025")
     environment.setdefault(
@@ -89,7 +107,9 @@ def local_environment() -> dict[str, str]:
     )
     environment.setdefault("RAUTHY_LISTEN_SCHEME", "http")
     environment.setdefault("RAUTHY_LOCAL_TEST", "false")
-    environment.setdefault("RAUTHY_BOOTSTRAP_HOST_DIR", str(ROOT / ".rauthy-bootstrap"))
+    environment.setdefault(
+        "RAUTHY_BOOTSTRAP_HOST_DIR", str(ROOT / ".rauthy-bootstrap")
+    )
     environment.setdefault("RAUTHY_RP_ID", "localhost")
     environment.setdefault(
         "RAUTHY_RP_ORIGIN",
@@ -124,7 +144,9 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
     environment["RAUTHY_SECRET_RAFT"] = _persisted_secret(
         directory, "rauthy-secret-raft"
     )
-    environment["RAUTHY_SECRET_API"] = _persisted_secret(directory, "rauthy-secret-api")
+    environment["RAUTHY_SECRET_API"] = _persisted_secret(
+        directory, "rauthy-secret-api"
+    )
     enc_key_file = directory / "rauthy-enc-key"
     enc_key_id_file = directory / "rauthy-enc-key-id"
     if enc_key_file.exists() and enc_key_id_file.exists():
@@ -158,7 +180,9 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
         )
         if len(key_secret) < 64:
             key_secret = secrets.token_hex(32)
-            api_key_file.write_text(f"{key_name}:{key_secret}\n", encoding="utf-8")
+            api_key_file.write_text(
+                f"{key_name}:{key_secret}\n", encoding="utf-8"
+            )
             api_key_file.chmod(0o600)
     else:
         key_name, key_secret = "a500-client-update", secrets.token_hex(32)
@@ -215,7 +239,10 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
                     "secret": {"Plain": key_secret},
                     "exp": int(time.time()) + 31536000,
                     "access": [
-                        {"group": "Clients", "access_rights": ["read", "update"]}
+                        {
+                            "group": "Clients",
+                            "access_rights": ["read", "update"],
+                        }
                     ],
                 }
             ]
@@ -227,7 +254,8 @@ def prepare_rauthy_bootstrap(environment: dict[str, str]) -> None:
 
 
 def set_client_audience(environment: dict[str, str]) -> None:
-    """Set and verify Rauthy's supported default audience field for both clients."""
+    """Set and verify Rauthy's supported default audience field for both
+    clients."""
     from urllib.request import ProxyHandler, Request, build_opener
 
     issuer = environment.get(
@@ -269,7 +297,9 @@ def set_client_audience(environment: dict[str, str]) -> None:
     )
     for client_id in ("a500-browser-client", "a500-device-client"):
         endpoint = f"{issuer}/clients/{client_id}"
-        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        with opener.open(
+            Request(endpoint, headers=headers), timeout=10
+        ) as response:
             client = json.load(response)
         update = {field: client.get(field) for field in fields}
         update["default_aud"] = ["a500-api"]
@@ -282,16 +312,22 @@ def set_client_audience(environment: dict[str, str]) -> None:
         with opener.open(request, timeout=10) as response:
             if response.status not in (200, 204):
                 raise RuntimeError(
-                    f"Rauthy client audience update returned HTTP {response.status}"
+                    "Rauthy client audience update returned HTTP "
+                    f"{response.status}"
                 )
-        with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+        with opener.open(
+            Request(endpoint, headers=headers), timeout=10
+        ) as response:
             configured = json.load(response)
         if configured.get("default_aud") != ["a500-api"]:
-            raise RuntimeError("Rauthy did not persist the configured client audience")
+            raise RuntimeError(
+                "Rauthy did not persist the configured client audience"
+            )
 
 
 def set_browser_origin(environment: dict[str, str]) -> None:
-    """Set and verify the browser client's LAN redirect URI and allowed origin."""
+    """Set and verify the browser client's LAN redirect URI and allowed
+    origin."""
     from urllib.request import ProxyHandler, Request, build_opener
 
     issuer = environment.get(
@@ -309,7 +345,9 @@ def set_browser_origin(environment: dict[str, str]) -> None:
     endpoint = f"{issuer}/clients/a500-browser-client"
     opener = build_opener(ProxyHandler({}))
     headers = {"Authorization": f"API-Key {key_name}${key_secret}"}
-    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+    with opener.open(
+        Request(endpoint, headers=headers), timeout=10
+    ) as response:
         client = json.load(response)
     fields = (
         "name",
@@ -349,16 +387,22 @@ def set_browser_origin(environment: dict[str, str]) -> None:
             raise RuntimeError(
                 f"Rauthy browser origin update returned HTTP {response.status}"
             )
-    with opener.open(Request(endpoint, headers=headers), timeout=10) as response:
+    with opener.open(
+        Request(endpoint, headers=headers), timeout=10
+    ) as response:
         configured = json.load(response)
     if configured.get("redirect_uris") != [redirect_uri] or configured.get(
         "allowed_origins"
     ) != [origin]:
-        raise RuntimeError("Rauthy did not persist the configured browser origin")
+        raise RuntimeError(
+            "Rauthy did not persist the configured browser origin"
+        )
 
 
 def compose_command(environment: dict[str, str]) -> list[str]:
-    configured = environment.get("COMPOSE_COMMAND") or environment.get("PODMAN_COMPOSE")
+    configured = environment.get("COMPOSE_COMMAND") or environment.get(
+        "PODMAN_COMPOSE"
+    )
     if configured:
         command = shlex.split(configured)
     elif (
@@ -378,9 +422,13 @@ def compose_command(environment: dict[str, str]) -> list[str]:
     engine = "podman" if "podman" in command[0] else "docker"
     if (
         not shutil.which(engine)
-        or subprocess.run([engine, "info"], capture_output=True, check=False).returncode
+        or subprocess.run(
+            [engine, "info"], capture_output=True, check=False
+        ).returncode
     ):
-        raise ValueError(f"{engine} is unavailable; check its daemon/rootless setup")
+        raise ValueError(
+            f"{engine} is unavailable; check its daemon/rootless setup"
+        )
     return [
         *command,
         "--env-file",
@@ -449,7 +497,9 @@ def check_configuration(environment: dict[str, str]) -> None:
         "tgw-1.0.9.2-py3-none-any.whl",
     ):
         if not (ROOT / "wheels" / wheel).is_file():
-            raise ValueError(f"Missing wheels/{wheel}; obtain the deps-v1 release")
+            raise ValueError(
+                f"Missing wheels/{wheel}; obtain the deps-v1 release"
+            )
 
 
 def wait_ready(
@@ -505,7 +555,9 @@ def main() -> int:
     )
     arguments, replay_arguments = parser.parse_known_args()
     if replay_arguments and arguments.action != "replay":
-        parser.error("Unexpected arguments; only replay accepts backend CLI options")
+        parser.error(
+            "Unexpected arguments; only replay accepts backend CLI options"
+        )
     try:
         environment = local_environment()
         prepare_rauthy_bootstrap(environment)
@@ -569,12 +621,14 @@ def main() -> int:
                 check=True,
             )
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        # Never include configuration contents, child environments, or credentials.
+        # Never include configuration contents, child environments, or
+        # credentials.
         if isinstance(error, ValueError):
             print(str(error), file=sys.stderr)
         else:
             print(
-                "Container command failed; check prerequisites and service logs.",
+                "Container command failed; check prerequisites "
+                "and service logs.",
                 file=sys.stderr,
             )
         return 1

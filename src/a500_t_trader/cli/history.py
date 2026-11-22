@@ -38,13 +38,17 @@ def register_commands(
         required=not bool(os.environ.get("DATABASE_URL")),
         help="PostgreSQL connection URL",
     )
-    daily.add_argument("--confirm-history-persistence-permitted", action="store_true")
+    daily.add_argument(
+        "--confirm-history-persistence-permitted", action="store_true"
+    )
     indicators = commands.add_parser(
         "daily-indicators",
         help="calculate close-based SMA(5), SMA(20), and Wilder RSI(14)",
     )
     indicators.add_argument("--symbol", required=True)
-    indicators.add_argument("--start-date", required=True, type=date.fromisoformat)
+    indicators.add_argument(
+        "--start-date", required=True, type=date.fromisoformat
+    )
     indicators.add_argument(
         "--database",
         default=os.environ.get("DATABASE_URL"),
@@ -54,20 +58,31 @@ def register_commands(
     indicators.add_argument(
         "--confirm-history-persistence-permitted", action="store_true"
     )
-    indicators.add_argument("--end-date", required=True, type=date.fromisoformat)
+    indicators.add_argument(
+        "--end-date", required=True, type=date.fromisoformat
+    )
     backtest = commands.add_parser(
         "backtest", help="run an advisory minute-history backtest"
     )
-    backtest.add_argument("--config", required=True, help="local ETF/rule JSON file")
     backtest.add_argument(
-        "--account", required=True, help="initial user-entered account snapshot"
+        "--config", required=True, help="local ETF/rule JSON file"
     )
     backtest.add_argument(
-        "--symbol", help="selected configured ETF when multiple ETFs are configured"
+        "--account",
+        required=True,
+        help="initial user-entered account snapshot",
     )
-    backtest.add_argument("--start-date", required=True, type=date.fromisoformat)
+    backtest.add_argument(
+        "--symbol",
+        help="selected configured ETF when multiple ETFs are configured",
+    )
+    backtest.add_argument(
+        "--start-date", required=True, type=date.fromisoformat
+    )
     backtest.add_argument("--end-date", required=True, type=date.fromisoformat)
-    backtest.add_argument("--interval-minutes", type=int, choices=(1, 5), default=1)
+    backtest.add_argument(
+        "--interval-minutes", type=int, choices=(1, 5), default=1
+    )
     backtest.add_argument(
         "--database",
         default=os.environ.get("DATABASE_URL"),
@@ -80,16 +95,23 @@ def register_commands(
         "--minimum-commission",
         type=Decimal,
         default=Decimal(0),
-        help="minimum commission charged independently for each fill; zero disables it",
+        help=(
+            "minimum commission charged independently for each fill; "
+            "zero disables it"
+        ),
     )
     backtest.add_argument("--implementation-version", default="1")
     backtest.add_argument(
         "--confirm-history-persistence-permitted",
         action="store_true",
-        help="confirm the data provider permits local history/snapshot persistence",
+        help=(
+            "confirm the data provider permits local history/snapshot "
+            "persistence"
+        ),
     )
     cleanup = commands.add_parser(
-        "history-cleanup", help="remove reusable shared daily and minute history"
+        "history-cleanup",
+        help="remove reusable shared daily and minute history",
     )
     cleanup.add_argument(
         "--database",
@@ -129,7 +151,9 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
                 symbol, args.start_date, args.end_date
             )
             if bars is None:
-                source = market_data or MarketDataService(create_provider_from_env())
+                source = market_data or MarketDataService(
+                    create_provider_from_env()
+                )
                 bars = cast(DailyHistoryMarketData, source).get_daily_history(
                     symbol, args.start_date, args.end_date
                 )
@@ -161,7 +185,9 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
         return 0
     if args.command == "history-cleanup":
         try:
-            deleted = BacktestRepository(args.database).cleanup_shared_history()
+            deleted = BacktestRepository(
+                args.database
+            ).cleanup_shared_history()
         except Exception as error:
             print(f"Unable to clean shared history: {error}", file=sys.stderr)
             return 2
@@ -185,9 +211,13 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
         account = load_account(args.account)
         if args.symbol is not None:
             symbol = normalize_symbol(args.symbol)
-            matching = tuple(rule for rule in config.rules if rule.symbol == symbol)
+            matching = tuple(
+                rule for rule in config.rules if rule.symbol == symbol
+            )
             if not matching:
-                raise ValueError(f"{symbol} is not present in configured ETF rules")
+                raise ValueError(
+                    f"{symbol} is not present in configured ETF rules"
+                )
             config = replace(config, rules=matching)
         if len(config.rules) != 1:
             raise ValueError(
@@ -219,7 +249,9 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
                         file=sys.stderr,
                     )
                     return 2
-            minute_bars = cast(BacktestMarketData, market_data).get_history_bars(
+            minute_bars = cast(
+                BacktestMarketData, market_data
+            ).get_history_bars(
                 symbol, args.start_date, args.end_date, args.interval_minutes
             )
             if not minute_bars:
@@ -236,7 +268,9 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
                     (
                         bar
                         for bar in minute_bars
-                        if args.start_date <= bar.timestamp.date() <= args.end_date
+                        if args.start_date
+                        <= bar.timestamp.date()
+                        <= args.end_date
                         and bar.is_completed
                     ),
                     key=lambda bar: bar.timestamp,
@@ -276,9 +310,15 @@ def handle(args: argparse.Namespace, market_data: MarketData | None) -> int:
     except Exception as error:
         if isinstance(error, CapabilityUnavailableError):
             print(
-                f"Required data capability unavailable or unauthorized: {error}",
+                (
+                    "Required data capability unavailable or unauthorized: "
+                    f"{error}"
+                ),
                 file=sys.stderr,
             )
         else:
-            print(f"Unable to generate plan or backtest: {error}", file=sys.stderr)
+            print(
+                f"Unable to generate plan or backtest: {error}",
+                file=sys.stderr,
+            )
         return 2

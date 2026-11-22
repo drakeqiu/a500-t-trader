@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import fakeredis.aioredis
+from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
 
 from a500_t_trader.signal_monitor import SignalStore, create_app
@@ -34,7 +34,7 @@ def _state() -> dict[str, object]:
 
 
 def test_app_constructs_and_serves_authenticated_signal_route() -> None:
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    redis = FakeAsyncRedis(decode_responses=True)
     app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
     with TestClient(app) as client:
         response = client.get(
@@ -47,7 +47,7 @@ def test_app_constructs_and_serves_authenticated_signal_route() -> None:
 
 
 def test_signal_query_and_sse_require_valid_shared_audience_bearer() -> None:
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    redis = FakeAsyncRedis(decode_responses=True)
     app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
     with TestClient(app) as client:
         assert client.portal is not None
@@ -76,8 +76,10 @@ def test_signal_query_and_sse_require_valid_shared_audience_bearer() -> None:
         client.portal.call(lambda: redis.aclose())
 
 
-def test_api_documentation_and_openapi_require_auth_but_health_does_not() -> None:
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+def test_api_documentation_and_openapi_require_auth_but_health_does_not() -> (
+    None
+):
+    redis = FakeAsyncRedis(decode_responses=True)
     app = create_app(redis, CONFIG, authenticator=_TestAuthenticator())
     with TestClient(app) as client:
         assert client.portal is not None

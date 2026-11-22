@@ -12,7 +12,9 @@ HEADER = (
 )
 
 
-def _row(trade_number: str, *, price: str = "1.264", quantity: str = "8000") -> str:
+def _row(
+    trade_number: str, *, price: str = "1.264", quantity: str = "8000"
+) -> str:
     amount = str(int(quantity) * 1264 // 1000)
     return (
         f"20261030,10:01:02,563360,A500基金,买入,{quantity},{price},{amount},"

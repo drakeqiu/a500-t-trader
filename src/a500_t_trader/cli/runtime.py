@@ -62,14 +62,19 @@ def create_provider_from_env[ProviderT](
     provider_factory: Callable[..., ProviderT] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> ProviderT:
-    """Load credentials, prepare the SDK directory, and start the real provider."""
-    factory = provider_factory or cast(Callable[..., ProviderT], AmazingDataProvider)
+    """Load credentials, prepare the SDK directory, and start the real
+    provider."""
+    factory = provider_factory or cast(
+        Callable[..., ProviderT], AmazingDataProvider
+    )
     process_env = os.environ if env is None else env
     settings = _read_dotenv(Path(env_file))
     settings.update(process_env)
 
     if any(not settings.get(key) for key in _REQUIRED_SETTINGS):
-        raise MissingConfigurationError("Missing required AD provider configuration")
+        raise MissingConfigurationError(
+            "Missing required AD provider configuration"
+        )
     username = settings["AD_USERNAME"]
     password = settings["AD_PASSWORD"]
     host = settings["AD_HOST"]
@@ -81,7 +86,9 @@ def create_provider_from_env[ProviderT](
         raise ConfigurationError("AD_PORT must be a valid TCP port")
 
     home_path = (
-        Path(home) if home is not None else Path(settings.get("HOME") or Path.home())
+        Path(home)
+        if home is not None
+        else Path(settings.get("HOME") or Path.home())
     )
     _ensure_sdk_directory(home_path / "mdga_file")
 
@@ -99,7 +106,9 @@ def create_provider_from_env[ProviderT](
                     "network retries"
                 ) from None
             if category == "authentication":
-                raise AuthenticationError("AmazingData authentication failed") from None
+                raise AuthenticationError(
+                    "AmazingData authentication failed"
+                ) from None
             if category == "permission":
                 raise PermissionDeniedError(
                     "AmazingData provider permission denied"
@@ -108,14 +117,18 @@ def create_provider_from_env[ProviderT](
                 raise ConfigurationError(
                     "AmazingData provider configuration failed"
                 ) from None
-            raise ProviderStartupError("AmazingData provider startup failed") from None
+            raise ProviderStartupError(
+                "AmazingData provider startup failed"
+            ) from None
     raise AssertionError("bounded startup retry loop ended unexpectedly")
 
 
 def _ensure_sdk_directory(directory: Path) -> None:
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        descriptor, probe = tempfile.mkstemp(prefix=".mdga-write-probe-", dir=directory)
+        descriptor, probe = tempfile.mkstemp(
+            prefix=".mdga-write-probe-", dir=directory
+        )
         os.close(descriptor)
         try:
             os.unlink(probe)
@@ -179,7 +192,8 @@ def _error_category(error: Exception) -> str:
     ):
         return "authentication"
     if isinstance(error, PermissionError) or any(
-        word in message for word in ("permission", "forbidden", "access denied")
+        word in message
+        for word in ("permission", "forbidden", "access denied")
     ):
         return "permission"
     if any(

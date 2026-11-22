@@ -1,4 +1,5 @@
-"""Publish completed historical minute bars through the normalized event path."""
+"""Publish completed historical minute bars through the normalized event
+path."""
 
 from __future__ import annotations
 
@@ -19,7 +20,9 @@ from .rabbitmq import RabbitMQPublisher
 
 def load_history(path: Path, symbol: str | None = None) -> list[MinuteBar]:
     document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or not isinstance(document.get("bars"), list):
+    if not isinstance(document, dict) or not isinstance(
+        document.get("bars"), list
+    ):
         raise ValueError("market history must contain a bars array")
     bars: list[MinuteBar] = []
     for row in document["bars"]:
@@ -30,9 +33,13 @@ def load_history(path: Path, symbol: str | None = None) -> list[MinuteBar]:
         interval_minutes = int(row["interval_minutes"])
         timestamp = datetime.fromisoformat(str(row["timestamp"]))
         if interval_minutes != 1:
-            raise ValueError("market history replay accepts only 1-minute bars")
+            raise ValueError(
+                "market history replay accepts only 1-minute bars"
+            )
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
-            raise ValueError("market history bar timestamps must be timezone-aware")
+            raise ValueError(
+                "market history bar timestamps must be timezone-aware"
+            )
         bar_symbol = str(row.get("symbol", document.get("symbol", "")))
         if symbol is not None and bar_symbol != symbol:
             continue
@@ -73,15 +80,23 @@ def replay_history(
     wait: Any = time.sleep,
 ) -> int:
     if not math.isfinite(speed) or speed <= 0:
-        raise ValueError("replay speed must be a finite number greater than zero")
+        raise ValueError(
+            "replay speed must be a finite number greater than zero"
+        )
     if start_time is not None and (
         start_time.tzinfo is None or start_time.utcoffset() is None
     ):
         raise ValueError("replay start time must be timezone-aware")
     warmup = [
-        bar for bar in bars if start_time is not None and bar.timestamp < start_time
+        bar
+        for bar in bars
+        if start_time is not None and bar.timestamp < start_time
     ]
-    active = [bar for bar in bars if start_time is None or bar.timestamp >= start_time]
+    active = [
+        bar
+        for bar in bars
+        if start_time is None or bar.timestamp >= start_time
+    ]
     published = 0
     for bar in warmup:
         if stop is not None and stop.is_set():
@@ -93,7 +108,9 @@ def replay_history(
         if stop is not None and stop.is_set():
             break
         if previous is not None:
-            delay = max(0.0, (bar.timestamp - previous).total_seconds() / speed)
+            delay = max(
+                0.0, (bar.timestamp - previous).total_seconds() / speed
+            )
             if stop is not None:
                 if stop.wait(delay):
                     break
@@ -123,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         replay_history(
             bars,
-            lambda bar, *, warmup: publisher.publish(bar, replay=True, warmup=warmup),
+            lambda bar, *, warmup: publisher.publish(
+                bar, replay=True, warmup=warmup
+            ),
             start_time=args.start_time,
             speed=args.speed,
         )

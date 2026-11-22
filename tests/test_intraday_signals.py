@@ -7,7 +7,9 @@ from zoneinfo import ZoneInfo
 import pytest
 from _pytest.capture import CaptureFixture
 
-from a500_t_trader.backtest.intraday_signals import replay_fixed_quantity_signals
+from a500_t_trader.backtest.intraday_signals import (
+    replay_fixed_quantity_signals,
+)
 from a500_t_trader.cli.main import main
 from a500_t_trader.market_data import MinuteBar
 
@@ -22,7 +24,8 @@ def test_fixed_quantity_replay_emits_no_candidate_before_warmup() -> None:
     bars = tuple(
         MinuteBar(
             "563360",
-            datetime(2026, 10, 30, 9, 30, tzinfo=zone) + timedelta(minutes=5 * index),
+            datetime(2026, 10, 30, 9, 30, tzinfo=zone)
+            + timedelta(minutes=5 * index),
             5,
             Decimal("1.000"),
             Decimal("1.001"),

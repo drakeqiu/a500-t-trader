@@ -32,8 +32,12 @@ def test_shared_daily_history_merges_coverage_and_replaces_observations(
     repository = BacktestRepository(postgres_url)
     start, end = date(2026, 1, 1), date(2026, 1, 6)
     assert repository.get_shared_daily_history("510300", start, end) is None
-    repository.save_daily_history((_bar("510300", 2, "2"),), start, date(2026, 1, 2))
-    repository.save_daily_history((_bar("510300", 5, "5"),), date(2026, 1, 5), end)
+    repository.save_daily_history(
+        (_bar("510300", 2, "2"),), start, date(2026, 1, 2)
+    )
+    repository.save_daily_history(
+        (_bar("510300", 5, "5"),), date(2026, 1, 5), end
+    )
     assert repository.get_shared_daily_history("510300", start, end) is None
     repository.save_daily_history(
         (), date(2026, 1, 3), date(2026, 1, 4), symbol="510300"
@@ -43,7 +47,9 @@ def test_shared_daily_history_merges_coverage_and_replaces_observations(
     assert [row.timestamp.day for row in rows] == [2, 5]
     assert rows[0].close == Decimal("2")
     alternate_timestamp = datetime(2026, 1, 2, 15, tzinfo=SHANGHAI)
-    later_observation = replace(_bar("510300", 2, "20"), timestamp=alternate_timestamp)
+    later_observation = replace(
+        _bar("510300", 2, "20"), timestamp=alternate_timestamp
+    )
     repository.save_daily_history(
         (_bar("510300", 5, "5"), later_observation), start, end
     )
@@ -88,7 +94,9 @@ def test_shared_daily_history_distinguishes_gaps_and_includes_boundaries(
     )
 
 
-def test_shared_daily_history_merges_overlapping_ranges(postgres_url: str) -> None:
+def test_shared_daily_history_merges_overlapping_ranges(
+    postgres_url: str,
+) -> None:
     repository = BacktestRepository(postgres_url)
     repository.save_daily_history(
         (), date(2026, 1, 1), date(2026, 1, 4), symbol="510302"
@@ -115,7 +123,9 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
                 return (_bar(symbol, 2, "1", year=2023),)
             return ()
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -133,12 +143,15 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
         assert status["status"] == "succeeded"
         assert not any("result" in key or "bar" in key for key in status)
         assert (
-            client.get(f"/v1/jobs/{job['id']}/results", headers=headers).status_code
+            client.get(
+                f"/v1/jobs/{job['id']}/results", headers=headers
+            ).status_code
             == 404
         )
         assert (
             client.get(
-                f"/v1/jobs/{job['id']}", headers={"Authorization": "Bearer bob"}
+                f"/v1/jobs/{job['id']}",
+                headers={"Authorization": "Bearer bob"},
             ).status_code
             == 404
         )
@@ -147,7 +160,9 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
     shared = repository.get_shared_daily_history(
         "563360", date(2023, 1, 1), date(2024, 12, 31)
     )
-    assert shared is not None and [bar.timestamp.year for bar in shared] == [2023]
+    assert shared is not None and [bar.timestamp.year for bar in shared] == [
+        2023
+    ]
     assert (
         repository.get_shared_daily_history(
             "563360", date(2024, 1, 1), date(2024, 12, 31)
@@ -156,7 +171,8 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
     )
     with psycopg.connect(postgres_url) as db:
         staged_row = db.execute(
-            "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+            "SELECT count(*) FROM daily_history_job_fetched_bars "
+            "WHERE job_id=%s",
             (job["id"],),
         ).fetchone()
         result_table_row = db.execute(
@@ -168,7 +184,9 @@ def test_successful_job_publishes_history_and_preserves_empty_query_coverage(
     assert result_table_row[0] is None
 
     refreshed = _bar("563360", 2, "9", year=2023)
-    repository.save_daily_history((refreshed,), date(2023, 1, 1), date(2023, 12, 31))
+    repository.save_daily_history(
+        (refreshed,), date(2023, 1, 1), date(2023, 12, 31)
+    )
     assert repository.get_shared_daily_history(
         "563360", date(2023, 1, 2), date(2023, 1, 2)
     ) == (refreshed,)
@@ -192,7 +210,9 @@ def test_failed_job_does_not_publish_partial_shared_history(
                 raise PermissionError("provider denied")
             return (_bar(symbol, 2, "1", year=2023),)
 
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     with TestClient(app) as client:
         client.post(
             "/v1/jobs",
@@ -214,8 +234,12 @@ def test_failed_job_does_not_publish_partial_shared_history(
     )
 
 
-def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> None:
-    app = create_app(postgres_url, lambda token: token, persistence_permitted=True)
+def test_cancelled_job_does_not_publish_shared_history(
+    postgres_url: str,
+) -> None:
+    app = create_app(
+        postgres_url, lambda token: token, persistence_permitted=True
+    )
     headers = {"Authorization": "Bearer alice"}
     with TestClient(app) as client:
         job = client.post(
@@ -252,7 +276,8 @@ def test_cancelled_job_does_not_publish_shared_history(postgres_url: str) -> Non
     )
     with psycopg.connect(postgres_url) as db:
         staged_row = db.execute(
-            "SELECT count(*) FROM daily_history_job_fetched_bars WHERE job_id=%s",
+            "SELECT count(*) FROM daily_history_job_fetched_bars "
+            "WHERE job_id=%s",
             (job["id"],),
         ).fetchone()
     assert staged_row is not None
@@ -279,15 +304,26 @@ def test_authenticated_daily_history_symbols_list_shared_coverage(
             "/v1/history/daily/symbols",
             headers={"Authorization": "Bearer alice"},
         )
-        assert client.get("/v1/history/daily/symbols/510300/ranges").status_code == 401
+        assert (
+            client.get("/v1/history/daily/symbols/510300/ranges").status_code
+            == 401
+        )
         ranges = client.get(
             "/v1/history/daily/symbols/SH.510300/ranges",
             headers={"Authorization": "Bearer alice"},
         )
     assert response.status_code == 200
     assert response.json()["symbols"] == [
-        {"symbol": "510300", "start_date": "2026-01-01", "end_date": "2026-01-08"},
-        {"symbol": "510500", "start_date": "2025-12-01", "end_date": "2026-01-09"},
+        {
+            "symbol": "510300",
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-08",
+        },
+        {
+            "symbol": "510500",
+            "start_date": "2025-12-01",
+            "end_date": "2026-01-09",
+        },
     ]
     assert ranges.status_code == 200
     assert ranges.json() == {
@@ -315,7 +351,9 @@ def test_authenticated_daily_history_api_reports_coverage_and_pages_rows(
             "limit": 1,
             "offset": 0,
         }
-        assert client.get("/v1/history/daily", params=params).status_code == 401
+        assert (
+            client.get("/v1/history/daily", params=params).status_code == 401
+        )
         first = client.get(
             "/v1/history/daily",
             params=params,

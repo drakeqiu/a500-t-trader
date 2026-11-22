@@ -35,7 +35,10 @@ def test_calendar_loads_at_startup_and_reports_known_trading_dates() -> None:
 
     assert provider.calls == 1
     assert calendar.session_status() == (SessionState.TRADING, False)
-    assert calendar.session_status(date(2026, 11, 3)) == (SessionState.CLOSED, False)
+    assert calendar.session_status(date(2026, 11, 3)) == (
+        SessionState.CLOSED,
+        False,
+    )
     assert provider.calls == 1
 
 
@@ -58,8 +61,14 @@ def test_refresh_failure_retains_last_valid_calendar_as_stale() -> None:
     provider.error = OSError("calendar unavailable")
     now[0] = datetime(2026, 11, 3, tzinfo=SHANGHAI)
 
-    assert calendar.session_status(date(2026, 11, 2)) == (SessionState.TRADING, True)
-    assert calendar.session_status(date(2026, 11, 4)) == (SessionState.CLOSED, True)
+    assert calendar.session_status(date(2026, 11, 2)) == (
+        SessionState.TRADING,
+        True,
+    )
+    assert calendar.session_status(date(2026, 11, 4)) == (
+        SessionState.CLOSED,
+        True,
+    )
     assert provider.calls == 2
 
 
@@ -71,7 +80,10 @@ def test_no_valid_calendar_means_unknown_not_inferred_weekday_status() -> None:
     )
 
     assert calendar.session_status() == (SessionState.UNKNOWN, True)
-    assert calendar.session_status(date(2026, 11, 7)) == (SessionState.UNKNOWN, True)
+    assert calendar.session_status(date(2026, 11, 7)) == (
+        SessionState.UNKNOWN,
+        True,
+    )
     assert provider.calls == 1
 
 

@@ -11,7 +11,11 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, cast
 
 from ..market_data import SHANGHAI, MinuteBar
-from .intraday_v1_config import RULE_SOURCE_SHA256, STRATEGY_ID, IntradayV1Config
+from .intraday_v1_config import (
+    RULE_SOURCE_SHA256,
+    STRATEGY_ID,
+    IntradayV1Config,
+)
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -74,9 +78,9 @@ TECHNICAL_PARAMETERS: dict[str, Any] = {
     },
 }
 TECHNICAL_PARAMETER_HASH = hashlib.sha256(
-    json.dumps(TECHNICAL_PARAMETERS, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
-    )
+    json.dumps(
+        TECHNICAL_PARAMETERS, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 ).hexdigest()
 
 
@@ -118,7 +122,8 @@ def analyze_intraday_technical(
         or config.rule_source_sha256.lower() != RULE_SOURCE_SHA256
     ):
         raise ValueError(
-            "technical analysis requires the tracked intraday ETF T V1.0 configuration"
+            "technical analysis requires the tracked intraday ETF T "
+            "V1.0 configuration"
         )
     parameters = TECHNICAL_PARAMETERS if config is None else config.parameters
     if score_thresholds is not None:
@@ -128,10 +133,18 @@ def analyze_intraday_technical(
         parameters = dict(parameters)
         scores = dict(score_parameters)
         for name, value in score_thresholds.items():
-            if name in {"direction_delta", "take_profit", "buyback", "buy", "sell"}:
+            if name in {
+                "direction_delta",
+                "take_profit",
+                "buyback",
+                "buy",
+                "sell",
+            }:
                 scores[name] = value
         parameters["scores"] = scores
-    parameter_hash = TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
+    parameter_hash = (
+        TECHNICAL_PARAMETER_HASH if config is None else config.fingerprint
+    )
     if score_thresholds is not None:
         canonical_parameters = json.dumps(
             parameters, sort_keys=True, separators=(",", ":")
@@ -149,7 +162,9 @@ def analyze_intraday_technical(
         )
     if score_weights is not None:
         canonical_weights = json.dumps(
-            dict(sorted(score_weights.items())), sort_keys=True, separators=(",", ":")
+            dict(sorted(score_weights.items())),
+            sort_keys=True,
+            separators=(",", ":"),
         )
         parameter_hash = hashlib.sha256(
             f"{parameter_hash}:{canonical_weights}".encode()
@@ -198,7 +213,10 @@ def _analyze_symbol(
             or bar.low > bar.high
             or bar.volume < 0
             or (bar.amount is not None and bar.amount < ZERO)
-            or (prior_timestamp is not None and bar.timestamp <= prior_timestamp)
+            or (
+                prior_timestamp is not None
+                and bar.timestamp <= prior_timestamp
+            )
         ):
             invalid_data = True
             continue
@@ -206,7 +224,9 @@ def _analyze_symbol(
         valid.append(bar)
     if _has_session_gap(valid):
         invalid_data = True
-        reasons.append("missing completed five-minute bars within a trading session")
+        reasons.append(
+            "missing completed five-minute bars within a trading session"
+        )
     if invalid_data:
         reasons.append("invalid or mismatched five-minute bar data")
     if len(valid) < MINIMUM_HISTORY:
@@ -218,7 +238,8 @@ def _analyze_symbol(
     grid_anchor = indicators.get("grid_anchor", indicators.get("vwap_0945"))
     if grid_anchor is None:
         grid_settings = cast(
-            Mapping[str, Any], parameters.get("grid", TECHNICAL_PARAMETERS["grid"])
+            Mapping[str, Any],
+            parameters.get("grid", TECHNICAL_PARAMETERS["grid"]),
         )
         anchor = grid_settings.get("anchor", "09:45")
         reasons.append(f"missing {anchor} VWAP anchor")
@@ -239,7 +260,9 @@ def _analyze_symbol(
             breakdown["atr_grid_buy"] = 0.0
             breakdown["atr_grid_sell"] = 0.0
         else:
-            grid_step, grid_buy, grid_sell, grid_buy_level, grid_sell_level = grid
+            grid_step, grid_buy, grid_sell, grid_buy_level, grid_sell_level = (
+                grid
+            )
             breakdown["atr_grid_buy"] = grid_buy
             breakdown["atr_grid_sell"] = grid_sell
             indicators["grid_step"] = grid_step
@@ -249,7 +272,12 @@ def _analyze_symbol(
         breakdown = None
     scores = _scores(breakdown)
     candidate = "WAIT"
-    if enough_history and not invalid_data and grid_anchor is not None and breakdown:
+    if (
+        enough_history
+        and not invalid_data
+        and grid_anchor is not None
+        and breakdown
+    ):
         delta = (
             breakdown["buy_total"]
             + breakdown.get("atr_grid_buy", 0.0)
@@ -259,14 +287,18 @@ def _analyze_symbol(
         direction_confirmed = _confirmations(
             valid, indicators, breakdown, grid_buy_level, grid_sell_level
         )
-        timing_parameters = parameters.get("timing", TECHNICAL_PARAMETERS["timing"])
+        timing_parameters = parameters.get(
+            "timing", TECHNICAL_PARAMETERS["timing"]
+        )
         window = (
             _window_allows(as_of or valid[-1].timestamp, timing_parameters)
             if isinstance(timing_parameters, Mapping)
             else (False, False)
         )
         buy_total = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
-        sell_total = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
+        sell_total = breakdown["sell_total"] + breakdown.get(
+            "atr_grid_sell", 0.0
+        )
         score_parameters = parameters.get("scores")
         signal_parameters = parameters.get("signals", {})
         if not isinstance(score_parameters, Mapping) or not isinstance(
@@ -329,7 +361,9 @@ def _analyze_symbol(
                     else None
                 )
                 bb_quantity = (
-                    buyback.get("quantity") if isinstance(buyback, Mapping) else None
+                    buyback.get("quantity")
+                    if isinstance(buyback, Mapping)
+                    else None
                 )
                 if (
                     tp_price is not None
@@ -364,7 +398,9 @@ def _analyze_symbol(
                             and buy_total >= weak_score
                             and _golden_cross(indicators)
                             and len(valid) >= 3
-                            and valid[-1].close > valid[-2].close > valid[-3].close
+                            and valid[-1].close
+                            > valid[-2].close
+                            > valid[-3].close
                         ):
                             candidate = "BUYBACK"
                     else:
@@ -377,7 +413,8 @@ def _analyze_symbol(
             reasons.append("BEAR bans ordinary BUY")
     if candidate == "WAIT" and not reasons:
         reasons.append(
-            "technical threshold, confirmation, trend, or grid conditions not met"
+            "technical threshold, confirmation, trend, or grid "
+            "conditions not met"
         )
     risk_status = (
         "BLOCKED"
@@ -484,13 +521,15 @@ def _indicators(
     if len(closes) >= boll_period:
         window = closes[-boll_period:]
         boll_mid = sum(window, ZERO) / Decimal(boll_period)
-        variance = sum(((value - boll_mid) ** 2 for value in window), ZERO) / Decimal(
-            boll_period
-        )
+        variance = sum(
+            ((value - boll_mid) ** 2 for value in window), ZERO
+        ) / Decimal(boll_period)
         boll_sigma = variance.sqrt()
         boll_upper = boll_mid + Decimal(boll_width) * boll_sigma
         boll_lower = boll_mid - Decimal(boll_width) * boll_sigma
-    kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(bars, *kdj_periods)
+    kdj_k, kdj_d, kdj_j, kdj_prev_k, kdj_prev_d, kdj_min = _kdj(
+        bars, *kdj_periods
+    )
     rsi, previous_rsi = _wilder_rsi(closes, rsi_period)
     atr = _wilder_atr(bars, atr_period)
     grid_settings = cast(
@@ -544,7 +583,10 @@ def _ema(values: list[Decimal], period: int) -> Decimal | None:
 
 
 def _kdj(
-    bars: list[MinuteBar], period: int = 9, k_smoothing: int = 3, d_smoothing: int = 3
+    bars: list[MinuteBar],
+    period: int = 9,
+    k_smoothing: int = 3,
+    d_smoothing: int = 3,
 ) -> tuple[
     Decimal | None,
     Decimal | None,
@@ -554,7 +596,7 @@ def _kdj(
     Decimal | None,
 ]:
     if len(bars) < period:
-        return (None,) * 6
+        return (None, None, None, None, None, None)
     k = d = Decimal(50)
     values = []
     for end in range(period - 1, len(bars)):
@@ -605,7 +647,9 @@ def _session_vwaps(
         return None, None
     today = bars[-1].timestamp.astimezone(SHANGHAI).date()
     session = [
-        bar for bar in bars if bar.timestamp.astimezone(SHANGHAI).date() == today
+        bar
+        for bar in bars
+        if bar.timestamp.astimezone(SHANGHAI).date() == today
     ]
     amount = volume = ZERO
     anchor = None
@@ -635,7 +679,9 @@ def _trend(
     )
     indicator_settings = cast(
         Mapping[str, Any],
-        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+        technical_settings.get(
+            "indicators", TECHNICAL_PARAMETERS["indicators"]
+        ),
     )
     fast, slow = indicator_settings.get("ema", (20, 60))
     atr_period = indicator_settings.get("atr", 14)
@@ -643,7 +689,9 @@ def _trend(
     ema_slow = indicators.get(f"ema_{slow}")
     atr = indicators.get(f"atr_{atr_period}")
     previous = (
-        _ema([bar.close for bar in bars[:-3]], fast) if len(bars) >= fast + 44 else None
+        _ema([bar.close for bar in bars[:-3]], fast)
+        if len(bars) >= fast + 44
+        else None
     )
     if (
         ema_fast is None
@@ -721,7 +769,8 @@ def _score_components(
         raise ValueError("configured score weights are unavailable")
     settings = parameters or TECHNICAL_PARAMETERS
     score_settings = cast(
-        Mapping[str, Any], settings.get("scores", TECHNICAL_PARAMETERS["scores"])
+        Mapping[str, Any],
+        settings.get("scores", TECHNICAL_PARAMETERS["scores"]),
     )
     kdj_weight = Decimal(str(weights.get("kdj", 8)))
     rsi_weight = Decimal(str(weights.get("rsi", 7)))
@@ -772,8 +821,12 @@ def _score_components(
     boll_start = Decimal(str(score_settings["bollinger_z_start"]))
     boll_full = Decimal(str(score_settings["bollinger_z_full"]))
     z = ZERO if sigma == ZERO else (close - mid) / (Decimal(2) * sigma)
-    boll_buy = bollinger_weight * _clip((-z - boll_start) / (boll_full - boll_start))
-    boll_sell = bollinger_weight * _clip((z - boll_start) / (boll_full - boll_start))
+    boll_buy = bollinger_weight * _clip(
+        (-z - boll_start) / (boll_full - boll_start)
+    )
+    boll_sell = bollinger_weight * _clip(
+        (z - boll_start) / (boll_full - boll_start)
+    )
     k, d = indicators["kdj_k"], indicators["kdj_d"]
     pk, pd, recent_min = (
         indicators["kdj_previous_k"],
@@ -815,8 +868,12 @@ def _score_components(
     v = (close - vwap) / atr
     vwap_start = Decimal(str(score_settings["vwap_atr_start"]))
     vwap_full = Decimal(str(score_settings["vwap_atr_full"]))
-    vwap_buy = vwap_weight * _clip((-v - vwap_start) / (vwap_full - vwap_start))
-    vwap_sell = vwap_weight * _clip((v - vwap_start) / (vwap_full - vwap_start))
+    vwap_buy = vwap_weight * _clip(
+        (-v - vwap_start) / (vwap_full - vwap_start)
+    )
+    vwap_sell = vwap_weight * _clip(
+        (v - vwap_start) / (vwap_full - vwap_start)
+    )
     return {
         "ema_buy": float(ema_buy),
         "ema_sell": float(ema_sell),
@@ -830,7 +887,9 @@ def _score_components(
         "vwap_sell": float(vwap_sell),
         "atr_grid": 0.0,
         "buy_total": float(ema_buy + boll_buy + kdj_buy + rsi_buy + vwap_buy),
-        "sell_total": float(ema_sell + boll_sell + kdj_sell + rsi_sell + vwap_sell),
+        "sell_total": float(
+            ema_sell + boll_sell + kdj_sell + rsi_sell + vwap_sell
+        ),
     }
 
 
@@ -852,11 +911,15 @@ def _grid(
     )
     weights = cast(
         Mapping[str, Any],
-        score_settings.get("weights", TECHNICAL_PARAMETERS["scores"]["weights"]),
+        score_settings.get(
+            "weights", TECHNICAL_PARAMETERS["scores"]["weights"]
+        ),
     )
     indicator_settings = cast(
         Mapping[str, Any],
-        technical_settings.get("indicators", TECHNICAL_PARAMETERS["indicators"]),
+        technical_settings.get(
+            "indicators", TECHNICAL_PARAMETERS["indicators"]
+        ),
     )
     atr_period = indicator_settings.get("atr", 14)
     anchor, atr, close = (
@@ -874,7 +937,11 @@ def _grid(
     if tick <= ZERO or cost < ZERO or close <= ZERO:
         return None
     strong_trend = trend in ("STRONG_BULL", "STRONG_BEAR")
-    factor = Decimal(str(settings["strong_trend_multiplier"])) if strong_trend else ONE
+    factor = (
+        Decimal(str(settings["strong_trend_multiplier"]))
+        if strong_trend
+        else ONE
+    )
     atr_ratio = atr / close
     minimum = Decimal(str(settings["minimum_atr_ratio"]))
     maximum = Decimal(str(settings["maximum_atr_ratio"]))
@@ -907,9 +974,9 @@ def _grid(
                 time(13, 30),
                 time(14, 0),
             }
-            changed = abs(calculated_step - previous_step) / previous_step >= Decimal(
-                "0.20"
-            )
+            changed = abs(
+                calculated_step - previous_step
+            ) / previous_step >= Decimal("0.20")
             if (
                 not reevaluate
                 or not changed
@@ -998,8 +1065,12 @@ def _confirmations(
     )
     lower = indicators["bollinger_lower"]
     upper = indicators["bollinger_upper"]
-    boll_buy = lower is not None and previous.low <= lower and current.close > lower
-    boll_sell = upper is not None and previous.high >= upper and current.close < upper
+    boll_buy = (
+        lower is not None and previous.low <= lower and current.close > lower
+    )
+    boll_sell = (
+        upper is not None and previous.high >= upper and current.close < upper
+    )
     anchor, step = (
         indicators.get("grid_anchor", indicators.get("vwap_0945")),
         indicators["grid_step"],
@@ -1008,12 +1079,16 @@ def _confirmations(
     if anchor is not None and step is not None and buy_level:
         index = int(buy_level[1:])
         level = anchor - step * index
-        grid_buy = min(bar.low for bar in bars[-2:]) <= level and current.close > level
+        grid_buy = (
+            min(bar.low for bar in bars[-2:]) <= level
+            and current.close > level
+        )
     if anchor is not None and step is not None and sell_level:
         index = int(sell_level[1:])
         level = anchor + step * index
         grid_sell = (
-            max(bar.high for bar in bars[-2:]) >= level and current.close < level
+            max(bar.high for bar in bars[-2:]) >= level
+            and current.close < level
         )
     rising = current.close > previous.close
     falling = current.close < previous.close
@@ -1025,7 +1100,9 @@ def _confirmations(
 def _window_allows(
     as_of: datetime, parameters: Mapping[str, object] | None = None
 ) -> tuple[bool, bool]:
-    settings = cast(Mapping[str, Any], parameters or TECHNICAL_PARAMETERS["timing"])
+    settings = cast(
+        Mapping[str, Any], parameters or TECHNICAL_PARAMETERS["timing"]
+    )
     stamp = as_of.astimezone(SHANGHAI).time()
     windows = settings["buy_sell_windows"]
     parsed_windows = [
@@ -1034,8 +1111,12 @@ def _window_allows(
     ]
     normal = any(start <= stamp < end for start, end in parsed_windows)
     no_buy_after = time.fromisoformat(str(settings["no_buy_after"]))
-    closeout_only_after = time.fromisoformat(str(settings["closeout_only_after"]))
-    protection_only_after = time.fromisoformat(str(settings["protection_only_after"]))
+    closeout_only_after = time.fromisoformat(
+        str(settings["closeout_only_after"])
+    )
+    protection_only_after = time.fromisoformat(
+        str(settings["protection_only_after"])
+    )
     sell_cutoff = min(closeout_only_after, protection_only_after)
     buy = normal and stamp < no_buy_after
     sell = stamp < sell_cutoff and (
@@ -1051,4 +1132,8 @@ def _scores(
         return {"buy": None, "sell": None, "delta": None}
     buy = breakdown["buy_total"] + breakdown.get("atr_grid_buy", 0.0)
     sell = breakdown["sell_total"] + breakdown.get("atr_grid_sell", 0.0)
-    return {"buy": round(buy, 2), "sell": round(sell, 2), "delta": round(buy - sell, 2)}
+    return {
+        "buy": round(buy, 2),
+        "sell": round(sell, 2),
+        "delta": round(buy - sell, 2),
+    }

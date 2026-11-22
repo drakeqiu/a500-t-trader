@@ -24,14 +24,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--factory",
         default=os.environ.get("TGW_CONNECTION_FACTORY"),
         help=(
-            "external module:callable that connects tgw and returns a push connection"
+            "external module:callable that connects tgw and returns "
+            "a push connection"
         ),
     )
     parser.add_argument(
         "--symbols", required=True, help="comma-separated security codes"
     )
     parser.add_argument(
-        "--tgw-config", type=Path, help="JSON file passed to the external factory"
+        "--tgw-config",
+        type=Path,
+        help="JSON file passed to the external factory",
     )
     args = parser.parse_args(argv)
     if market_data_mode() is not MarketDataMode.TGW:
@@ -42,7 +45,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     options = _load_config(args.tgw_config)
     config = CollectorConfig(
         symbols=tuple(
-            symbol.strip() for symbol in args.symbols.split(",") if symbol.strip()
+            symbol.strip()
+            for symbol in args.symbols.split(",")
+            if symbol.strip()
         ),
         connection_options=options,
     )
@@ -70,7 +75,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _load_factory(reference: str) -> Callable[[CollectorConfig], PushConnection]:
+def _load_factory(
+    reference: str,
+) -> Callable[[CollectorConfig], PushConnection]:
     module_name, separator, attribute = reference.partition(":")
     if not separator or not module_name or not attribute:
         raise ValueError("factory must use module:callable syntax")
@@ -84,7 +91,9 @@ def _load_config(path: Path | None) -> dict[str, object] | None:
     if path is None:
         return None
     value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) for key in value
+    ):
         raise ValueError("tgw config JSON must be an object with string keys")
     return cast(dict[str, object], value)
 

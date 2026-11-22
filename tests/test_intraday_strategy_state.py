@@ -70,14 +70,18 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(
     store.record_recommendation(recommendation)
 
     assert not store.confirm_fill(
-        StrategyFill("sim-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "sim-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=False,
         simulated=True,
         cooldown_minutes=10,
     )
     assert store.trade_pairs() == []
     assert not store.confirm_fill(
-        StrategyFill("manual-1", None, "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "manual-1", None, "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=True,
         simulated=False,
         cooldown_minutes=10,
@@ -85,7 +89,9 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(
     assert store.trade_pairs() == []
 
     assert store.confirm_fill(
-        StrategyFill("actual-buy", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "actual-buy", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=True,
         simulated=False,
         order_state="filled",
@@ -102,7 +108,9 @@ def test_only_confirmed_linked_actual_fills_change_pair_state(
         }
     ]
 
-    sell = StrategyRecommendation("rec-2", "510300", "sell", NOW, grid_version=4)
+    sell = StrategyRecommendation(
+        "rec-2", "510300", "sell", NOW, grid_version=4
+    )
     store.record_recommendation(sell)
     assert store.confirm_fill(
         StrategyFill(
@@ -135,7 +143,12 @@ def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(
     ) -> bool:
         store.record_recommendation(
             StrategyRecommendation(
-                recommendation_id, "510300", side, NOW, grid_version=1, grid_layer=layer
+                recommendation_id,
+                "510300",
+                side,
+                NOW,
+                grid_version=1,
+                grid_layer=layer,
             )
         )
         return store.confirm_fill(
@@ -156,14 +169,20 @@ def test_sell_first_pairs_allocate_sellable_inventory_and_buy_only_to_close(
 
     assert fill("sell-1", "sell-rec-1", "pair-1", "sell", 120, 0)
     assert fill("sell-2", "sell-rec-2", "pair-2", "sell", 80, 1)
-    with pytest.raises(ValueError, match="unallocated initial sellable inventory"):
+    with pytest.raises(
+        ValueError, match="unallocated initial sellable inventory"
+    ):
         fill("sell-3", "sell-rec-3", "pair-3", "sell", 101, 2)
 
-    with pytest.raises(ValueError, match="outstanding linked strategy sell quantity"):
+    with pytest.raises(
+        ValueError, match="outstanding linked strategy sell quantity"
+    ):
         fill("buy-too-much", "buy-rec-too-much", "pair-1", "buy", 121, 0)
     assert fill("buy-part", "buy-rec-part", "pair-1", "buy", 70, 1)
     assert store.trade_pairs()[0]["status"] == "open"
-    with pytest.raises(ValueError, match="unallocated initial sellable inventory"):
+    with pytest.raises(
+        ValueError, match="unallocated initial sellable inventory"
+    ):
         fill(
             "sell-after-partial-buy",
             "sell-rec-after-partial-buy",
@@ -180,13 +199,17 @@ def test_recommendations_and_strategy_fills_do_not_change_account_snapshot(
     postgres_url: str,
 ) -> None:
     store = IntradayStrategyStateStore(postgres_url)
-    holdings = InitialHoldings("510300", NOW, 1000, Decimal("3.85"), 2500, 2000)
+    holdings = InitialHoldings(
+        "510300", NOW, 1000, Decimal("3.85"), 2500, 2000
+    )
     store.record_initial_holdings(holdings)
     store.record_recommendation(
         StrategyRecommendation("rec-1", "510300", "buy", NOW, grid_version=1)
     )
     store.confirm_fill(
-        StrategyFill("actual-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "actual-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=True,
         simulated=False,
         order_state="filled",
@@ -202,7 +225,9 @@ def test_invalid_fill_pairing_is_rejected(postgres_url: str) -> None:
         StrategyRecommendation("rec-1", "510300", "buy", NOW, grid_version=1)
     )
     store.confirm_fill(
-        StrategyFill("buy-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "buy-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=True,
         simulated=False,
         order_state="filled",
@@ -221,7 +246,9 @@ def test_invalid_fill_pairing_is_rejected(postgres_url: str) -> None:
         )
 
 
-def test_grid_layer_round_use_is_durable_and_directional(postgres_url: str) -> None:
+def test_grid_layer_round_use_is_durable_and_directional(
+    postgres_url: str,
+) -> None:
     path = postgres_url
     store = IntradayStrategyStateStore(path)
 
@@ -231,7 +258,9 @@ def test_grid_layer_round_use_is_durable_and_directional(postgres_url: str) -> N
     )
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 1, 2, 2, "buy")
     assert store.consume_grid_slot("510300", date(2026, 11, 2), 2, 2, 1, "buy")
-    assert store.consume_grid_slot("510300", date(2026, 11, 2), 1, 2, 1, "sell")
+    assert store.consume_grid_slot(
+        "510300", date(2026, 11, 2), 1, 2, 1, "sell"
+    )
 
 
 def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(
@@ -280,12 +309,16 @@ def test_admission_reuses_persisted_grid_cooldown_and_daily_limits(
     )
 
 
-def test_unknown_or_pending_order_status_fails_closed(postgres_url: str) -> None:
+def test_unknown_or_pending_order_status_fails_closed(
+    postgres_url: str,
+) -> None:
     store = IntradayStrategyStateStore(postgres_url)
     store.record_recommendation(
         StrategyRecommendation("rec-1", "510300", "buy", NOW, grid_version=1)
     )
-    fill = StrategyFill("fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW)
+    fill = StrategyFill(
+        "fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+    )
 
     assert not store.confirm_fill(
         fill,
@@ -304,7 +337,9 @@ def test_unknown_or_pending_order_status_fails_closed(postgres_url: str) -> None
     assert store.trade_pairs() == []
 
 
-def test_grid_slot_is_consumed_only_by_confirmed_fill(postgres_url: str) -> None:
+def test_grid_slot_is_consumed_only_by_confirmed_fill(
+    postgres_url: str,
+) -> None:
     database = postgres_url
     store = IntradayStrategyStateStore(database)
     store.save_state(
@@ -367,7 +402,9 @@ def test_grid_slot_is_consumed_only_by_confirmed_fill(postgres_url: str) -> None
         min_same_direction_bars=2,
     ) == ("order state unavailable or pending",)
     assert not store.confirm_fill(
-        StrategyFill("sim-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "sim-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=False,
         simulated=True,
         order_state="filled",
@@ -392,13 +429,17 @@ def test_grid_slot_is_consumed_only_by_confirmed_fill(postgres_url: str) -> None
     )
 
     assert store.confirm_fill(
-        StrategyFill("fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW),
+        StrategyFill(
+            "fill-1", "rec-1", "pair-1", "buy", 100, Decimal("3.90"), NOW
+        ),
         confirmed=True,
         simulated=False,
         order_state="filled",
         cooldown_minutes=10,
     )
-    persisted = IntradayStrategyStateStore(database).state("510300", NOW.date())
+    persisted = IntradayStrategyStateStore(database).state(
+        "510300", NOW.date()
+    )
     assert persisted is not None
     assert persisted.daily_trade_count == 1
     assert persisted.daily_add_count == 1

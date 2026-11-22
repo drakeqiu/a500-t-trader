@@ -11,10 +11,13 @@ from psycopg import sql
 
 @contextmanager
 def _isolated_postgres_url() -> Iterator[str]:
-    """Use a private schema on the explicitly configured PostgreSQL test server."""
+    """Use a private schema on the explicitly configured PostgreSQL
+    test server."""
     base_url = os.environ.get("TEST_DATABASE_URL")
     if not base_url:
-        pytest.fail("TEST_DATABASE_URL must point to a PostgreSQL test database")
+        pytest.fail(
+            "TEST_DATABASE_URL must point to a PostgreSQL test database"
+        )
     parts = urlsplit(base_url)
     if parts.scheme not in ("postgres", "postgresql"):
         pytest.fail("TEST_DATABASE_URL must be a PostgreSQL URL")
@@ -30,7 +33,11 @@ def _isolated_postgres_url() -> Iterator[str]:
         yield scoped_url
     finally:
         with psycopg.connect(base_url, autocommit=True) as db:
-            db.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            db.execute(
+                sql.SQL("DROP SCHEMA {} CASCADE").format(
+                    sql.Identifier(schema)
+                )
+            )
 
 
 @pytest.fixture

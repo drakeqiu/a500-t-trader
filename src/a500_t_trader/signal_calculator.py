@@ -25,7 +25,8 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class SignalCalculator:
-    """Evaluate completed bars once per strategy identity and market event time."""
+    """Evaluate completed bars once per strategy identity and market event
+    time."""
 
     def __init__(
         self,
@@ -44,7 +45,9 @@ class SignalCalculator:
         for symbol in config.etfs:
             cached = redis.get(f"a500:signals:history:{symbol}")
             if cached is not None:
-                self.histories[symbol] = [_bar(row) for row in json.loads(cached)]
+                self.histories[symbol] = [
+                    _bar(row) for row in json.loads(cached)
+                ]
 
     def handle(self, event: dict[str, Any]) -> None:
         if event.get("event_type") != "minute_bar":
@@ -74,7 +77,10 @@ class SignalCalculator:
             if bar.timestamp.minute % 5 != 4:
                 return
             expected = [start + timedelta(minutes=index) for index in range(5)]
-            if len(bucket) != 5 or [item.timestamp for item in bucket] != expected:
+            if (
+                len(bucket) != 5
+                or [item.timestamp for item in bucket] != expected
+            ):
                 bucket.clear()
                 return
             bar = _aggregate_five_minute(start, bucket)
@@ -102,7 +108,9 @@ class SignalCalculator:
             if not history or history[-1].timestamp != bar.timestamp:
                 history.append(bar)
                 del history[:-240]
-            event_type = str(result.get("direction") or result.get("status", "WAIT"))
+            event_type = str(
+                result.get("direction") or result.get("status", "WAIT")
+            )
             pipe = self.redis.pipeline(transaction=True)
             pipe.set(dedupe, "1", ex=60 * 60 * 24)
             pipe.set(
@@ -119,10 +127,14 @@ class SignalCalculator:
                     {
                         "symbol": symbol,
                         "type": event_type,
-                        "data": json.dumps(result, ensure_ascii=False, default=str),
+                        "data": json.dumps(
+                            result, ensure_ascii=False, default=str
+                        ),
                     },
                 )
-                cutoff = int((datetime.now().timestamp() - 24 * 60 * 60) * 1000)
+                cutoff = int(
+                    (datetime.now().timestamp() - 24 * 60 * 60) * 1000
+                )
                 pipe.xtrim(
                     "a500:signals:events",
                     minid=f"{cutoff}-0",
@@ -142,7 +154,9 @@ class SignalCalculator:
 
 
 def run_signal_calculator(
-    *, purpose: str = "signal-calculator", max_age: timedelta = timedelta(seconds=30)
+    *,
+    purpose: str = "signal-calculator",
+    max_age: timedelta = timedelta(seconds=30),
 ) -> None:
     from .market_data.consumer import RabbitMQConsumer
 
@@ -173,8 +187,12 @@ def _bar(data: dict[str, Any]) -> MinuteBar:
         low=Decimal(str(data["low"])),
         close=Decimal(str(data["close"])),
         volume=int(data["volume"]),
-        amount=None if data.get("amount") is None else Decimal(str(data["amount"])),
-        is_completed=bool(data.get("is_completed", data.get("completed", True))),
+        amount=None
+        if data.get("amount") is None
+        else Decimal(str(data["amount"])),
+        is_completed=bool(
+            data.get("is_completed", data.get("completed", True))
+        ),
         source=str(data.get("source", "normalized")),
     )
 

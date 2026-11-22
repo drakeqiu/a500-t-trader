@@ -12,8 +12,12 @@ NOW = datetime(2026, 10, 30, 8, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
 class Data:
-    def __init__(self, *, stale: bool = False, calendar_stale: bool = False) -> None:
-        timestamp = datetime(2026, 10, 29, 8, 20, tzinfo=NOW.tzinfo) if stale else NOW
+    def __init__(
+        self, *, stale: bool = False, calendar_stale: bool = False
+    ) -> None:
+        timestamp = (
+            datetime(2026, 10, 29, 8, 20, tzinfo=NOW.tzinfo) if stale else NOW
+        )
         self.snapshot = Snapshot(
             "510300",
             timestamp,

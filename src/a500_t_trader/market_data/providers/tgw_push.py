@@ -125,7 +125,12 @@ def _timestamp(value: Any) -> datetime:
         result = value
     else:
         text = str(value)
-        for fmt in ("%Y%m%d%H%M%S%f", "%Y%m%d%H%M%S", "%Y%m%d%H%M", "%Y%m%d%H%M%S%f0"):
+        for fmt in (
+            "%Y%m%d%H%M%S%f",
+            "%Y%m%d%H%M%S",
+            "%Y%m%d%H%M",
+            "%Y%m%d%H%M%S%f0",
+        ):
             try:
                 result = datetime.strptime(text, fmt)
                 break
@@ -263,14 +268,20 @@ class TgwPushProvider:
             if item is not None and not self._closed:
                 result = self._api.UnSubscribe(item, self._spi)
                 if result not in (None, 0):
-                    subscription.fail(RuntimeError(f"tgw unsubscribe failed: {result}"))
+                    subscription.fail(
+                        RuntimeError(f"tgw unsubscribe failed: {result}")
+                    )
 
     def _dispatch(self, kind: str, raw: Any, error_message: str = "") -> None:
         with self._lock:
-            targets = tuple(s for s in self._subscriptions if s.event_type == kind)
+            targets = tuple(
+                s for s in self._subscriptions if s.event_type == kind
+            )
         if error_message:
             for sub in targets:
-                sub.fail(RuntimeError(f"tgw {kind} push failed: {error_message}"))
+                sub.fail(
+                    RuntimeError(f"tgw {kind} push failed: {error_message}")
+                )
             return
         try:
             now = self._clock()
@@ -317,7 +328,9 @@ class _PushSpi:
     def OnMDSnapshot(self, data: Any, error: str = "") -> None:
         self._provider._dispatch("snapshot", data, error)
 
-    def OnKLine(self, data: Any, kline_type: Any = None, error: str = "") -> None:
+    def OnKLine(
+        self, data: Any, kline_type: Any = None, error: str = ""
+    ) -> None:
         self._provider._dispatch("bar", data, error)
 
     def OnMDTickExecution(self, data: Any, error: str = "") -> None:

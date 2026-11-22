@@ -30,7 +30,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--max-age-seconds must not be negative")
 
     def handle(event: dict[str, Any]) -> None:
-        print(json.dumps(event, ensure_ascii=False, separators=(",", ":")), flush=True)
+        print(
+            json.dumps(event, ensure_ascii=False, separators=(",", ":")),
+            flush=True,
+        )
 
     consumer = RabbitMQConsumer(
         args.purpose,

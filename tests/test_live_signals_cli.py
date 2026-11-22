@@ -127,7 +127,9 @@ def test_live_cli_deduplicates_repeated_minute_before_aggregation(
     assert json.loads(outputs[0])["status"] == "WAIT"
 
 
-def test_live_output_deduplicates_by_symbol_not_only_timestamp(capsys: Any) -> None:
+def test_live_output_deduplicates_by_symbol_not_only_timestamp(
+    capsys: Any,
+) -> None:
     from a500_t_trader.cli.live_signals import _emit_once
 
     seen: set[tuple[str, str]] = set()
@@ -139,7 +141,9 @@ def test_live_output_deduplicates_by_symbol_not_only_timestamp(capsys: Any) -> N
     _emit_once({**common, "symbol": "510300"}, seen)
     _emit_once({**common, "symbol": "510500"}, seen)
 
-    outputs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    outputs = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines()
+    ]
     assert [item["symbol"] for item in outputs] == ["510300", "510500"]
 
 
@@ -169,7 +173,9 @@ def test_live_cli_reports_incomplete_five_minute_sequence_on_transition(
         as_of=datetime(2026, 11, 4, 10, 6, tzinfo=SHANGHAI),
     )
 
-    outputs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    outputs = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines()
+    ]
     assert outputs
     assert outputs[0]["status"] == "UNAVAILABLE"
     assert "missing one-minute input" in outputs[0]["reasons"][0]
@@ -260,7 +266,9 @@ def test_live_cli_uses_explicit_etf_scope_and_reports_stale_data(
 def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(
     tmp_path: Path,
 ) -> None:
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     path = tmp_path / "signals.yaml"
     path.write_text(
@@ -279,8 +287,12 @@ def test_live_yaml_partial_overrides_have_stable_complete_fingerprint(
     assert first.fingerprint == second.fingerprint
 
 
-def test_live_yaml_loads_account_costs_and_fingerprints_them(tmp_path: Path) -> None:
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+def test_live_yaml_loads_account_costs_and_fingerprints_them(
+    tmp_path: Path,
+) -> None:
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     path = tmp_path / "signals.yaml"
     path.write_text(
@@ -342,10 +354,14 @@ def test_live_cli_calculates_round_trip_commission_from_config(
     }
 
 
-def test_live_yaml_rejects_unknown_or_invalid_parameter(tmp_path: Path) -> None:
+def test_live_yaml_rejects_unknown_or_invalid_parameter(
+    tmp_path: Path,
+) -> None:
     import pytest
 
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     path = tmp_path / "signals.yaml"
     for fragment in ("unknown: 1", "buy: nope", "buy: 1000"):
@@ -362,7 +378,9 @@ def test_live_yaml_validates_nested_timing_windows_and_rejects_short_etfs(
 ) -> None:
     import pytest
 
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     path = tmp_path / "signals.yaml"
     path.write_text(
@@ -391,7 +409,9 @@ def test_live_yaml_validates_nested_timing_windows_and_rejects_short_etfs(
 
 
 def test_missing_live_yaml_uses_rule_defaults(tmp_path: Path) -> None:
-    from a500_t_trader.strategy.intraday_v1_config import load_live_signal_config
+    from a500_t_trader.strategy.intraday_v1_config import (
+        load_live_signal_config,
+    )
 
     config = load_live_signal_config(tmp_path / "missing.yaml")
 

@@ -42,7 +42,8 @@ def run_live_signals(
     as_of: datetime | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> int:
-    """Consume an injected push provider until interrupted or one bar is evaluated."""
+    """Consume an injected push provider until interrupted or one bar is
+    evaluated."""
     try:
         configuration = load_live_signal_config(Path(config_path))
     except Exception as error:
@@ -55,7 +56,10 @@ def run_live_signals(
         print(
             json.dumps(
                 {
-                    "error": "live YAML must explicitly list at least one ETF in etfs",
+                    "error": (
+                        "live YAML must explicitly list at least one ETF "
+                        "in etfs"
+                    ),
                     "status": "CONFIG_ERROR",
                 }
             ),
@@ -92,7 +96,9 @@ def run_live_signals(
     try:
         if hasattr(signal, "SIGHUP"):
             previous_hup_handler = signal.getsignal(signal.SIGHUP)
-            signal.signal(signal.SIGHUP, lambda _signum, _frame: events.put("reload"))
+            signal.signal(
+                signal.SIGHUP, lambda _signum, _frame: events.put("reload")
+            )
         subscribe(configuration.etfs)
         while not stopped.is_set():
             try:
@@ -108,7 +114,8 @@ def run_live_signals(
                     raise LiveConfigurationError(str(error)) from None
                 if not reloaded.etfs:
                     raise LiveConfigurationError(
-                        "reloaded YAML must explicitly list at least one ETF in etfs"
+                        "reloaded YAML must explicitly list at least one ETF "
+                        "in etfs"
                     )
                 if reloaded.etfs != configuration.etfs:
                     subscribe(reloaded.etfs)
@@ -118,11 +125,16 @@ def run_live_signals(
                 continue
             if not isinstance(event, MinuteBar):
                 continue
-            if event.symbol not in configuration.etfs or not event.is_completed:
+            if (
+                event.symbol not in configuration.etfs
+                or not event.is_completed
+            ):
                 continue
             minute = event.timestamp.astimezone(SHANGHAI)
             if event.interval_minutes != 1:
-                raise ValueError("live signal provider must emit one-minute bars")
+                raise ValueError(
+                    "live signal provider must emit one-minute bars"
+                )
             if seen_minute_days.get(event.symbol) != minute.date():
                 seen_minutes = {
                     item for item in seen_minutes if item[0] != event.symbol
@@ -138,7 +150,10 @@ def run_live_signals(
                 microsecond=0,
             )
             bucket = buckets[event.symbol]
-            if bucket and bucket[0].timestamp.astimezone(SHANGHAI) != bucket_start:
+            if (
+                bucket
+                and bucket[0].timestamp.astimezone(SHANGHAI) != bucket_start
+            ):
                 prior_minute = bucket[0].timestamp.astimezone(SHANGHAI)
                 prior_start = prior_minute.replace(
                     minute=prior_minute.minute - prior_minute.minute % 5,
@@ -146,15 +161,19 @@ def run_live_signals(
                     microsecond=0,
                 )
                 prior_expected = [
-                    prior_start + timedelta(minutes=index) for index in range(5)
+                    prior_start + timedelta(minutes=index)
+                    for index in range(5)
                 ]
-                prior_actual = [bar.timestamp.astimezone(SHANGHAI) for bar in bucket]
+                prior_actual = [
+                    bar.timestamp.astimezone(SHANGHAI) for bar in bucket
+                ]
                 if prior_actual != prior_expected:
                     payload = _unavailable(
                         event.symbol,
                         prior_start,
                         configuration,
-                        "completed five-minute bar has missing one-minute input",
+                        "completed five-minute bar has missing one-minute "
+                        "input",
                     )
                     _emit_once(payload, seen)
                     if once:
@@ -163,7 +182,9 @@ def run_live_signals(
             bucket.append(event)
             if minute.minute % 5 != 4:
                 continue
-            expected = [bucket_start + timedelta(minutes=index) for index in range(5)]
+            expected = [
+                bucket_start + timedelta(minutes=index) for index in range(5)
+            ]
             actual = [bar.timestamp.astimezone(SHANGHAI) for bar in bucket]
             if len(bucket) != 5 or actual != expected:
                 payload = _unavailable(
@@ -249,7 +270,10 @@ def _emit_once(payload: dict[str, object], seen: set[tuple[str, str]]) -> None:
     if key in seen:
         return
     seen.add(key)
-    print(json.dumps(payload, ensure_ascii=False, default=json_default), flush=True)
+    print(
+        json.dumps(payload, ensure_ascii=False, default=json_default),
+        flush=True,
+    )
 
 
 def _evaluate(
@@ -263,7 +287,9 @@ def _evaluate(
     timestamp = latest.timestamp.astimezone(SHANGHAI)
     age = as_of - timestamp - timedelta(minutes=5)
     if age < timedelta(0) or age > timedelta(minutes=15):
-        reason = "latest completed five-minute market data is stale or future-dated"
+        reason = (
+            "latest completed five-minute market data is stale or future-dated"
+        )
         return _unavailable(symbol, timestamp, configuration, reason)
     bars = tuple((*history, latest))
     v1 = IntradayV1Config(
@@ -287,7 +313,9 @@ def _evaluate(
         minimum_commission = cast(Decimal, cost_inputs["minimum_commission"])
         reference_quantity = cast(int, cost_inputs["reference_quantity"])
         notional = latest.close * reference_quantity
-        commission_per_side = max(notional * commission_rate, minimum_commission)
+        commission_per_side = max(
+            notional * commission_rate, minimum_commission
+        )
         grid_context = {
             "tick_size": tick_size,
             "round_trip_cost_rate": (
@@ -318,7 +346,10 @@ def _evaluate(
             "configure tick_size, commission_rate, minimum_commission, "
             "and reference_quantity"
         )
-    elif analysis.candidate in {"BUY", "SELL"} and analysis.risk_status == "READY":
+    elif (
+        analysis.candidate in {"BUY", "SELL"}
+        and analysis.risk_status == "READY"
+    ):
         status = analysis.candidate
         direction = analysis.candidate
         quantity = None
@@ -365,7 +396,9 @@ def _unavailable(
     }
 
 
-def _aggregate_five_minute(start: datetime, bars: list[MinuteBar]) -> MinuteBar:
+def _aggregate_five_minute(
+    start: datetime, bars: list[MinuteBar]
+) -> MinuteBar:
     return MinuteBar(
         bars[0].symbol,
         start,
@@ -377,7 +410,9 @@ def _aggregate_five_minute(start: datetime, bars: list[MinuteBar]) -> MinuteBar:
         sum(bar.volume for bar in bars),
         None
         if any(bar.amount is None for bar in bars)
-        else sum((bar.amount for bar in bars if bar.amount is not None), Decimal(0)),
+        else sum(
+            (bar.amount for bar in bars if bar.amount is not None), Decimal(0)
+        ),
         True,
         source=bars[-1].source,
     )

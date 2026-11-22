@@ -1,4 +1,5 @@
-"""Test-only account API entrypoint with an explicitly synthetic market source."""
+"""Test-only account API entrypoint with an explicitly synthetic market
+source."""
 
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -7,7 +8,11 @@ from typing import cast
 import uvicorn
 
 from a500_t_trader.account_snapshot_api import create_app
-from a500_t_trader.market_data import MarketDataService, MarketDataSource, Snapshot
+from a500_t_trader.market_data import (
+    MarketDataService,
+    MarketDataSource,
+    Snapshot,
+)
 
 
 class FixtureQuotes:
@@ -22,7 +27,9 @@ class FixtureQuotes:
         )
 
 
-app = create_app(market_data=MarketDataService(cast(MarketDataSource, FixtureQuotes())))
+app = create_app(
+    market_data=MarketDataService(cast(MarketDataSource, FixtureQuotes()))
+)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

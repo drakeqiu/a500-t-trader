@@ -25,7 +25,9 @@ class MonitorMarketData(Protocol):
         self, symbol: str, interval_minutes: int = 1
     ) -> tuple[MinuteBar, ...]: ...
 
-    def session_status(self, session_date: date) -> tuple[SessionState, bool]: ...
+    def session_status(
+        self, session_date: date
+    ) -> tuple[SessionState, bool]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,9 +55,10 @@ class TriggerEvidenceStore:
             result = connection.execute(
                 """INSERT INTO trigger_evidence (
                     symbol, direction, condition, bar_timestamp,
-                    bar_interval_minutes, bar_open, bar_high, bar_low, bar_close,
-                    bar_volume, bar_amount, bar_completed, bar_source, session_state,
-                    evaluated_at, risk_or_invalidation, account_as_of, account_source
+                    bar_interval_minutes, bar_open, bar_high, bar_low,
+                    bar_close, bar_volume, bar_amount, bar_completed,
+                    bar_source, session_state, evaluated_at,
+                    risk_or_invalidation, account_as_of, account_source
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
                           %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING""",
@@ -102,7 +105,10 @@ def monitor_once(
     try:
         session, stale = market_data.session_status(now.date())
     except CapabilityUnavailableError as error:
-        print(f"Required trading-calendar capability unavailable: {error}", file=errors)
+        print(
+            f"Required trading-calendar capability unavailable: {error}",
+            file=errors,
+        )
         return 0
     if stale or session is SessionState.UNKNOWN:
         print(
@@ -111,7 +117,9 @@ def monitor_once(
         )
         return 0
     if session is SessionState.CLOSED:
-        print("Trading session is closed; no conditions evaluated.", file=output)
+        print(
+            "Trading session is closed; no conditions evaluated.", file=output
+        )
         return 0
     account_age = now - account.as_of.astimezone(SHANGHAI)
     if account_age < timedelta(0) or account_age > MAX_INPUT_AGE:
@@ -124,11 +132,13 @@ def monitor_once(
     saved = 0
     for rule in config.rules:
         try:
-            bars = market_data.get_intraday_bars(rule.symbol, interval_minutes=1)
+            bars = market_data.get_intraday_bars(
+                rule.symbol, interval_minutes=1
+            )
         except CapabilityUnavailableError as error:
             print(
-                f"{rule.symbol}: required 1-minute market-data capability unavailable "
-                f"or unauthorized: {error}",
+                f"{rule.symbol}: required 1-minute market-data capability "
+                f"unavailable or unauthorized: {error}",
                 file=errors,
             )
             continue
@@ -159,7 +169,9 @@ def monitor_once(
                 file=errors,
             )
             continue
-        for bar in sorted(latest_by_status.values(), key=lambda item: item.timestamp):
+        for bar in sorted(
+            latest_by_status.values(), key=lambda item: item.timestamp
+        ):
             for trigger in _triggers(rule, bar, now, account.as_of):
                 if not _account_allows(rule, trigger.direction, account):
                     print(
@@ -172,14 +184,16 @@ def monitor_once(
                     continue
                 saved += 1
                 completion = (
-                    "" if bar.is_completed else " [UNFINISHED BAR — provisional]"
+                    ""
+                    if bar.is_completed
+                    else " [UNFINISHED BAR — provisional]"
                 )
                 print(
-                    f"SUGGESTION{completion}: {trigger.direction} {trigger.symbol}; "
-                    f"condition: {trigger.condition}; bar: "
-                    f"{bar.timestamp.isoformat()}; "
-                    f"risk/invalidation: {trigger.risk_or_invalidation}. NOT AN ORDER; "
-                    "no trade was executed.",
+                    f"SUGGESTION{completion}: {trigger.direction} "
+                    f"{trigger.symbol}; condition: {trigger.condition}; "
+                    f"bar: {bar.timestamp.isoformat()}; "
+                    f"risk/invalidation: {trigger.risk_or_invalidation}. "
+                    "NOT AN ORDER; no trade was executed.",
                     file=output,
                 )
     if not saved:
@@ -208,7 +222,9 @@ def run_monitor(
             account,
             market_data,
             evidence,
-            as_of=as_of if once and as_of is not None else datetime.now(SHANGHAI),
+            as_of=as_of
+            if once and as_of is not None
+            else datetime.now(SHANGHAI),
         )
         if once:
             return
@@ -265,7 +281,9 @@ def _triggers(
     return tuple(found)
 
 
-def _account_allows(rule: EtfRule, direction: str, account: AccountSnapshot) -> bool:
+def _account_allows(
+    rule: EtfRule, direction: str, account: AccountSnapshot
+) -> bool:
     if direction == "buy":
         threshold = rule.buy_below
         if threshold is None:

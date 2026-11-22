@@ -76,9 +76,9 @@ def test_replay_event_preserves_market_time_and_uses_replay_clock() -> None:
             self.message = kwargs
 
     channel = Channel()
-    RabbitMQPublisher(channel=channel, exchange=MarketDataMode.REPLAY.exchange).publish(
-        bar, replay=True, warmup=True
-    )
+    RabbitMQPublisher(
+        channel=channel, exchange=MarketDataMode.REPLAY.exchange
+    ).publish(bar, replay=True, warmup=True)
     event = json.loads(channel.message["body"])
     observed: list[dict[str, object]] = []
 
