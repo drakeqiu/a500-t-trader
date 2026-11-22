@@ -571,7 +571,6 @@ class BacktestRepository:
                     "SELECT result_json, bars_json FROM backtests "
                     "JOIN minute_snapshots USING(snapshot_id) ORDER BY id DESC LIMIT 1"
                 ).fetchone()
-            else:
                 row = db.execute(
                     "SELECT result_json, bars_json FROM backtests "
                     "JOIN minute_snapshots USING(snapshot_id) WHERE id=%s",

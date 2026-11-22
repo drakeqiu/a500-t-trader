@@ -1,4 +1,5 @@
-"""Durable V1 strategy constraints and explicitly linked actual-fill state."""
+"""Durable V1 strategy constraints and explicitly linked actual-fill
+state."""
 
 from __future__ import annotations
 
@@ -160,8 +161,8 @@ class IntradayStrategyStateStore:
     def initial_holdings(self, symbol: str) -> InitialHoldings | None:
         with psycopg.connect(self.dsn) as db:
             row = db.execute(
-                "SELECT record_json FROM strategy_initial_holdings WHERE symbol=%s",
-                (symbol,),
+                "SELECT record_json FROM strategy_initial_holdings "
+                "WHERE symbol=%s",
             ).fetchone()
         if row is None:
             return None
@@ -287,7 +288,8 @@ class IntradayStrategyStateStore:
         grid_round: int,
         side: str,
     ) -> bool:
-        """Persist a once-per-layer/round use; return false if already consumed."""
+        """Persist once-per-layer/round use; return false if already
+        consumed."""
         _validate_side(side)
         if not symbol.strip() or grid_version < 1 or grid_layer < 0 or grid_round < 0:
             raise ValueError("symbol and non-negative grid coordinates are required")
@@ -315,7 +317,8 @@ class IntradayStrategyStateStore:
         order_state: str | None = None,
         cooldown_minutes: int,
     ) -> bool:
-        """Apply a user-confirmed linked real fill; all other order states veto."""
+        """Apply a user-confirmed linked real fill; all other order states
+        veto."""
         if not confirmed or simulated or fill.recommendation_id is None:
             return False
         if order_state != "filled":
@@ -362,8 +365,8 @@ class IntradayStrategyStateStore:
             if consumed.rowcount != 1:
                 return False
             pair = db.execute(
-                "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,buy_quantity,"
-                "sell_quantity "
+                "SELECT symbol,grid_version,buy_fill_id,sell_fill_id,"
+                "buy_quantity,sell_quantity "
                 "FROM strategy_trade_pairs WHERE trade_pair_id=%s",
                 (fill.trade_pair_id,),
             ).fetchone()
@@ -399,14 +402,17 @@ class IntradayStrategyStateStore:
                         "SELECT 1 FROM strategy_actual_fills first_fill "
                         "WHERE first_fill.trade_pair_id=p.trade_pair_id "
                         "AND first_fill.side='sell' "
-                        "AND NOT EXISTS (SELECT 1 FROM strategy_actual_fills earlier "
+                        "AND NOT EXISTS ("
+                        "SELECT 1 FROM strategy_actual_fills earlier "
                         "WHERE earlier.trade_pair_id=p.trade_pair_id "
-                        "AND earlier.fill_sequence<first_fill.fill_sequence))",
+                        "AND earlier.fill_sequence"
+                        "<first_fill.fill_sequence))",
                         (symbol,),
                     ).fetchall()[0][0]
                     if allocated + fill.quantity > sellable_quantity:
                         raise ValueError(
-                            "sell fill exceeds unallocated initial sellable inventory"
+                            "sell fill exceeds unallocated initial "
+                            "sellable inventory"
                         )
                     db.execute(
                         "INSERT INTO strategy_trade_pairs "
@@ -444,7 +450,8 @@ class IntradayStrategyStateStore:
                             "SET buy_fill_id=COALESCE(buy_fill_id,%s),"
                             "buy_quantity=buy_quantity+%s,"
                             "status=CASE WHEN buy_quantity+%s=sell_quantity "
-                            "THEN 'closed' ELSE 'open' END WHERE trade_pair_id=%s",
+                            "THEN 'closed' ELSE 'open' END "
+                            "WHERE trade_pair_id=%s",
                             (
                                 fill.fill_id,
                                 fill.quantity,
@@ -456,17 +463,18 @@ class IntradayStrategyStateStore:
                     if buy_fill is not None:
                         if buy_qty < sell_qty + fill.quantity:
                             raise ValueError(
-                                "sell fill exceeds linked strategy buy quantity"
+                                "sell fill exceeds linked strategy "
+                                "buy quantity"
                             )
                     else:
                         if buy_qty > 0:
                             raise ValueError(
-                                "cannot add a sell fill after the pair has begun "
-                                "closing"
+                                "cannot add a sell fill after the pair "
+                                "has begun closing"
                             )
                         holdings_row = db.execute(
-                            "SELECT record_json FROM strategy_initial_holdings "
-                            "WHERE symbol=%s",
+                            "SELECT record_json FROM "
+                            "strategy_initial_holdings WHERE symbol=%s",
                             (symbol,),
                         ).fetchone()
                         if holdings_row is None:
@@ -480,14 +488,16 @@ class IntradayStrategyStateStore:
                         allocated = db.execute(
                             "SELECT COALESCE(SUM(p.sell_quantity),0) "
                             "FROM strategy_trade_pairs p "
-                            "WHERE p.symbol=%s AND p.trade_pair_id<>%s AND EXISTS ("
+                            "WHERE p.symbol=%s AND p.trade_pair_id<>%s "
+                            "AND EXISTS ("
                             "SELECT 1 FROM strategy_actual_fills first_fill "
                             "WHERE first_fill.trade_pair_id=p.trade_pair_id "
                             "AND first_fill.side='sell' "
-                            "AND NOT EXISTS (SELECT 1 FROM "
-                            "strategy_actual_fills earlier "
+                            "AND NOT EXISTS ("
+                            "SELECT 1 FROM strategy_actual_fills earlier "
                             "WHERE earlier.trade_pair_id=p.trade_pair_id "
-                            "AND earlier.fill_sequence<first_fill.fill_sequence))",
+                            "AND earlier.fill_sequence"
+                            "<first_fill.fill_sequence))",
                             (symbol, fill.trade_pair_id),
                         ).fetchall()[0][0]
                         if allocated + sell_qty + fill.quantity > sellable_quantity:
@@ -532,9 +542,10 @@ class IntradayStrategyStateStore:
                 value = Decimal(existing[0]) + fill.price * fill.quantity
                 cooldown_until = fill.timestamp + timedelta(minutes=cooldown_minutes)
                 db.execute(
-                    """UPDATE intraday_strategy_state SET same_direction_bars=0,
-                        cooldown_until=%s,daily_trade_count=daily_trade_count+1,
-                        daily_add_count=daily_add_count+%s,daily_turnover=%s
+                    """UPDATE intraday_strategy_state
+                    SET same_direction_bars=0, cooldown_until=%s,
+                        daily_trade_count=daily_trade_count+1,
+                        daily_add_count=daily_add_count+%s, daily_turnover=%s
                     WHERE symbol=%s AND session_date=%s""",
                     (
                         _timestamp(cooldown_until),
@@ -557,13 +568,14 @@ class IntradayStrategyStateStore:
             return [dict(row) for row in rows]
 
     def trade_pair(self, trade_pair_id: str) -> dict[str, object] | None:
-        """Return persisted fill linkage and outstanding quantities for one pair."""
+        """Return persisted fill linkage and outstanding quantities for one
+        pair."""
         if not isinstance(trade_pair_id, str) or not trade_pair_id.strip():
             return None
         with psycopg.connect(self.dsn, row_factory=dict_row) as db:
             row = db.execute(
-                """SELECT trade_pair_id,symbol,grid_version,buy_fill_id,sell_fill_id,
-                    buy_quantity,sell_quantity,status
+                """SELECT trade_pair_id,symbol,grid_version,buy_fill_id,
+                    sell_fill_id,buy_quantity,sell_quantity,status
                 FROM strategy_trade_pairs WHERE trade_pair_id=%s""",
                 (trade_pair_id,),
             ).fetchone()

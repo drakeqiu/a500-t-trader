@@ -1,4 +1,5 @@
-"""Post-market review assembled from saved advice, trigger evidence, and bars."""
+"""Post-market review assembled from saved advice, trigger evidence, and
+bars."""
 
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ class PostMarketReview:
 
 
 def save_plan(path: str | Path, plan: Plan, account: AccountSnapshot) -> None:
-    """Save a locally reviewable plan and its separate user-entered account input."""
+    """Save a locally reviewable plan and its separate user-entered account
+    input."""
     account_record = asdict(account)
     payload = {
         "session_date": plan.as_of.date().isoformat(),
@@ -75,7 +77,8 @@ def generate_review(
             missing.append("saved pre-market plan is not a JSON object")
         elif saved.get("session_date") != session_date.isoformat():
             missing.append(
-                "saved pre-market plan does not match the requested session date"
+                "saved pre-market plan does not match the requested "
+                "session date"
             )
         elif not isinstance(saved.get("plan"), dict):
             missing.append("saved pre-market plan has no valid plan record")
@@ -174,7 +177,8 @@ def generate_review(
                     "status": "recorded" if imported_records else "not recorded",
                     "records": imported_records,
                     "classification": (
-                        "user-provided Galaxy Securities file; not system-verified"
+                        "user-provided Galaxy Securities file; "
+                        "not system-verified"
                     ),
                     "source": "user-provided Galaxy Securities CSV file",
                 }
@@ -255,7 +259,9 @@ def generate_review(
         account_record = {
             **account_record,
             "source": "user-entered; not broker-verified",
-            "classification": "account snapshot; not recommendation, order, or fill",
+            "classification": (
+                "account snapshot; not recommendation, order, or fill"
+            ),
         }
     return PostMarketReview(
         session_date.isoformat(),

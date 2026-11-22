@@ -193,6 +193,7 @@ def test_internal_jwks_keeps_compose_route_and_query() -> None:
 
 
 def test_internal_jwks_routes_public_http_identity_host_to_compose_service() -> None:
+def test_internal_jwks_routes_public_http_host_to_compose_service() -> None:
     assert (
         internal_jwks_uri(
             "http://identity.example.test:8081/auth/v1/oidc/certs?tenant=a500"
@@ -591,6 +592,7 @@ def test_cleanup_verifies_resources_even_when_compose_down_fails(
 
 
 def test_device_browser_errors_do_not_expose_credentials_or_verification_uri() -> None:
+def test_device_errors_hide_credentials_and_verification_uri() -> None:
     verification_uri = "https://idp.example.test/device?user_code=secret-code"
     password = "secret-password"
 

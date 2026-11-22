@@ -182,7 +182,8 @@ class JobRepository:
             db.execute("""CREATE INDEX IF NOT EXISTS daily_history_jobs_claim_idx
                 ON daily_history_jobs (status, lease_until, created_at)""")
             db.execute(
-                """CREATE INDEX IF NOT EXISTS daily_history_job_outbox_pending_idx
+                """CREATE INDEX IF NOT EXISTS
+                daily_history_job_outbox_pending_idx
                 ON daily_history_job_outbox (available_at, created_at)
                 WHERE published_at IS NULL"""
             )
@@ -194,13 +195,17 @@ class JobRepository:
                 PRIMARY KEY (symbol, start_date, end_date)
             )""")
 
-            db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_fetched_bars (
-                job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
-                    ON DELETE CASCADE,
-                bar_date DATE NOT NULL, bar_json JSONB NOT NULL,
-                fetched BOOLEAN NOT NULL DEFAULT true,
-                PRIMARY KEY (job_id, bar_date)
-            )""")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS
+                daily_history_job_fetched_bars (
+                    job_id UUID NOT NULL REFERENCES daily_history_jobs(id)
+                        ON DELETE CASCADE,
+                    bar_date DATE NOT NULL,
+                    bar_json JSONB NOT NULL,
+                    fetched BOOLEAN NOT NULL DEFAULT true,
+                    PRIMARY KEY (job_id, bar_date)
+                )"""
+            )
             db.execute(
                 "ALTER TABLE daily_history_job_fetched_bars "
                 "ADD COLUMN IF NOT EXISTS fetched BOOLEAN NOT NULL DEFAULT true"
@@ -223,8 +228,10 @@ class JobRepository:
         with self._connect() as db:
             identifier = uuid.uuid4()
             row = db.execute(
-                f"INSERT INTO daily_history_jobs (id, subject, symbol, start_date, "
-                f"end_date, status, total_chunks) VALUES (%s,%s,%s,%s,%s,'queued',%s) "
+                "INSERT INTO daily_history_jobs "
+                "(id, subject, symbol, start_date, end_date, "
+                "status, total_chunks) "
+                "VALUES (%s,%s,%s,%s,%s,'queued',%s) "
                 f"RETURNING {_COLUMNS}",
                 (
                     identifier,
@@ -236,7 +243,8 @@ class JobRepository:
                 ),
             ).fetchone()
             db.execute(
-                "INSERT INTO daily_history_job_outbox (id, job_id) VALUES (%s, %s)",
+                "INSERT INTO daily_history_job_outbox "
+                "(id, job_id) VALUES (%s, %s)",
                 (uuid.uuid4(), identifier),
             )
         assert row is not None
@@ -302,7 +310,8 @@ class JobRepository:
             return None
         with self._connect() as db:
             row = db.execute(
-                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs "
+                "WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return _job(row)
@@ -329,8 +338,10 @@ class JobRepository:
                 f"""UPDATE daily_history_jobs SET
                     cancel_requested = CASE WHEN status IN ('queued','running')
                         THEN true ELSE cancel_requested END,
-                    status = CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
-                    stage = CASE WHEN status='queued' THEN 'finished' ELSE stage END,
+                    status = CASE WHEN status='queued' THEN 'cancelled'
+                        ELSE status END,
+                    stage = CASE WHEN status='queued' THEN 'finished'
+                        ELSE stage END,
                     finished_at = CASE WHEN status='queued' THEN now()
                         ELSE finished_at END,
                     updated_at = CASE WHEN status IN ('queued','running')
@@ -341,22 +352,24 @@ class JobRepository:
         return _job(row)
 
     def backfill_queued_jobs(self) -> int:
-        """Create dispatch records for queued jobs written by older API versions."""
+        """Create dispatch records for queued jobs written by older API
+        versions."""
         with self._connect() as db:
             rows = db.execute(
                 """INSERT INTO daily_history_job_outbox (id, job_id)
                 SELECT gen_random_uuid(), j.id FROM daily_history_jobs j
                 WHERE j.status='queued'
                     AND NOT EXISTS (
-                        SELECT 1 FROM daily_history_job_outbox o WHERE o.job_id=j.id
-                    )
+                        SELECT 1 FROM daily_history_job_outbox o
+                        WHERE o.job_id=j.id
                 ON CONFLICT (job_id) DO NOTHING
                 RETURNING job_id"""
             ).fetchall()
         return len(rows)
 
     def publish_pending(self, publisher: Any, limit: int = 100) -> int:
-        """Publish a batch from the transactional outbox and mark confirmed rows."""
+        """Publish a batch from the transactional outbox and mark confirmed
+        rows."""
         self.backfill_queued_jobs()
         with self._connect() as db:
             rows = db.execute(
@@ -370,16 +383,21 @@ class JobRepository:
                     publisher.publish(str(row["job_id"]))
                 except Exception as error:
                     db.execute(
-                        """UPDATE daily_history_job_outbox SET attempts=attempts+1,
-                        last_error=%s, available_at=now() +
-                        (LEAST(300, power(2, LEAST(attempts, 8))) * interval '1 second')
+                        """UPDATE daily_history_job_outbox
+                        SET attempts=attempts+1, last_error=%s,
+                            available_at=now() + (
+                                LEAST(300, power(2, LEAST(attempts, 8)))
+                                * interval '1 second'
+                            )
                         WHERE id=%s""",
                         (str(error)[:1000], row["id"]),
                     )
                 else:
                     db.execute(
-                        """UPDATE daily_history_job_outbox SET published_at=now(),
-                        attempts=attempts+1, last_error=NULL WHERE id=%s""",
+                        """UPDATE daily_history_job_outbox
+                        SET published_at=now(), attempts=attempts+1,
+                            last_error=NULL
+                        WHERE id=%s""",
                         (row["id"],),
                     )
         return len(rows)
@@ -421,7 +439,8 @@ class JobRepository:
             ).fetchall()
             for cancelled_row in cancelled:
                 db.execute(
-                    "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                    "DELETE FROM daily_history_job_fetched_bars "
+                    "WHERE job_id=%s",
                     (cancelled_row["id"],),
                 )
             _LOG.info("History claim candidate query starting job_id=%s", job_id)
@@ -433,7 +452,8 @@ class JobRepository:
                     AND NOT cancel_requested))
                     AND (%s::uuid IS NULL OR id=%s)
                 ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
-            ) UPDATE daily_history_jobs j SET status='running', stage='checking_cache',
+            ) UPDATE daily_history_jobs j
+            SET status='running', stage='checking_cache',
                 lease_token=%s, lease_until=now() + (%s * interval '1 second'),
                 updated_at=now()
                 FROM candidate WHERE j.id=candidate.id
@@ -467,8 +487,8 @@ class JobRepository:
                 """UPDATE daily_history_jobs SET
                 lease_until=now() + (%s * interval '1 second')
                 WHERE id=%s AND status='running' AND lease_token=%s
-                    AND lease_until > now() AND NOT cancel_requested RETURNING id""",
-                (_LEASE_SECONDS, job_id, token),
+                    AND lease_until > now() AND NOT cancel_requested
+                    RETURNING id""",
             ).fetchone()
         return row is not None
 
@@ -477,8 +497,8 @@ class JobRepository:
             row = db.execute(
                 """UPDATE daily_history_jobs SET stage=%s, updated_at=now()
                 WHERE id=%s AND status='running' AND lease_token=%s
-                    AND lease_until > now() AND NOT cancel_requested RETURNING id""",
-                (stage, job_id, token),
+                    AND lease_until > now() AND NOT cancel_requested
+                    RETURNING id""",
             ).fetchone()
         return row is not None
 
@@ -551,8 +571,9 @@ class JobRepository:
                     ),
                 )
             db.execute(
-                """UPDATE daily_history_jobs SET completed_chunks=completed_chunks+1,
-                updated_at=now() WHERE id=%s""",
+                """UPDATE daily_history_jobs
+                SET completed_chunks=completed_chunks+1, updated_at=now()
+                WHERE id=%s""",
                 (job_id,),
             )
         return True
@@ -564,10 +585,12 @@ class JobRepository:
             row = db.execute(
                 """UPDATE daily_history_jobs SET
                 status=CASE WHEN cancel_requested THEN 'cancelled'
-                    WHEN %s::text IS NOT NULL THEN 'failed' ELSE 'succeeded' END,
+                    WHEN %s::text IS NOT NULL THEN 'failed'
+                    ELSE 'succeeded' END,
                 stage='finished',
                 error=CASE WHEN cancel_requested THEN NULL ELSE %s END,
-                finished_at=now(), updated_at=now(), lease_token=NULL, lease_until=NULL
+                finished_at=now(), updated_at=now(),
+                lease_token=NULL, lease_until=NULL
                 WHERE id=%s AND status='running' AND lease_token=%s
                     AND lease_until > now()
                     AND (cancel_requested OR %s::text IS NOT NULL
@@ -580,7 +603,8 @@ class JobRepository:
             if row["status"] == "succeeded":
                 db.execute("SELECT pg_advisory_xact_lock(500001)")
                 bars = db.execute(
-                    "SELECT bar_json, fetched FROM daily_history_job_fetched_bars "
+                    "SELECT bar_json, fetched "
+                    "FROM daily_history_job_fetched_bars "
                     "WHERE job_id=%s ORDER BY bar_date",
                     (job_id,),
                 ).fetchall()
@@ -716,8 +740,8 @@ def _run_job(
                             )
                         query_started = time.monotonic()
                         _LOG.info(
-                            "History provider query starting job_id=%s chunk=%d "
-                            "attempt=%d",
+                            "History provider query starting job_id=%s "
+                            "chunk=%d attempt=%d",
                             job_id,
                             index + 1,
                             attempt + 1,
@@ -729,8 +753,8 @@ def _run_job(
                             )
                         ]
                         _LOG.info(
-                            "History provider query finished job_id=%s chunk=%d "
-                            "bars=%d elapsed_ms=%d",
+                            "History provider query finished job_id=%s "
+                            "chunk=%d bars=%d elapsed_ms=%d",
                             job_id,
                             index + 1,
                             len(bars),
@@ -762,10 +786,17 @@ def _run_job(
                         )
                         if category != "network" or attempt + 1 == _MAX_ATTEMPTS:
                             message = {
-                                "network": "Daily history provider network unavailable",
-                                "authentication": "Provider authentication failed",
+                                "network": (
+                                    "Daily history provider network "
+                                    "unavailable"
+                                ),
+                                "authentication": (
+                                    "Provider authentication failed"
+                                ),
                                 "permission": "Provider permission denied",
-                                "configuration": "Provider configuration invalid",
+                                "configuration": (
+                                    "Provider configuration invalid"
+                                ),
                             }.get(category, "Daily history retrieval failed")
                             repository.finish(job_id, token, message)
                             return
@@ -810,6 +841,10 @@ def process_one(
     job = repository.claim()
     if job is None:
         return False
+    if provider_factory is None:
+        provider_factory = cast(
+            Callable[[], DailyHistoryProvider], create_provider_from_env
+        )
     _run_job(repository, job, provider_factory)
     return True
 
@@ -823,6 +858,10 @@ def process_job(
     job = repository.claim(job_id)
     if job is None:
         return False
+    if provider_factory is None:
+        provider_factory = cast(
+            Callable[[], DailyHistoryProvider], create_provider_from_env
+        )
     _run_job(repository, job, provider_factory)
     return True
 

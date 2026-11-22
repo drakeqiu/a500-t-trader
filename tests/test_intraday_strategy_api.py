@@ -391,8 +391,7 @@ def _paired_api_result(
 
 
 def test_technical_candidate_uses_exact_config_and_reports_missing_grid_context() -> (
-    None
-):
+def test_technical_candidate_reports_missing_grid_context() -> None:
     result = _evaluate()["510300"]
 
     signal = result["signal"]

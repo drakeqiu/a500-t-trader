@@ -161,9 +161,10 @@ def handle(args: argparse.Namespace) -> int:
                 "rsi_comparison_eligible": False,
                 "rsi_certification_eligible": False,
                 "evidence_scope": (
-                    "Fixed-share technical replay is historical research only; it "
-                    "is not a complete account backtest and is excluded from RSI "
-                    "comparison and certification evidence."
+                    "Fixed-share technical replay is historical "
+                    "research only; it is not a complete account "
+                    "backtest and is excluded from RSI comparison "
+                    "and certification evidence."
                 ),
                 "symbol": symbol,
                 "signal_quantity": args.quantity,
@@ -181,15 +182,22 @@ def handle(args: argparse.Namespace) -> int:
                     "fixed_quantity_sell_slots_at_start": 3,
                 },
                 "limitations": [
-                    "no fills, P&L, position updates, T+1 or sell-capacity checks",
-                    "starting account snapshot is informational, not a signal gate",
-                    "grid tick uses the SSE ETF minimum increment of 0.001 yuan",
-                    "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
+                    "no fills, P&L, position updates, T+1 or "
+                    "sell-capacity checks",
+                    "starting account snapshot is informational, not a "
+                    "signal gate",
+                    "grid tick uses the SSE ETF minimum increment of "
+                    "0.001 yuan",
+                    "0.5 bps commission, 0.1 yuan minimum; "
+                    "no slippage is modeled",
                     "missing history is not synthesized",
-                    "grid-level cooldown is absent; repeated candidates may occur",
-                    "fixed-share technical replay is research only and excluded "
-                    "from RSI comparison and certification evidence",
-                    "daily bar completeness has not been independently audited",
+                    "grid-level cooldown is absent; repeated "
+                    "candidates may occur",
+                    "fixed-share technical replay is research only and "
+                    "excluded from RSI comparison and certification "
+                    "evidence",
+                    "daily bar completeness has not been independently "
+                    "audited",
                 ],
             }
             return _print_result(result, args.output)
@@ -235,8 +243,9 @@ def handle(args: argparse.Namespace) -> int:
                 stream.write(rendered + "\n")
         print(
             (
-                "Advisory only: this system does not connect to a broker; pending "
-                "broker orders are unseen and may cause duplicate orders."
+                "Advisory only: this system does not connect to a broker; "
+                "pending broker orders are unseen and may cause duplicate "
+                "orders."
             ),
             file=sys.stderr,
         )

@@ -55,6 +55,7 @@ def events() -> tuple[Snapshot, MinuteBar, Trade]:
 
 
 def test_normalized_events_include_version_event_time_and_nonunique_source_id() -> None:
+def test_normalized_events_include_version_and_time() -> None:
     timestamp = events()[0].timestamp
     cases: tuple[tuple[MarketEvent, str, str, str], ...] = (
         (events()[0], "snapshot", "last_price", "1.2345"),
@@ -76,6 +77,7 @@ def test_normalized_events_include_version_event_time_and_nonunique_source_id() 
 
 
 def test_rabbitmq_publisher_confirms_encoded_event_through_injected_channel() -> None:
+def test_rabbitmq_publisher_confirms_encoded_events() -> None:
     from a500_t_trader.market_data.rabbitmq import RabbitMQPublisher
 
     class Channel:

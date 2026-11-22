@@ -1,4 +1,5 @@
-"""Public advisory strategy API with separate candidate and execution veto."""
+"""Public advisory strategy API with separate candidate and execution
+veto."""
 
 from __future__ import annotations
 

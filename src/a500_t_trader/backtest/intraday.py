@@ -623,8 +623,9 @@ def run_intraday_backtest(
                         }:
                             pair_ledger.append(
                                 {
-                                    "pair_id": f"pair-{pair_sequence}",
-                                    "sell_timestamp": bar.timestamp.isoformat(),
+                                    "sell_timestamp": (
+                                        bar.timestamp.isoformat()
+                                    ),
                                     "sell_price": str(fill_price),
                                     "sell_quantity": quantity,
                                     "sell_gross": str(notional),
@@ -1114,8 +1115,8 @@ def run_intraday_backtest(
             for signal in submitted_signals
         ],
         "partial_fill": (
-            "board-lot quantity limited by bar volume and the lower of configured "
-            "participation or 2% in dynamic mode"
+            "board-lot quantity limited by bar volume and the lower of "
+            "configured participation or 2% in dynamic mode"
         ),
         "cancel": (
             "unfilled remainder canceled at order lifetime; reserved cash released"

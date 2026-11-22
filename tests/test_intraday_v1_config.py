@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from a500_t_trader.strategy.intraday_v1_config import (
 )
 
 
-def _complete_config() -> dict[str, object]:
+def _complete_config() -> dict[str, Any]:
     return {
         "schema_version": "2.0",
         "strategy_id": "intraday-etf-t-v1-rsi",
