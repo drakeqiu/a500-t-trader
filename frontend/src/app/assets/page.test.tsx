@@ -64,6 +64,8 @@ describe("assets route", () => {
       screen.queryByText("净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"),
     ).toBeNull();
     const navHelp = screen.getByRole("note", { name: "净资产估值说明" });
+    expect(navHelp.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(navHelp.textContent).toBe("");
     expect(navHelp.getAttribute("title")).toBeNull();
     expect(navHelp.getAttribute("aria-description")).toBe(
       "净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。",

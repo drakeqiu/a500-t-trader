@@ -772,26 +772,18 @@ code {
   top: -10px;
   right: -18px;
   display: inline-grid;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--focus) 30%, var(--rule));
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--focus) 7%, var(--surface));
+  place-items: center;
   color: var(--focus);
-  font-size: 9px;
-  font-weight: 650;
-  line-height: 1;
-  vertical-align: middle;
+  line-height: 0;
   cursor: help;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease;
+  transition: color 160ms ease;
 }
 .asset-help:hover,
 .asset-help:focus-visible {
-  border-color: color-mix(in srgb, var(--focus) 65%, var(--rule));
-  background: color-mix(in srgb, var(--focus) 10%, var(--surface));
+  color: var(--ink);
 }
 .asset-help::before,
 .asset-help::after {

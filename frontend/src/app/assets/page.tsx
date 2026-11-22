@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { CircleHelp } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PageHeading } from "@/components/page-heading";
 import {
@@ -312,7 +313,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                       data-tooltip="净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"
                       aria-description="净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"
                     >
-                      ?
+                      <CircleHelp size={16} strokeWidth={1.75} aria-hidden="true" />
                     </span>
                   </h2>
                 </div>
@@ -436,7 +437,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                       data-tooltip="保存后会用当前内容完整替换现有账户快照。"
                       aria-description="保存后会用当前内容完整替换现有账户快照。"
                     >
-                      ?
+                      <CircleHelp size={16} strokeWidth={1.75} aria-hidden="true" />
                     </span>
                   </h2>
                 </div>

@@ -234,12 +234,15 @@ test("shows asset explanations on hover and keyboard focus", async ({ page }) =>
       help.evaluate((element) => {
         const marker = element.getBoundingClientRect();
         const heading = element.closest("h2")?.getBoundingClientRect();
+        const icon = element.querySelector("svg");
         return {
           content: getComputedStyle(element, "::after").content,
           opacity: getComputedStyle(element, "::after").opacity,
           popupRight: getComputedStyle(element, "::after").right,
           popupMaxWidth: getComputedStyle(element, "::after").maxWidth,
           markerWidth: getComputedStyle(element).width,
+          iconWidth: icon?.getAttribute("width"),
+          iconAriaHidden: icon?.getAttribute("aria-hidden"),
           markerAboveTitle: Boolean(heading && marker.bottom < heading.top + heading.height / 2),
           markerRightOfTitle: Boolean(heading && marker.left > heading.right),
         };
@@ -250,7 +253,9 @@ test("shows asset explanations on hover and keyboard focus", async ({ page }) =>
       opacity: "1",
       popupRight: "-8px",
       popupMaxWidth: "280px",
-      markerWidth: "14px",
+      markerWidth: "16px",
+      iconWidth: "16",
+      iconAriaHidden: "true",
       markerAboveTitle: true,
       markerRightOfTitle: true,
     });
