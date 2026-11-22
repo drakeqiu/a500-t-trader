@@ -624,7 +624,9 @@ def run_intraday_backtest(
                             pair_ledger.append(
                                 {
                                     "pair_id": str(pair_sequence),
-                                    "sell_timestamp": (bar.timestamp.isoformat()),
+                                    "sell_timestamp": (
+                                        bar.timestamp.isoformat()
+                                    ),
                                     "sell_price": str(fill_price),
                                     "sell_quantity": quantity,
                                     "sell_gross": str(notional),

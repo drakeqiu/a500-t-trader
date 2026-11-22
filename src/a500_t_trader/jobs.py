@@ -243,7 +243,8 @@ class JobRepository:
                 ),
             ).fetchone()
             db.execute(
-                "INSERT INTO daily_history_job_outbox (id, job_id) VALUES (%s, %s)",
+                "INSERT INTO daily_history_job_outbox "
+                "(id, job_id) VALUES (%s, %s)",
                 (uuid.uuid4(), identifier),
             )
         assert row is not None
@@ -297,7 +298,8 @@ class JobRepository:
             if deleted is not None:
                 return True
             existing = db.execute(
-                "SELECT 1 FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs "
+                "WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return False if existing is not None else None
@@ -309,7 +311,8 @@ class JobRepository:
             return None
         with self._connect() as db:
             row = db.execute(
-                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs "
+                "WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return _job(row)
@@ -438,7 +441,8 @@ class JobRepository:
             ).fetchall()
             for cancelled_row in cancelled:
                 db.execute(
-                    "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                    "DELETE FROM daily_history_job_fetched_bars "
+                    "WHERE job_id=%s",
                     (cancelled_row["id"],),
                 )
             _LOG.info("History claim candidate query starting job_id=%s", job_id)

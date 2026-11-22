@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -6,6 +7,19 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from a500_t_trader.cli.main import main
+from a500_t_trader.market_data import MinuteBar
+
+
+class _NoReviewMarketData:
+    def get_history_bars(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int = 1,
+    ) -> tuple[MinuteBar, ...]:
+        return ()
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -140,7 +154,8 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
                 str(plan),
                 "--database",
                 str(database),
-            ]
+            ],
+            market_data=_NoReviewMarketData(),
         )
         == 0
     )
