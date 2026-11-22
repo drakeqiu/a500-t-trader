@@ -117,6 +117,24 @@ test("returns to a protected route after fixture authorization and disconnects t
   await expect(page.getByRole("heading", { name: "策略信号", exact: true })).toBeVisible();
 });
 
+test("restores an existing identity session automatically after a page reload", async ({
+  page,
+}) => {
+  await page.goto("/assets");
+  await connect(page, `reload-${randomUUID()}`, "账户资产");
+
+  const silentToken = page.waitForResponse(
+    (response) =>
+      response.url() === `${new URL(test.info().project.use.baseURL!).origin}/fixture-idp/token` &&
+      response.ok(),
+  );
+  await page.reload();
+  await silentToken;
+  await expect(page).toHaveURL(/\/assets$/);
+  await expect(page.getByRole("heading", { name: "账户资产", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "断开" })).toBeVisible();
+});
+
 test("rejects unsolicited callbacks and removes authorization data from the address bar", async ({
   page,
 }) => {
@@ -335,7 +353,8 @@ test("creates and edits an account; a mocked 412 retains the draft until explici
 
   const other = await context.newPage();
   await other.goto("/assets");
-  await connect(other, subject, "账户资产");
+  await expect(other.getByRole("heading", { name: "账户资产", exact: true })).toBeVisible();
+  await expect(other.getByRole("link", { name: "断开" })).toBeVisible();
   await other.getByRole("button", { name: "编辑快照", exact: true }).click();
   await expect(other.getByLabel("快照时间")).toHaveCount(0);
   await expect(other.getByLabel("可用现金", { exact: true })).toHaveValue("125.50");
@@ -419,14 +438,17 @@ test("shows sanitized row errors, restores preview after reauthorization, and co
     }),
   );
   expect(stored).not.toContain(token);
-  await page.reload();
-  await expect(
-    page.getByRole("banner").getByRole("button", { name: "安全连接", exact: true }),
-  ).toBeEnabled();
+  const silentTokenResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/fixture-idp/token") &&
+      response.request().method() === "POST" &&
+      response.ok(),
+  );
   const restored = page.waitForResponse((response) =>
     response.url().endsWith(`/api/v1/trade-imports/previews/${valid.batch_id}`),
   );
-  token = await connect(page, subject, "成交导入");
+  await page.reload();
+  token = (await (await silentTokenResponse).json()).access_token as string;
   expect((await restored).status()).toBe(200);
   await expect(imports).toContainText(valid.batch_id);
   await expect(
@@ -446,8 +468,14 @@ test("shows sanitized row errors, restores preview after reauthorization, and co
   expect(after.headers().etag).toBe(before.headers().etag);
   expect(await after.json()).toEqual(originalSnapshot);
 
+  const confirmedReload = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/fixture-idp/token") &&
+      response.request().method() === "POST" &&
+      response.ok(),
+  );
   await page.reload();
-  await connect(page, subject, "成交导入");
+  await confirmedReload;
   await expect(imports).toContainText(valid.batch_id);
   await expect(imports.getByRole("heading", { name: "已确认", exact: true })).toBeVisible();
   const duplicate = await upload(page, request, "valid");

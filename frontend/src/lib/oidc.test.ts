@@ -86,6 +86,16 @@ describe("authorization code with PKCE", () => {
     );
   });
 
+
+  it("requests a silent authorization without prompting for credentials", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(metadata)));
+    const { beginSilentAuthorization } = await import("./oidc");
+    const authorization = new URL(await beginSilentAuthorization());
+    expect(authorization.searchParams.get("prompt")).toBe("none");
+    expect(authorization.searchParams.get("response_type")).toBe("code");
+    expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(sessionStorage.getItem(key)).toBeTruthy();
+  });
   it("uses random state and S256, consumes the callback before exchanging and never stores the token", async () => {
     const fetchMock = vi
       .fn()

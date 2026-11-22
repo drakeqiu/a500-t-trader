@@ -232,6 +232,7 @@ def create_fixture(port: int) -> FastAPI:
         state: str,
         code_challenge: str,
         code_challenge_method: str,
+        prompt: str | None = None,
     ) -> Any:
         values = {
             "client_id": client_id,
@@ -243,6 +244,22 @@ def create_fixture(port: int) -> FastAPI:
             "code_challenge_method": code_challenge_method,
         }
         validate_authorization(request=request, **values)
+        if prompt == "none":
+            subject = request.cookies.get("fixture_session")
+            if not subject:
+                params = urlencode({"error": "login_required", "state": state})
+                callback = f"{redirect_uri}?{params}"
+                return RedirectResponse(callback, status_code=303)
+            code = secrets.token_urlsafe(32)
+            codes[code] = {
+                "subject": subject,
+                "challenge": code_challenge,
+                "redirect_uri": redirect_uri,
+            }
+            return RedirectResponse(
+                f"{redirect_uri}?{urlencode({'code': code, 'state': state})}",
+                status_code=303,
+            )
         subject = os.getenv("FIXTURE_AUTO_SUBJECT")
         if subject:
             code = secrets.token_urlsafe(32)
@@ -300,10 +317,17 @@ def create_fixture(port: int) -> FastAPI:
             "challenge": code_challenge,
             "redirect_uri": redirect_uri,
         }
-        return RedirectResponse(
+        response = RedirectResponse(
             f"{redirect_uri}?{urlencode({'code': code, 'state': state})}",
             status_code=303,
         )
+        response.set_cookie(
+            "fixture_session",
+            subject.strip(),
+            httponly=True,
+            samesite="lax",
+        )
+        return response
 
     @app.post("/fixture-idp/token")
     async def token(

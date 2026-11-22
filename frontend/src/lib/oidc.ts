@@ -1,3 +1,4 @@
+export const silentAuthorizationKey = "a500.oidc.silent-attempt";
 const configuredIssuer = process.env.NEXT_PUBLIC_OIDC_ISSUER;
 const clientId = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "a500-browser-client";
 const transactionKey = "a500.oidc.transaction";
@@ -112,15 +113,14 @@ function randomString() {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-export async function beginAuthorization(signal?: AbortSignal): Promise<string> {
+async function authorizationUrl(signal: AbortSignal | undefined, prompt?: "none") {
   const endpoints = await discover(signal);
   const transaction: Transaction = {
     state: randomString(),
     verifier: randomString(),
     created: Date.now(),
   };
-  const url = new URL(endpoints.authorization);
-  url.search = new URLSearchParams({
+  const parameters: Record<string, string> = {
     client_id: clientId,
     redirect_uri: `${window.location.origin}/`,
     response_type: "code",
@@ -128,9 +128,20 @@ export async function beginAuthorization(signal?: AbortSignal): Promise<string> 
     state: transaction.state,
     code_challenge: pkceChallenge(transaction.verifier),
     code_challenge_method: "S256",
-  }).toString();
+  };
+  if (prompt) parameters.prompt = prompt;
+  const url = new URL(endpoints.authorization);
+  url.search = new URLSearchParams(parameters).toString();
   sessionStorage.setItem(transactionKey, JSON.stringify(transaction));
   return url.href;
+}
+
+export function beginAuthorization(signal?: AbortSignal): Promise<string> {
+  return authorizationUrl(signal);
+}
+
+export function beginSilentAuthorization(): Promise<string> {
+  return authorizationUrl(undefined, "none");
 }
 
 // Consume the transaction and erase the callback before any asynchronous work, including failures.

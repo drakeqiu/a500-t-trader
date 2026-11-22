@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { completeAuthorization } from "@/lib/oidc";
+import { completeAuthorization, silentAuthorizationKey } from "@/lib/oidc";
 import { setAccessToken } from "@/lib/session";
 
 const returnKey = "a500.auth.return";
@@ -39,10 +39,15 @@ export default function Home() {
     }
     void pending
       .then(({ token, expiresIn }) => {
+        sessionStorage.removeItem(silentAuthorizationKey);
         setAccessToken(token, expiresIn);
         router.replace(consumeReturnPath());
       })
       .catch((reason: unknown) => {
+        if (sessionStorage.getItem(silentAuthorizationKey)) {
+          router.replace(consumeReturnPath());
+          return;
+        }
         sessionStorage.removeItem(returnKey);
         setError(reason instanceof Error ? reason.message : "无法完成身份授权，请重新连接。");
       });

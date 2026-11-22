@@ -15,3 +15,5 @@ The approved browser scope is current signals, user-entered account snapshot edi
 ## 2026-11-07: browser authorization code
 
 The user chose OIDC Authorization Code with PKCE S256 for the browser instead of device authorization. The public browser client uses exact redirect URIs and origins, keeps access tokens only in page memory, and does not persist refresh tokens. Reload or expiry requires another authorization redirect; an existing Keycloak session can avoid another password prompt. Passwords remain with the IdP and API authentication and per-subject ownership are unchanged. The separate device client remains available to direct API callers.
+
+The frontend starts a `prompt=none` Authorization Code with PKCE redirect when a route opens without an in-memory token. An existing IdP browser session restores access without a manual click or credential prompt; when no IdP session exists, the app returns to the original route and leaves the manual “安全连接” action available. Explicit disconnect suppresses automatic restoration for the current tab until the user reconnects. Access tokens remain memory-only.
