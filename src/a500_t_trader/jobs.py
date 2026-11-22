@@ -297,7 +297,7 @@ class JobRepository:
             if deleted is not None:
                 return True
             existing = db.execute(
-                "SELECT 1 FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return False if existing is not None else None
