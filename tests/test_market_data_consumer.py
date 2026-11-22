@@ -49,7 +49,6 @@ def test_consumer_acknowledges_fresh_json_and_nacks_handler_failure() -> None:
     assert channel.nacks == [(2, True)]
 
 
-def test_consumer_drops_stale_message_and_configures_shared_durable_queue() -> None:
 def test_consumer_drops_stale_message_and_configures_queue() -> None:
     now = datetime(2026, 11, 4, 9, 31, tzinfo=SHANGHAI)
     stale = {
