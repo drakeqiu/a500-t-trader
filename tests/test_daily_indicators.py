@@ -37,7 +37,9 @@ def test_indicators_use_completed_observations_and_wilder_rsi() -> None:
     assert rows[14].rsi_14 == Decimal("100")
 
 
-def test_indicators_reject_duplicate_or_out_of_order_daily_observations() -> None:
+def test_indicators_reject_duplicate_or_out_of_order_daily_observations() -> (
+    None
+):
     bars = _bars(["1", "2", "3"])
     with pytest.raises(ValueError, match="ordered"):
         calculate_indicators((bars[1], bars[0], bars[2]))
@@ -51,7 +53,10 @@ def test_daily_indicators_cli_returns_calculated_values(
             self, symbol: str, start_date: date, end_date: date
         ) -> tuple[DailyBar, ...]:
             assert symbol == "510300"
-            assert (start_date, end_date) == (date(2026, 1, 1), date(2026, 1, 21))
+            assert (start_date, end_date) == (
+                date(2026, 1, 1),
+                date(2026, 1, 21),
+            )
             return _bars([str(value) for value in range(1, 22)])
 
     args = [

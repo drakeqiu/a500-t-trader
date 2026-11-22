@@ -9,7 +9,8 @@ import psycopg
 
 
 def database_url(value: str | None = None) -> str:
-    """Resolve the explicit connection string before the environment default."""
+    """Resolve the explicit connection string before the environment
+    default."""
     url = value or os.environ.get("DATABASE_URL")
     if not url and os.environ.get("POSTGRES_HOST"):
         user = quote(os.environ.get("POSTGRES_USER", "a500"), safe="")
@@ -19,7 +20,8 @@ def database_url(value: str | None = None) -> str:
         url = f"postgresql://{user}:{password}@{host}/{name}"
     if not url:
         raise ValueError(
-            "PostgreSQL connection string required: set DATABASE_URL or --database"
+            "PostgreSQL connection string required: set DATABASE_URL or "
+            "--database"
         )
     if not url.startswith(("postgresql://", "postgres://")):
         raise ValueError("database must be a PostgreSQL connection URL")
@@ -27,7 +29,8 @@ def database_url(value: str | None = None) -> str:
 
 
 def initialize_database(dsn: str) -> None:
-    """Apply schema versions atomically, serialized across application processes."""
+    """Apply schema versions atomically, serialized across application
+    processes."""
     from . import account_migration, backtest_migration, strategy_migration
 
     with psycopg.connect(database_url(dsn)) as db:
@@ -37,7 +40,8 @@ def initialize_database(dsn: str) -> None:
             "(version integer PRIMARY KEY)"
         )
         applied = {
-            row[0] for row in db.execute("SELECT version FROM a500_schema_migrations")
+            row[0]
+            for row in db.execute("SELECT version FROM a500_schema_migrations")
         }
         migrations = (
             (1, account_migration.migrate),

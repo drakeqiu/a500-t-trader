@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -83,9 +84,11 @@ class IntradayStrategyStateStore:
             db.execute("SELECT pg_advisory_xact_lock(500021)")
             db.execute(
                 """INSERT INTO intraday_strategy_state (
-                    symbol,session_date,grid_version,grid_layer,grid_round,spacing,
-                    same_direction_bars,cooldown_until,reset_anchor_crossings,
-                    daily_trade_count,daily_add_count,daily_turnover
+                    symbol, session_date, grid_version, grid_layer,
+                    grid_round, spacing,
+                    same_direction_bars,cooldown_until,
+                    reset_anchor_crossings,daily_trade_count,daily_add_count,
+                    daily_turnover
                 ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(symbol,session_date) DO UPDATE SET
                     grid_version=excluded.grid_version,
@@ -106,7 +109,9 @@ class IntradayStrategyStateStore:
                     state.grid_round,
                     str(state.spacing),
                     state.same_direction_bars,
-                    _timestamp(state.cooldown_until) if state.cooldown_until else None,
+                    _timestamp(state.cooldown_until)
+                    if state.cooldown_until
+                    else None,
                     state.reset_anchor_crossings,
                     state.daily_trade_count,
                     state.daily_add_count,
@@ -117,10 +122,11 @@ class IntradayStrategyStateStore:
     def state(self, symbol: str, session_date: date) -> StrategyState | None:
         with psycopg.connect(self.dsn) as db:
             row = db.execute(
-                """SELECT symbol,session_date,grid_version,grid_layer,grid_round,
-                    spacing,same_direction_bars,cooldown_until,reset_anchor_crossings,
-                    daily_trade_count,daily_add_count,daily_turnover
-                    FROM intraday_strategy_state WHERE symbol=%s AND session_date=%s""",
+                """SELECT symbol,session_date,grid_version,grid_layer,
+                    grid_round,spacing,same_direction_bars,cooldown_until,
+                    reset_anchor_crossings,daily_trade_count,daily_add_count,
+                    daily_turnover FROM intraday_strategy_state
+                    WHERE symbol=%s AND session_date=%s""",
                 (symbol, session_date.isoformat()),
             ).fetchone()
         if row is None:
@@ -154,14 +160,16 @@ class IntradayStrategyStateStore:
             db.execute("SELECT pg_advisory_xact_lock(500021)")
             db.execute(
                 "INSERT INTO strategy_initial_holdings VALUES(%s,%s) "
-                "ON CONFLICT(symbol) DO UPDATE SET record_json=excluded.record_json",
+                "ON CONFLICT(symbol) DO UPDATE SET "
+                "record_json=excluded.record_json",
                 (holdings.symbol, json.dumps(payload, separators=(",", ":"))),
             )
 
     def initial_holdings(self, symbol: str) -> InitialHoldings | None:
         with psycopg.connect(self.dsn) as db:
             row = db.execute(
-                "SELECT record_json FROM strategy_initial_holdings WHERE symbol=%s",
+                "SELECT record_json FROM strategy_initial_holdings "
+                "WHERE symbol=%s",
                 (symbol,),
             ).fetchone()
         if row is None:
@@ -207,7 +215,8 @@ class IntradayStrategyStateStore:
             or min_same_direction_bars < 0
         ):
             raise ValueError(
-                "explicit positive strategy limits and grid coordinates are required"
+                "explicit positive strategy limits and grid coordinates "
+                "are required"
             )
         reasons: list[str] = []
         if pending_order_state not in _SETTLED_ORDER_STATES:
@@ -236,7 +245,8 @@ class IntradayStrategyStateStore:
             reasons.append("grid slot already used")
         if (
             state.cooldown_until is not None
-            and now.astimezone(state.cooldown_until.tzinfo) < state.cooldown_until
+            and now.astimezone(state.cooldown_until.tzinfo)
+            < state.cooldown_until
         ):
             reasons.append("direction cooldown is active")
         if state.same_direction_bars < min_same_direction_bars:
@@ -249,9 +259,13 @@ class IntradayStrategyStateStore:
             reasons.append("daily turnover limit reached")
         return tuple(reasons)
 
-    def record_recommendation(self, recommendation: StrategyRecommendation) -> None:
+    def record_recommendation(
+        self, recommendation: StrategyRecommendation
+    ) -> None:
         _validate_side(recommendation.side)
-        _validate_timestamp(recommendation.created_at, "recommendation timestamp")
+        _validate_timestamp(
+            recommendation.created_at, "recommendation timestamp"
+        )
         if (
             not recommendation.recommendation_id.strip()
             or not recommendation.symbol.strip()
@@ -266,7 +280,8 @@ class IntradayStrategyStateStore:
         with psycopg.connect(self.dsn) as db:
             db.execute(
                 """INSERT INTO strategy_recommendations (
-                    recommendation_id,symbol,side,created_at,grid_version,grid_layer,grid_round
+                    recommendation_id,symbol,side,created_at,grid_version,
+                    grid_layer,grid_round
                 ) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                 (
                     recommendation.recommendation_id,
@@ -291,8 +306,15 @@ class IntradayStrategyStateStore:
         """Persist once-per-layer/round use; return false if already
         consumed."""
         _validate_side(side)
-        if not symbol.strip() or grid_version < 1 or grid_layer < 0 or grid_round < 0:
-            raise ValueError("symbol and non-negative grid coordinates are required")
+        if (
+            not symbol.strip()
+            or grid_version < 1
+            or grid_layer < 0
+            or grid_round < 0
+        ):
+            raise ValueError(
+                "symbol and non-negative grid coordinates are required"
+            )
         with psycopg.connect(self.dsn) as db:
             cursor = db.execute(
                 "INSERT INTO consumed_grid_slots VALUES(%s,%s,%s,%s,%s,%s) "
@@ -337,7 +359,9 @@ class IntradayStrategyStateStore:
             raise ValueError(
                 "fill id, pair id, positive quantity and price are required"
             )
-        session_date = fill.timestamp.astimezone(ZoneInfo("Asia/Shanghai")).date()
+        session_date = fill.timestamp.astimezone(
+            ZoneInfo("Asia/Shanghai")
+        ).date()
         with psycopg.connect(self.dsn) as db:
             db.execute("SELECT pg_advisory_xact_lock(500021)")
             recommendation = db.execute(
@@ -394,7 +418,9 @@ class IntradayStrategyStateStore:
                             "sell-first pair requires recorded initial "
                             "sellable inventory"
                         )
-                    sellable_quantity = json.loads(holdings_row[0])["sellable_quantity"]
+                    sellable_quantity = json.loads(holdings_row[0])[
+                        "sellable_quantity"
+                    ]
                     allocated = db.execute(
                         "SELECT COALESCE(SUM(p.sell_quantity),0) "
                         "FROM strategy_trade_pairs p "
@@ -411,7 +437,8 @@ class IntradayStrategyStateStore:
                     ).fetchall()[0][0]
                     if allocated + fill.quantity > sellable_quantity:
                         raise ValueError(
-                            "sell fill exceeds unallocated initial sellable inventory"
+                            "sell fill exceeds unallocated initial sellable "
+                            "inventory"
                         )
                     db.execute(
                         "INSERT INTO strategy_trade_pairs "
@@ -429,7 +456,9 @@ class IntradayStrategyStateStore:
             else:
                 pair_symbol, _, buy_fill, sell_fill, buy_qty, sell_qty = pair
                 if pair_symbol != symbol:
-                    raise ValueError("trade pair symbol must match the recommendation")
+                    raise ValueError(
+                        "trade pair symbol must match the recommendation"
+                    )
                 if fill.side == "buy":
                     if sell_fill is None and buy_fill is not None:
                         db.execute(
@@ -462,7 +491,8 @@ class IntradayStrategyStateStore:
                     if buy_fill is not None:
                         if buy_qty < sell_qty + fill.quantity:
                             raise ValueError(
-                                "sell fill exceeds linked strategy buy quantity"
+                                "sell fill exceeds linked strategy buy "
+                                "quantity"
                             )
                     else:
                         if buy_qty > 0:
@@ -498,7 +528,10 @@ class IntradayStrategyStateStore:
                             "<first_fill.fill_sequence))",
                             (symbol, fill.trade_pair_id),
                         ).fetchall()[0][0]
-                        if allocated + sell_qty + fill.quantity > sellable_quantity:
+                        if (
+                            allocated + sell_qty + fill.quantity
+                            > sellable_quantity
+                        ):
                             raise ValueError(
                                 "sell fill exceeds unallocated initial "
                                 "sellable inventory"
@@ -538,7 +571,9 @@ class IntradayStrategyStateStore:
             ).fetchone()
             if existing is not None:
                 value = Decimal(existing[0]) + fill.price * fill.quantity
-                cooldown_until = fill.timestamp + timedelta(minutes=cooldown_minutes)
+                cooldown_until = fill.timestamp + timedelta(
+                    minutes=cooldown_minutes
+                )
                 db.execute(
                     """UPDATE intraday_strategy_state
                     SET same_direction_bars=0, cooldown_until=%s,
@@ -557,7 +592,10 @@ class IntradayStrategyStateStore:
         return True
 
     def trade_pairs(self) -> list[dict[str, object]]:
-        with psycopg.connect(self.dsn, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.dsn, row_factory=cast(Any, dict_row)),
+        ) as db:
             rows = db.execute(
                 "SELECT trade_pair_id,symbol,grid_version,buy_fill_id,"
                 "sell_fill_id,status "
@@ -570,7 +608,10 @@ class IntradayStrategyStateStore:
         pair."""
         if not isinstance(trade_pair_id, str) or not trade_pair_id.strip():
             return None
-        with psycopg.connect(self.dsn, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.dsn, row_factory=cast(Any, dict_row)),
+        ) as db:
             row = db.execute(
                 """SELECT trade_pair_id,symbol,grid_version,buy_fill_id,
                     sell_fill_id,buy_quantity,sell_quantity,status
@@ -587,8 +628,14 @@ def _validate_state(state: StrategyState) -> None:
         or state.grid_layer < 0
         or state.grid_round < 0
     ):
-        raise ValueError("symbol and non-negative grid coordinates are required")
-    if state.spacing <= 0 or not state.spacing.is_finite() or state.daily_turnover < 0:
+        raise ValueError(
+            "symbol and non-negative grid coordinates are required"
+        )
+    if (
+        state.spacing <= 0
+        or not state.spacing.is_finite()
+        or state.daily_turnover < 0
+    ):
         raise ValueError("spacing must be positive and turnover non-negative")
     counters = (
         state.same_direction_bars,
@@ -613,7 +660,9 @@ def _validate_holdings(holdings: InitialHoldings) -> None:
         or not holdings.cost_basis.is_finite()
         or holdings.cost_basis < 0
     ):
-        raise ValueError("initial holding quantities and cost basis are inconsistent")
+        raise ValueError(
+            "initial holding quantities and cost basis are inconsistent"
+        )
 
 
 def _validate_side(side: str) -> None:

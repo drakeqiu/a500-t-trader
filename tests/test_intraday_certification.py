@@ -53,8 +53,16 @@ def passing_evidence() -> CertificationEvidence:
         stressed_cost_slippage_multiplier=Decimal("1.5"),
         neighbor_net_returns=(Decimal("0.02"),),
         neighbor_profit_factors=(Decimal("1.3"),),
-        walk_forward_net_returns=(Decimal("0.02"), Decimal("0.03"), Decimal("0.01")),
-        walk_forward_profit_factors=(Decimal("1.1"), Decimal("1.2"), Decimal("1.05")),
+        walk_forward_net_returns=(
+            Decimal("0.02"),
+            Decimal("0.03"),
+            Decimal("0.01"),
+        ),
+        walk_forward_profit_factors=(
+            Decimal("1.1"),
+            Decimal("1.2"),
+            Decimal("1.05"),
+        ),
     )
 
 
@@ -82,7 +90,8 @@ def test_certificate_binds_rule_inputs() -> None:
     assert (
         certification_is_current(
             result,
-            binding() | {"cost_model": {"commission": "0.0004", "slippage_bps": "2"}},
+            binding()
+            | {"cost_model": {"commission": "0.0004", "slippage_bps": "2"}},
             config(),
         )
         is False
@@ -105,7 +114,9 @@ def test_certificate_binds_rule_inputs() -> None:
     )
     assert (
         certification_is_current(
-            result, binding() | {"strategy_id": "intraday-etf-t-rsi-v1"}, config()
+            result,
+            binding() | {"strategy_id": "intraday-etf-t-rsi-v1"},
+            config(),
         )
         is False
     )
@@ -119,13 +130,21 @@ def test_certificate_binds_rule_inputs() -> None:
     )
 
 
-def test_certificate_requires_ruleset_identity_and_execution_assumptions() -> None:
+def test_certificate_requires_ruleset_identity_and_execution_assumptions() -> (
+    None
+):
     for incomplete in (
         binding() | {"strategy_id": ""},
         binding() | {"execution_assumptions": {}},
-        {key: value for key, value in binding().items() if key != "strategy_id"},
+        {
+            key: value
+            for key, value in binding().items()
+            if key != "strategy_id"
+        },
     ):
-        result = certify_intraday_backtest(passing_evidence(), incomplete, config())
+        result = certify_intraday_backtest(
+            passing_evidence(), incomplete, config()
+        )
         assert result.certified is False
         assert result.fingerprint is None
 
@@ -149,10 +168,13 @@ def test_report_exposes_metrics_and_binding() -> None:
 def test_invalid_risk_or_neighbor_config_fails_closed() -> None:
     for invalid in (
         config() | {"maximum_drawdown": "-0.1"},
-        config() | {"neighbor_parameter_perturbation": {"grid.width": "-0.001"}},
+        config()
+        | {"neighbor_parameter_perturbation": {"grid.width": "-0.001"}},
         config() | {"net_return_minimum": "-1"},
     ):
-        result = certify_intraday_backtest(passing_evidence(), binding(), invalid)
+        result = certify_intraday_backtest(
+            passing_evidence(), binding(), invalid
+        )
         assert result.certified is False
         assert result.fingerprint is None
 
@@ -162,14 +184,18 @@ def test_binding_must_be_complete_and_canonicalizable() -> None:
         binding() | {"cost_model": {}},
         binding() | {"parameters": []},
     ):
-        result = certify_intraday_backtest(passing_evidence(), invalid, config())
+        result = certify_intraday_backtest(
+            passing_evidence(), invalid, config()
+        )
         assert result.certified is False
         assert result.fingerprint is None
 
 
 def test_incomplete_certification_configuration_never_certifies() -> None:
     incomplete = config() | {"walk_forward": {"splits": 3}}
-    result = certify_intraday_backtest(passing_evidence(), binding(), incomplete)
+    result = certify_intraday_backtest(
+        passing_evidence(), binding(), incomplete
+    )
     assert result.certified is False
     assert any(
         blocker.startswith("walk_forward.minimum_passing_splits")

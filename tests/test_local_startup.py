@@ -28,7 +28,8 @@ def test_local_environment_prefers_dotenv_provider_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / ".env").write_text(
-        "AD_USERNAME=trader\nAD_PASSWORD=secret\nAD_HOST=market.example\nAD_PORT=9876\n",
+        "AD_USERNAME=trader\nAD_PASSWORD=secret\n"
+        "AD_HOST=market.example\nAD_PORT=9876\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
@@ -74,7 +75,9 @@ def test_local_environment_preserves_explicit_persistence_opt_out(
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
     monkeypatch.setenv("HISTORY_PERSISTENCE_PERMITTED", "false")
 
-    assert LOCAL.local_environment()["HISTORY_PERSISTENCE_PERMITTED"] == "false"
+    assert (
+        LOCAL.local_environment()["HISTORY_PERSISTENCE_PERMITTED"] == "false"
+    )
 
 
 def test_local_environment_defaults_build_mirrors(
@@ -86,7 +89,10 @@ def test_local_environment_defaults_build_mirrors(
 
     environment = LOCAL.local_environment()
 
-    assert environment["UV_INDEX_URL"] == "https://mirrors.aliyun.com/pypi/simple/"
+    assert (
+        environment["UV_INDEX_URL"]
+        == "https://mirrors.aliyun.com/pypi/simple/"
+    )
     assert environment["UV_HTTP_TIMEOUT"] == "180"
     assert environment["APT_MIRROR"] == "mirrors.bfsu.edu.cn"
 
@@ -100,7 +106,10 @@ def test_local_environment_defaults_empty_build_mirrors(
 
     environment = LOCAL.local_environment()
 
-    assert environment["UV_INDEX_URL"] == "https://mirrors.aliyun.com/pypi/simple/"
+    assert (
+        environment["UV_INDEX_URL"]
+        == "https://mirrors.aliyun.com/pypi/simple/"
+    )
     assert environment["UV_HTTP_TIMEOUT"] == "180"
     assert environment["APT_MIRROR"] == "mirrors.bfsu.edu.cn"
 
@@ -120,7 +129,9 @@ def test_local_environment_defaults_to_single_rauthy_issuer(
     environment = LOCAL.local_environment()
 
     assert environment["OIDC_ISSUER"] == "http://localhost:8081/auth/v1/"
-    assert environment["OIDC_JWKS_URI"] == "http://rauthy:8080/auth/v1/oidc/certs"
+    assert (
+        environment["OIDC_JWKS_URI"] == "http://rauthy:8080/auth/v1/oidc/certs"
+    )
     assert environment["OIDC_CLIENT_ID"] == "a500-browser-client"
 
 
@@ -156,7 +167,9 @@ def test_local_environment_preserves_configured_build_mirrors(
 def test_exported_environment_overrides_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    (tmp_path / ".env").write_text("MARKET_DATA_MODE=tgw\nMAILPIT_HOST_PORT=8010\n")
+    (tmp_path / ".env").write_text(
+        "MARKET_DATA_MODE=tgw\nMAILPIT_HOST_PORT=8010\n"
+    )
     monkeypatch.setattr(LOCAL, "ROOT", tmp_path)
     monkeypatch.setenv("MARKET_DATA_MODE", "replay")
     monkeypatch.setenv("MAILPIT_HOST_PORT", "8020")
@@ -181,7 +194,9 @@ def test_local_environment_defaults_mailpit_and_rauthy_port(
     assert environment["RAUTHY_LOCAL_TEST"] == "false"
 
 
-def test_rauthy_rootless_container_reads_bootstrap_as_mapped_host_user() -> None:
+def test_rauthy_rootless_container_reads_bootstrap_as_mapped_host_user() -> (
+    None
+):
     compose = (SCRIPT.parents[1] / "compose.rauthy.yaml").read_text()
     rauthy = compose.split("  rauthy:\n", 1)[1].split("\n  volumes:", 1)[0]
 
@@ -202,7 +217,11 @@ def test_rauthy_bootstrap_persists_secure_secrets(
     LOCAL.prepare_rauthy_bootstrap(environment)
     first = {
         key: environment[key]
-        for key in ("RAUTHY_SECRET_RAFT", "RAUTHY_SECRET_API", "RAUTHY_ENC_KEYS")
+        for key in (
+            "RAUTHY_SECRET_RAFT",
+            "RAUTHY_SECRET_API",
+            "RAUTHY_ENC_KEYS",
+        )
     }
     LOCAL.prepare_rauthy_bootstrap(environment)
 
@@ -261,7 +280,9 @@ def test_rauthy_bootstrap_sets_client_audience_using_persisted_api_key(
     environment = {"RAUTHY_BOOTSTRAP_HOST_DIR": str(tmp_path / "bootstrap")}
     LOCAL.prepare_rauthy_bootstrap(environment)
     clients = json.loads((tmp_path / "bootstrap" / "clients.json").read_text())
-    api_keys = json.loads((tmp_path / "bootstrap" / "api_keys.json").read_text())
+    api_keys = json.loads(
+        (tmp_path / "bootstrap" / "api_keys.json").read_text()
+    )
 
     assert all("default_aud" not in client for client in clients)
     assert api_keys[0]["access"] == [
@@ -310,7 +331,9 @@ def test_rauthy_audience_is_updated_and_verified_for_both_clients(
                 return Response({"id": "client", "default_aud": ["a500-api"]})
             return Response({})
 
-    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    monkeypatch.setattr(
+        "urllib.request.build_opener", lambda *handlers: Opener()
+    )
 
     LOCAL.set_client_audience(environment)
 
@@ -364,7 +387,9 @@ def test_rauthy_browser_origin_is_updated_and_verified(
                 return Response({})
             return Response(dict(configured))
 
-    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: Opener())
+    monkeypatch.setattr(
+        "urllib.request.build_opener", lambda *handlers: Opener()
+    )
 
     LOCAL.set_browser_origin(environment)
 
@@ -394,7 +419,9 @@ def test_rauthy_bootstrap_creates_browser_and_device_clients(
     assert browser["auth_code_lifetime"] == device["auth_code_lifetime"] == 60
     assert "default_aud" not in browser
     assert "default_aud" not in device
-    assert device["flows_enabled"] == ["urn:ietf:params:oauth:grant-type:device_code"]
+    assert device["flows_enabled"] == [
+        "urn:ietf:params:oauth:grant-type:device_code"
+    ]
 
 
 def test_readiness_uses_configured_issuer_and_gateway(
@@ -416,7 +443,9 @@ def test_readiness_uses_configured_issuer_and_gateway(
 
     def fake_urlopen(url: str, timeout: int) -> Response:
         requested.append(url)
-        if url.endswith("/api/v1/signals") or url.endswith("/api/v1/account-snapshot"):
+        if url.endswith("/api/v1/signals") or url.endswith(
+            "/api/v1/account-snapshot"
+        ):
             raise LOCAL.HTTPError(url, 401, "Unauthorized", {}, None)
         return Response()
 
@@ -429,16 +458,21 @@ def test_readiness_uses_configured_issuer_and_gateway(
     )
 
     assert (
-        "http://localhost:18443/auth/v1/.well-known/openid-configuration" in requested
+        "http://localhost:18443/auth/v1/.well-known/openid-configuration"
+        in requested
     )
     assert "http://localhost:18080" in requested
 
 
 def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     lan_script = SCRIPT.with_name("start-lan-replay.py")
-    lan_spec = importlib.util.spec_from_file_location("start_lan_replay", lan_script)
+    lan_spec = importlib.util.spec_from_file_location(
+        "start_lan_replay", lan_script
+    )
     assert lan_spec is not None and lan_spec.loader is not None
     lan = importlib.util.module_from_spec(lan_spec)
     lan_spec.loader.exec_module(lan)
@@ -487,7 +521,9 @@ def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
 
     monkeypatch.setattr(lan, "urlopen", open_url)
     monkeypatch.setattr(
-        lan.subprocess, "run", lambda command, **kwargs: commands.append(command)
+        lan.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
     )
     monkeypatch.setattr(lan.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(
@@ -508,7 +544,10 @@ def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
     assert environment["RAUTHY_RP_ID"] == "a500.test"
     assert environment["RAUTHY_RP_ORIGIN"] == "https://a500.test:8444"
     assert environment["OIDC_ISSUER"] == "https://a500.test:8444/auth/v1/"
-    assert environment["RAUTHY_ADMIN_API_BASE_URL"] == "http://127.0.0.1:8081/auth/v1/"
+    assert (
+        environment["RAUTHY_ADMIN_API_BASE_URL"]
+        == "http://127.0.0.1:8081/auth/v1/"
+    )
     assert environment["LAN_TLS"] == "1"
     assert environment["TLS_CERT"] == str(cert_file.resolve())
     assert environment["TLS_KEY"] == str(key_file.resolve())
@@ -550,6 +589,8 @@ def test_lan_up_sets_secure_origins_after_discovery_and_gateway_readiness(
 
 def test_gateway_routes_shared_history_through_jobs_api() -> None:
     gateway = (SCRIPT.parents[1] / "deploy" / "oidc-gateway.conf").read_text()
-    jobs_location = gateway.split("location ~ ^/api/v1/(jobs|history/daily)", 1)[1]
+    jobs_location = gateway.split(
+        "location ~ ^/api/v1/(jobs|history/daily)", 1
+    )[1]
     jobs_location = jobs_location.split("\n    }", 1)[0]
     assert "set $jobs_api jobs-api:8000;" in jobs_location

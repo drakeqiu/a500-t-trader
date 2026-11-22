@@ -88,7 +88,9 @@ def test_plan_calculates_explainable_buy_quantity_from_explicit_rule() -> None:
     assert suggestion.risk_or_invalidation
 
 
-def test_missing_or_stale_market_data_never_recommends_tradable_quantity() -> None:
+def test_missing_or_stale_market_data_never_recommends_tradable_quantity() -> (
+    None
+):
     config, account = _inputs()
     stale = _snapshot(datetime(2026, 10, 29, 8, 20, tzinfo=SHANGHAI))
     plan = generate_plan(config, account, MarketData(stale), as_of=AS_OF)

@@ -21,7 +21,9 @@ from .common import json_default
 def _load_completed_bars(path: str) -> tuple[MinuteBar, ...]:
     with open(path, encoding="utf-8") as stream:
         document = json.load(stream)
-    if not isinstance(document, dict) or not isinstance(document.get("bars"), list):
+    if not isinstance(document, dict) or not isinstance(
+        document.get("bars"), list
+    ):
         raise ValueError("bars input must be a JSON object containing bars")
     return tuple(
         MinuteBar(
@@ -33,7 +35,9 @@ def _load_completed_bars(path: str) -> tuple[MinuteBar, ...]:
             Decimal(str(item["low"])),
             Decimal(str(item["close"])),
             item["volume"],
-            None if item.get("amount") is None else Decimal(str(item["amount"])),
+            None
+            if item.get("amount") is None
+            else Decimal(str(item["amount"])),
             item.get("is_completed", True),
         )
         for item in document["bars"]
@@ -47,16 +51,25 @@ def register_commands(
         "intraday-config",
         help="validate explicit V1 strategy inputs and report their identity",
     )
-    config_parser.add_argument("--config", required=True, help="V1 JSON config file")
+    config_parser.add_argument(
+        "--config", required=True, help="V1 JSON config file"
+    )
     strategy = commands.add_parser(
-        "intraday-strategy", help="evaluate user-supplied intraday strategy inputs"
+        "intraday-strategy",
+        help="evaluate user-supplied intraday strategy inputs",
     )
     strategy.add_argument(
         "--config", required=True, help="explicit V1 strategy input JSON"
     )
-    strategy.add_argument("--bars", required=True, help="minute bars JSON input")
-    strategy.add_argument("--as-of", required=True, type=datetime.fromisoformat)
-    strategy.add_argument("--output", help="export the exact structured result as JSON")
+    strategy.add_argument(
+        "--bars", required=True, help="minute bars JSON input"
+    )
+    strategy.add_argument(
+        "--as-of", required=True, type=datetime.fromisoformat
+    )
+    strategy.add_argument(
+        "--output", help="export the exact structured result as JSON"
+    )
     signal_replay = commands.add_parser(
         "intraday-signals",
         help="replay V1 BUY/SELL candidates with a fixed signal quantity",
@@ -67,7 +80,10 @@ def register_commands(
         help="saved five-minute history JSON",
     )
     signal_replay.add_argument(
-        "--quantity", type=int, default=40000, help="fixed signal quantity in shares"
+        "--quantity",
+        type=int,
+        default=40000,
+        help="fixed signal quantity in shares",
     )
     signal_replay.add_argument("--output", help="optional JSON output file")
     comparison = commands.add_parser(
@@ -111,7 +127,10 @@ def handle(args: argparse.Namespace) -> int:
         try:
             config = load_intraday_v1_config(args.config)
         except Exception as error:
-            print(f"Unable to load V1 intraday configuration: {error}", file=sys.stderr)
+            print(
+                f"Unable to load V1 intraday configuration: {error}",
+                file=sys.stderr,
+            )
             return 2
         print(
             json.dumps(
@@ -132,9 +151,13 @@ def handle(args: argparse.Namespace) -> int:
     if args.command == "intraday-compare-563360":
         try:
             minute_bars = _load_completed_bars(args.bars)
-            return _print_result(run_issue83_comparison(minute_bars), args.output)
+            return _print_result(
+                run_issue83_comparison(minute_bars), args.output
+            )
         except Exception as error:
-            print(f"Unable to run Issue 83 comparison: {error}", file=sys.stderr)
+            print(
+                f"Unable to run Issue 83 comparison: {error}", file=sys.stderr
+            )
             return 2
     if args.command == "intraday-replay-563360-v1":
         try:
@@ -142,7 +165,9 @@ def handle(args: argparse.Namespace) -> int:
             result = run_issue85_sequential_replay(minute_bars)
             return _print_result(result, args.output)
         except Exception as error:
-            print(f"Unable to run Issue 85 V1 replay: {error}", file=sys.stderr)
+            print(
+                f"Unable to run Issue 85 V1 replay: {error}", file=sys.stderr
+            )
             return 2
     if args.command == "intraday-signals":
         try:
@@ -182,22 +207,43 @@ def handle(args: argparse.Namespace) -> int:
                     "fixed_quantity_sell_slots_at_start": 3,
                 },
                 "limitations": [
-                    "no fills, P&L, position updates, T+1 or sell-capacity checks",
-                    "starting account snapshot is informational, not a signal gate",
-                    "grid tick uses the SSE ETF minimum increment of 0.001 yuan",
-                    "0.5 bps commission, 0.1 yuan minimum; no slippage is modeled",
+                    (
+                        "no fills, P&L, position updates, T+1 or "
+                        "sell-capacity checks"
+                    ),
+                    (
+                        "starting account snapshot is informational, not a "
+                        "signal gate"
+                    ),
+                    (
+                        "grid tick uses the SSE ETF minimum increment of "
+                        "0.001 yuan"
+                    ),
+                    (
+                        "0.5 bps commission, 0.1 yuan minimum; no slippage is "
+                        "modeled"
+                    ),
                     "missing history is not synthesized",
-                    "grid-level cooldown is absent; repeated candidates may occur",
-                    "fixed-share technical replay is research only and "
-                    "excluded from RSI comparison and certification "
-                    "evidence",
-                    "daily bar completeness has not been independently audited",
+                    (
+                        "grid-level cooldown is absent; repeated candidates "
+                        "may occur"
+                    ),
+                    (
+                        "fixed-share technical replay is research only and "
+                        "excluded from RSI comparison and certification "
+                        "evidence"
+                    ),
+                    (
+                        "daily bar completeness has not been independently "
+                        "audited"
+                    ),
                 ],
             }
             return _print_result(result, args.output)
         except Exception as error:
             print(
-                f"Unable to replay fixed-quantity V1 signals: {error}", file=sys.stderr
+                f"Unable to replay fixed-quantity V1 signals: {error}",
+                file=sys.stderr,
             )
             return 2
     try:
@@ -219,7 +265,9 @@ def handle(args: argparse.Namespace) -> int:
                 Decimal(str(item["low"])),
                 Decimal(str(item["close"])),
                 item["volume"],
-                None if item.get("amount") is None else Decimal(str(item["amount"])),
+                None
+                if item.get("amount") is None
+                else Decimal(str(item["amount"])),
                 item.get("is_completed", True),
             )
             grouped.setdefault(bar.symbol, []).append(bar)
@@ -245,12 +293,16 @@ def handle(args: argparse.Namespace) -> int:
         )
         return 0
     except Exception as error:
-        print(f"Unable to evaluate intraday strategy: {error}", file=sys.stderr)
+        print(
+            f"Unable to evaluate intraday strategy: {error}", file=sys.stderr
+        )
         return 2
 
 
 def _print_result(result: object, output: str | None) -> int:
-    rendered = json.dumps(result, ensure_ascii=False, indent=2, default=json_default)
+    rendered = json.dumps(
+        result, ensure_ascii=False, indent=2, default=json_default
+    )
     print(rendered)
     if output:
         with open(output, "w", encoding="utf-8") as stream:

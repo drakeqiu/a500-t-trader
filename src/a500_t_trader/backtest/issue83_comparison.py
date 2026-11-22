@@ -32,7 +32,8 @@ IMPLEMENTATION_VERSION = "issue83-ruleset-account-comparison-1"
 
 
 def _average_daily_amount(bars: tuple[MinuteBar, ...]) -> Decimal | None:
-    """Return the trailing 20 complete 48-bar session amounts, if all are valid."""
+    """Return the trailing 20 complete 48-bar session amounts, if all are
+    valid."""
     daily: dict[date, list[MinuteBar]] = {}
     for bar in bars:
         day = bar.timestamp.astimezone(SHANGHAI).date()
@@ -62,8 +63,9 @@ class _ExploratoryGridContext(TechnicalGridContextProvider):
     def context_for(
         self, symbol: str, bars: tuple[MinuteBar, ...]
     ) -> dict[str, object]:
-        # Only the stable fee/tick inputs are supplied; the source analyzer derives
-        # a causal session grid from the bars and does not reuse any future grid state.
+        # Only the stable fee/tick inputs are supplied; the source analyzer
+        # derives a causal session grid from the bars and does not reuse any
+        # future grid state.
         return {
             "tick_size": Decimal("0.001"),
             "round_trip_cost_rate": Decimal("0.0001"),
@@ -71,7 +73,8 @@ class _ExploratoryGridContext(TechnicalGridContextProvider):
 
 
 def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
-    """Run the three source-scored groups on one fixed account and execution model."""
+    """Run the three source-scored groups on one fixed account and execution
+    model."""
     if not bars:
         raise ValueError("market history is empty")
     if any(bar.symbol != SYMBOL for bar in bars):
@@ -86,7 +89,9 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         bar for bar in ordered if WARMUP_START <= bar.timestamp < START
     )
     warmup_bars = all_warmup_bars[-180:]
-    decision_bars = tuple(bar for bar in ordered if START <= bar.timestamp <= END)
+    decision_bars = tuple(
+        bar for bar in ordered if START <= bar.timestamp <= END
+    )
     relevant = (*warmup_bars, *decision_bars)
     if len(warmup_bars) < 180:
         raise ValueError(
@@ -94,7 +99,9 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
             f"{len(all_warmup_bars)}"
         )
     if len(decision_bars) < 2:
-        raise ValueError("market history must contain at least two decision bars")
+        raise ValueError(
+            "market history must contain at least two decision bars"
+        )
     if decision_bars[0].timestamp != START:
         raise ValueError(
             f"first decision bar must be {START.isoformat()}; "
@@ -142,7 +149,9 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         )
         candidate_signals = provider.signals(SYMBOL, relevant)
         signals = tuple(
-            signal for signal in candidate_signals if START <= signal.timestamp <= END
+            signal
+            for signal in candidate_signals
+            if START <= signal.timestamp <= END
         )
         simulation = run_intraday_backtest(
             symbol=SYMBOL,
@@ -154,7 +163,9 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
                 "group": name,
                 "score_weights": weights,
                 "rsi_momentum_filter": momentum_filter,
-                "quantity_policy": "one fixed 100-share board lot per candidate",
+                "quantity_policy": (
+                    "one fixed 100-share board lot per candidate"
+                ),
                 "maximum_history_bars": 181,
             },
             implementation_version=IMPLEMENTATION_VERSION,
@@ -200,7 +211,9 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
         }
     base_value = Decimal(groups["kdj15_rsi0"]["strategy_final_value"])
     score_value = Decimal(groups["kdj8_rsi7"]["strategy_final_value"])
-    momentum_value = Decimal(groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"])
+    momentum_value = Decimal(
+        groups["kdj8_rsi7_rsi_momentum"]["strategy_final_value"]
+    )
     groups["kdj8_rsi7"]["incremental_value_vs_kdj15_rsi0"] = str(
         score_value - base_value
     )
@@ -210,12 +223,15 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
     input_digest = _bars_digest(relevant)
     return {
         "issue": 83,
-        "status": "exploratory_historical_account_simulation_not_certification",
+        "status": (
+            "exploratory_historical_account_simulation_not_certification"
+        ),
         "strategy_id": STRATEGY_ID,
         "technical_parameter_hash": TECHNICAL_PARAMETER_HASH,
         "rule_source_sha256": RULE_SOURCE_SHA256,
         "group_analysis_parameter_hashes": {
-            name: result["analysis_parameter_hash"] for name, result in groups.items()
+            name: result["analysis_parameter_hash"]
+            for name, result in groups.items()
         },
         "symbol": SYMBOL,
         "input": {
@@ -260,13 +276,20 @@ def run_issue83_comparison(bars: tuple[MinuteBar, ...]) -> dict[str, object]:
                 "This is an exploratory historical replay, not certified "
                 "strategy evidence."
             ),
-            "The fixed one-lot signal quantity is not the V1 account-state sizing, "
-            "position cap, or protected-floor policy.",
-            "Historical fill assumptions do not establish broker/exchange execution "
-            "quality, live order-state reconciliation, or production readiness.",
-            "The supplied market-history file's source completeness and "
-            "corporate-action/data-quality certification are not established by this "
-            "runner.",
+            (
+                "The fixed one-lot signal quantity is not V1 account-state "
+                "sizing, position cap, or protected-floor policy."
+            ),
+            (
+                "Historical fill assumptions do not establish broker/exchange "
+                "execution quality, live order-state reconciliation, or "
+                "production readiness."
+            ),
+            (
+                "The supplied market-history file's source completeness "
+                "and corporate-action/data-quality certification are not "
+                "established by this runner."
+            ),
         ],
         "reproduction": {
             "command": (

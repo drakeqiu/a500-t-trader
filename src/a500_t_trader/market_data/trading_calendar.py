@@ -31,14 +31,18 @@ class AmazingDataCalendar:
         self._base_data = base_data
 
     def get_calendar(self, market: str = "SH") -> tuple[date, ...]:
-        dates = self._base_data.get_calendar(market=market)  # type: ignore[attr-defined]
+        dates = self._base_data.get_calendar(  # type: ignore[attr-defined]
+            market=market
+        )
         return tuple(_calendar_date(item) for item in dates)
 
 
 def default_calendar_source() -> CalendarSource:
     """Create AmazingData's Shanghai adapter when the SDK is importable."""
     try:
-        from AmazingData.query_api.base_data import BaseData  # type: ignore[import-untyped]
+        from AmazingData.query_api import base_data  # type: ignore[import-untyped]
+
+        BaseData = base_data.BaseData
 
         return AmazingDataCalendar(BaseData())
     except Exception:
@@ -54,7 +58,9 @@ class TradingCalendarService:
         *,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._source = source if source is not None else default_calendar_source()
+        self._source = (
+            source if source is not None else default_calendar_source()
+        )
         self._clock = clock if clock is not None else _now_shanghai
         self._lock = RLock()
         self._dates: frozenset[date] | None = None
@@ -74,14 +80,18 @@ class TradingCalendarService:
                 return SessionState.UNKNOWN, True
             target = today if session_date is None else session_date
             return (
-                SessionState.TRADING if target in self._dates else SessionState.CLOSED,
+                SessionState.TRADING
+                if target in self._dates
+                else SessionState.CLOSED,
                 self._stale,
             )
 
     def _local_today(self) -> date:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("calendar clock must return a timezone-aware datetime")
+            raise ValueError(
+                "calendar clock must return a timezone-aware datetime"
+            )
         return now.astimezone(SHANGHAI).date()
 
     def _refresh_for(self, today: date) -> None:

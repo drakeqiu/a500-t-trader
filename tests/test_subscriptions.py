@@ -133,7 +133,11 @@ def test_provider_uses_tgw_and_cancels_subscription_before_close() -> None:
     sub.close()
     provider.close()
 
-    assert [call[0] for call in api.calls] == ["subscribe", "unsubscribe", "close"]
+    assert [call[0] for call in api.calls] == [
+        "subscribe",
+        "unsubscribe",
+        "close",
+    ]
 
 
 def test_callback_consumer_receives_events() -> None:
@@ -192,7 +196,7 @@ def test_provider_delivers_default_snapshot_with_aware_received_at() -> None:
     assert event.received_at.utcoffset() is not None
 
 
-def test_provider_marks_current_minute_in_progress_and_prior_minute_completed() -> None:
+def test_provider_marks_current_and_prior_minute_completion() -> None:
     now = datetime(2026, 11, 2, 9, 31, tzinfo=SHANGHAI)
     api = FakeTgw()
     provider = TgwPushProvider(api, clock=lambda: now)
@@ -260,7 +264,9 @@ def test_iterator_coalesces_slow_bar_consumer_to_latest_value() -> None:
     assert next(sub) == bar2
 
 
-def test_tick_buffer_overflow_terminates_iterator_with_explicit_error() -> None:
+def test_tick_buffer_overflow_terminates_iterator_with_explicit_error() -> (
+    None
+):
     sub = Subscription("tick", buffer_size=1)
     sub.publish(trade(1))
     sub.publish(trade(2))
@@ -270,7 +276,9 @@ def test_tick_buffer_overflow_terminates_iterator_with_explicit_error() -> None:
     assert sub.closed
 
 
-def test_callback_consumer_receives_events_and_unsubscribe_closes_stream() -> None:
+def test_callback_consumer_receives_events_and_unsubscribe_closes_stream() -> (
+    None
+):
     received: list[Snapshot] = []
     sub = Subscription("snapshot", callback=received.append)
     sub.publish(snapshot("1.1"))

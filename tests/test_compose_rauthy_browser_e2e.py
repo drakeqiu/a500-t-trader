@@ -64,9 +64,15 @@ def test_compose_e2e_uses_synthetic_account_market_data(
     config = json.loads(override.read_text())
     account_api = config["services"]["account-api"]
 
-    assert account_api["command"] == ["python", "/app/account-api-mock-market.py"]
+    assert account_api["command"] == [
+        "python",
+        "/app/account-api-mock-market.py",
+    ]
     assert account_api["volumes"] == [
-        f"{Path(__file__).resolve().parents[1]}/scripts/fixtures/account-api-mock-market.py:/app/account-api-mock-market.py:ro"
+        (
+            f"{Path(__file__).resolve().parents[1]}/scripts/fixtures/"
+            "account-api-mock-market.py:/app/account-api-mock-market.py:ro"
+        )
     ]
 
 
@@ -75,7 +81,9 @@ def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
 ) -> None:
     from scripts.compose_rauthy_browser_e2e import _write_bootstrap
 
-    key_name, secret, password = _write_bootstrap(tmp_path, "http://localhost:18080")
+    key_name, secret, password = _write_bootstrap(
+        tmp_path, "http://localhost:18080"
+    )
     users = json.loads((tmp_path / "users.json").read_text())
     clients = json.loads((tmp_path / "clients.json").read_text())
     api_keys = json.loads((tmp_path / "api_keys.json").read_text())
@@ -92,7 +100,9 @@ def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
     }
     assert all(user["family_name"] == "Acceptance" for user in users)
     assert tmp_path.stat().st_mode & 0o001
-    assert all(path.stat().st_mode & 0o777 == 0o600 for path in tmp_path.iterdir())
+    assert all(
+        path.stat().st_mode & 0o777 == 0o600 for path in tmp_path.iterdir()
+    )
     assert all(user["password"] == {"Plain": password} for user in users)
     assert any("admin" in user["roles"] for user in users)
     browser_client = next(
@@ -125,7 +135,9 @@ def test_bootstrap_seeds_public_clients_users_and_short_lived_api_key(
 def token(header: dict[str, object], claims: dict[str, object]) -> str:
     def encode(value: dict[str, object]) -> str:
         return (
-            base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
+            base64.urlsafe_b64encode(json.dumps(value).encode())
+            .rstrip(b"=")
+            .decode()
         )
 
     return f"{encode(header)}.{encode(claims)}.signature"
@@ -189,7 +201,9 @@ def test_rejects_wrong_token_contract(
 
 def test_internal_jwks_keeps_compose_route_and_query() -> None:
     jwks = "https://localhost:18443/auth/v1/oidc/certs?k=v"
-    assert internal_jwks_uri(jwks) == ("http://rauthy:8080/auth/v1/oidc/certs?k=v")
+    assert internal_jwks_uri(jwks) == (
+        "http://rauthy:8080/auth/v1/oidc/certs?k=v"
+    )
 
 
 def test_internal_jwks_routes_public_http_host_to_compose_service() -> None:
@@ -260,14 +274,19 @@ def test_wait_discovery_returns_validated_configuration(
     monkeypatch.setattr(runner, "urlopen", lambda *args, **kwargs: Response())
     ticks = iter((0, 0, 181))
     monkeypatch.setattr(
-        "scripts.compose_rauthy_browser_e2e.time.monotonic", lambda: next(ticks)
+        "scripts.compose_rauthy_browser_e2e.time.monotonic",
+        lambda: next(ticks),
     )
-    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        "scripts.compose_rauthy_browser_e2e.time.sleep", lambda _: None
+    )
 
     assert runner._wait_discovery(issuer) == discovery
 
 
-def test_email_update_preserves_the_user_record_and_changes_only_email() -> None:
+def test_email_update_preserves_the_user_record_and_changes_only_email() -> (
+    None
+):
     current_user = {
         "id": "stable-subject",
         "email": "before@example.test",
@@ -308,7 +327,10 @@ def test_refresh_token_accepts_local_self_signed_tls(
 
     monkeypatch.setattr(runner, "urlopen", fake_urlopen)
 
-    assert runner._refresh_token("https://localhost/token", "client", "secret") == 401
+    assert (
+        runner._refresh_token("https://localhost/token", "client", "secret")
+        == 401
+    )
 
 
 def test_bootstrap_clients_use_supported_audience_update_path(
@@ -383,7 +405,9 @@ def test_device_public_api_creates_before_owner_read_and_write(
             if path == "/api/v1/signals":
                 return Response(200, b"{}")
             if path == "/api/v1/account-snapshot" and method == "PUT":
-                return Response(201 if request.get_header("If-none-match") else 200)
+                return Response(
+                    201 if request.get_header("If-none-match") else 200
+                )
             if path == "/api/v1/account-snapshot":
                 snapshot_reads += 1
                 cash = "125.50" if snapshot_reads == 1 else "126.50"
@@ -393,7 +417,9 @@ def test_device_public_api_creates_before_owner_read_and_write(
                 return Response(200, body, '"snapshot-v1"')
             if path.startswith("/api/v1/signals/stream"):
                 return Response(200, b"event\n")
-            raise AssertionError(f"Unexpected public API request: {method} {path}")
+            raise AssertionError(
+                f"Unexpected public API request: {method} {path}"
+            )
 
     monkeypatch.setattr(runner, "build_opener", lambda *_args: Opener())
     runner._device_public_api("http://gateway", "user-access-token")
@@ -424,7 +450,9 @@ def test_token_rejection_returns_after_expected_unauthorized_response(
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    monkeypatch.setattr(runner, "_public_api_request", lambda *_args: (401, {}, None))
+    monkeypatch.setattr(
+        runner, "_public_api_request", lambda *_args: (401, {}, None)
+    )
     runner._assert_token_rejected("http://gateway", "id-token")
 
 
@@ -447,17 +475,28 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
         [
             (400, {"error": "authorization_pending"}),
             (400, {"error": "slow_down"}),
-            (200, {"access_token": "initial-access", "id_token": "initial-id"}),
+            (
+                200,
+                {"access_token": "initial-access", "id_token": "initial-id"},
+            ),
             (400, {"error": "expired_token"}),
             (400, {"error": "expired_token"}),
             (200, {"access_token": "fresh-access", "id_token": "fresh-id"}),
         ]
     )
-    monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner, "_device_public_api", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
+    monkeypatch.setattr(
+        runner, "verify_access_token", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        runner, "_device_public_api", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        runner, "_run_device_browser_step", lambda callback: None
+    )
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        runner, "build_opener", lambda *_args, **_kwargs: object()
+    )
     monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
 
@@ -470,7 +509,10 @@ def test_device_grant_returns_fresh_token_after_expiry_checks(
         ),
     )
     assert runner._device_grant(
-        "http://localhost:18080", "http://localhost:8081/auth/v1/", "user", "pass"
+        "http://localhost:18080",
+        "http://localhost:8081/auth/v1/",
+        "user",
+        "pass",
     ) == ("fresh-access", "fresh-id")
 
 
@@ -480,11 +522,19 @@ def test_device_grant_can_skip_repeated_lifecycle_checks(
     from scripts import compose_rauthy_browser_e2e as runner
 
     calls: list[str] = []
-    monkeypatch.setattr(runner, "verify_access_token", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner, "_device_public_api", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner, "_run_device_browser_step", lambda callback: None)
+    monkeypatch.setattr(
+        runner, "verify_access_token", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        runner, "_device_public_api", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        runner, "_run_device_browser_step", lambda callback: None
+    )
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(runner, "build_opener", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        runner, "build_opener", lambda *_args, **_kwargs: object()
+    )
     monkeypatch.setattr(runner, "ProxyHandler", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runner, "HTTPSHandler", lambda *_args, **_kwargs: None)
 
@@ -499,7 +549,9 @@ def test_device_grant_can_skip_repeated_lifecycle_checks(
                     "device_code": "code",
                     "expires_in": 300,
                     "interval": 0,
-                    "verification_uri_complete": "http://localhost/device?code=x",
+                    "verification_uri_complete": (
+                        "http://localhost/device?code=x"
+                    ),
                     "user_code": "x",
                 },
             )
@@ -534,7 +586,9 @@ def test_compose_cleanup_fails_when_test_resources_survive(
 
     commands: list[list[str]] = []
 
-    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         stdout = ""
         if survivor == "container" and command[1:3] == ["ps", "-aq"]:
@@ -552,7 +606,9 @@ def test_compose_cleanup_fails_when_test_resources_survive(
             stderr="",
         )
 
-    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.subprocess.run", run)
+    monkeypatch.setattr(
+        "scripts.compose_rauthy_browser_e2e.subprocess.run", run
+    )
     monkeypatch.setattr(
         runner,
         "_image_exists",
@@ -575,11 +631,17 @@ def test_cleanup_verifies_resources_even_when_compose_down_fails(
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
 
-    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def run(
+        command: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         code = 1 if command[1:3] == ["compose", "--project-name"] else 0
-        return subprocess.CompletedProcess(command, code, stdout="", stderr="failed")
+        return subprocess.CompletedProcess(
+            command, code, stdout="", stderr="failed"
+        )
 
-    monkeypatch.setattr("scripts.compose_rauthy_browser_e2e.subprocess.run", run)
+    monkeypatch.setattr(
+        "scripts.compose_rauthy_browser_e2e.subprocess.run", run
+    )
     monkeypatch.setattr(runner, "_image_exists", lambda _image: False)
 
     runner._cleanup_run(
@@ -595,12 +657,17 @@ def test_device_errors_hide_credentials_and_verification_uri() -> None:
     password = "secret-password"
 
     def fail_with_sensitive_details() -> None:
-        raise RuntimeError(f"navigation failed at {verification_uri}; {password}")
+        raise RuntimeError(
+            f"navigation failed at {verification_uri}; {password}"
+        )
 
     with pytest.raises(AssertionError) as error:
         _run_device_browser_step(fail_with_sensitive_details)
 
-    assert str(error.value) == "Rauthy device authorization browser interaction failed"
+    assert (
+        str(error.value)
+        == "Rauthy device authorization browser interaction failed"
+    )
     assert verification_uri not in str(error.value)
     assert password not in str(error.value)
     assert error.value.__cause__ is None
@@ -618,12 +685,15 @@ def test_container_diagnostics_hide_log_messages(
                 "Traceback (most recent call last):\n"
                 '  File "/app/private.py", line 9, in run\n'
                 "RuntimeError: password=secret-password\n"
-                "connect() failed while connecting to upstream secret-password\n",
+                "connect() failed while connecting to upstream "
+                "secret-password\n",
                 "",
             ),
         )
     )
-    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: next(calls))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_args, **_kwargs: next(calls)
+    )
 
     _safe_container_diagnostics("project", ("account-api",))
 
@@ -658,7 +728,7 @@ def test_account_api_readiness_waits_until_gateway_routes_to_api(
     ]
 
 
-def test_browser_flow_errors_report_stage_without_exposing_playwright_diagnostics(
+def test_browser_flow_errors_report_stage_without_playwright_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from scripts import compose_rauthy_browser_e2e as runner
@@ -675,7 +745,9 @@ def test_browser_flow_errors_report_stage_without_exposing_playwright_diagnostic
     monkeypatch.setattr(runner, "_browser_flow_impl", fail_browser_action)
 
     with pytest.raises(AssertionError) as error:
-        runner._browser_flow("gateway", "issuer", "token-endpoint", "user", "password")
+        runner._browser_flow(
+            "gateway", "issuer", "token-endpoint", "user", "password"
+        )
 
     assert str(error.value) == (
         "Rauthy browser automation failed during submitting credentials "

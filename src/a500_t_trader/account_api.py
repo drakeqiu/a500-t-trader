@@ -10,7 +10,8 @@ from .market_data import MarketDataService, MarketDataSource
 
 
 def create_market_data_service() -> MarketDataService | None:
-    """Create market data when configured; keep API startup optional otherwise."""
+    """Create market data when configured; keep API startup optional
+    otherwise."""
     try:
         provider: MarketDataSource = create_provider_from_env()
     except MissingConfigurationError:

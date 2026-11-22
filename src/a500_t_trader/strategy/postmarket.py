@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -53,7 +53,10 @@ def save_plan(path: str | Path, plan: Plan, account: AccountSnapshot) -> None:
         "account_snapshot": account_record,
     }
     Path(path).write_text(
-        json.dumps(payload, ensure_ascii=False, default=_json_default, indent=2) + "\n",
+        json.dumps(
+            payload, ensure_ascii=False, default=_json_default, indent=2
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -77,7 +80,8 @@ def generate_review(
             missing.append("saved pre-market plan is not a JSON object")
         elif saved.get("session_date") != session_date.isoformat():
             missing.append(
-                "saved pre-market plan does not match the requested session date"
+                "saved pre-market plan does not match the requested "
+                "session date"
             )
         elif not isinstance(saved.get("plan"), dict):
             missing.append("saved pre-market plan has no valid plan record")
@@ -113,22 +117,37 @@ def generate_review(
         }
 
     manual_fills: dict[str, object] = {"status": "not recorded", "records": []}
-    imported_fills: dict[str, object] = {"status": "not recorded", "records": []}
+    imported_fills: dict[str, object] = {
+        "status": "not recorded",
+        "records": [],
+    }
     triggers: list[dict[str, object]] = []
     try:
         initialize_database(evidence_path)
-        with psycopg.connect(evidence_path, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, object]],
+            psycopg.connect(evidence_path, row_factory=cast(Any, dict_row)),
+        ) as db:
             has_snapshots = db.execute(
                 "SELECT 1 WHERE to_regclass('account_snapshots') IS NOT NULL"
             ).fetchone()
             if has_snapshots and account_record.get("source") == "unavailable":
                 snapshot_row = db.execute(
-                    "SELECT as_of,record_json,classification FROM account_snapshots "
-                    "WHERE substr(as_of,1,10)=%s ORDER BY as_of DESC,id DESC LIMIT 1",
+                    "SELECT as_of,record_json,classification "
+                    "FROM account_snapshots "
+                    "WHERE substr(as_of,1,10)=%s "
+                    "ORDER BY as_of DESC,id DESC LIMIT 1",
                     (session_date.isoformat(),),
                 ).fetchone()
                 if snapshot_row is not None:
-                    account_record = json.loads(snapshot_row["record_json"])
+                    record = snapshot_row["record_json"]
+                    if isinstance(record, str):
+                        record = json.loads(record)
+                    if not isinstance(record, dict):
+                        raise TypeError(
+                            "account snapshot record must be an object"
+                        )
+                    account_record = cast(dict[str, object], record)
                     account_record["status"] = "recorded"
                     account_record["source"] = snapshot_row["classification"]
                     missing = [
@@ -152,7 +171,8 @@ def generate_review(
             ).fetchone()
             if has_manual_fills:
                 fills = db.execute(
-                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = %s "
+                    "SELECT * FROM manual_fills "
+                    "WHERE substr(timestamp, 1, 10) = %s "
                     "ORDER BY timestamp, id",
                     (session_date.isoformat(),),
                 )
@@ -160,7 +180,9 @@ def generate_review(
                 manual_fills = {
                     "status": "recorded" if records else "not recorded",
                     "records": records,
-                    "classification": "user-entered manual fills; not broker-verified",
+                    "classification": (
+                        "user-entered manual fills; not broker-verified"
+                    ),
                 }
             has_imported_fills = db.execute(
                 "SELECT 1 WHERE to_regclass('imported_fills') IS NOT NULL"
@@ -173,10 +195,13 @@ def generate_review(
                 )
                 imported_records = [dict(row) for row in imported_rows]
                 imported_fills = {
-                    "status": "recorded" if imported_records else "not recorded",
+                    "status": "recorded"
+                    if imported_records
+                    else "not recorded",
                     "records": imported_records,
                     "classification": (
-                        "user-provided Galaxy Securities file; not system-verified"
+                        "user-provided Galaxy Securities file; "
+                        "not system-verified"
                     ),
                     "source": "user-provided Galaxy Securities CSV file",
                 }
@@ -195,13 +220,17 @@ def generate_review(
     if not triggers and not any(
         "trigger evidence unavailable" in item for item in missing
     ):
-        missing.append("no trigger evidence recorded for the requested session date")
+        missing.append(
+            "no trigger evidence recorded for the requested session date"
+        )
 
     market: dict[str, object] = {}
     symbols = _symbols(plan_record, triggers)
     if market_data is None:
         detail = f": {market_data_error}" if market_data_error else ""
-        missing.append(f"historical market data unavailable or not supplied{detail}")
+        missing.append(
+            f"historical market data unavailable or not supplied{detail}"
+        )
     else:
         for symbol in symbols:
             try:
@@ -210,11 +239,14 @@ def generate_review(
                 )
             except CapabilityUnavailableError as error:
                 missing.append(
-                    f"{symbol} historical data unavailable or unauthorized: {error}"
+                    f"{symbol} historical data unavailable or "
+                    f"unauthorized: {error}"
                 )
                 continue
             except Exception as error:
-                missing.append(f"{symbol} historical market data unavailable: {error}")
+                missing.append(
+                    f"{symbol} historical market data unavailable: {error}"
+                )
                 continue
             valid = [
                 bar
@@ -224,7 +256,9 @@ def generate_review(
                 and bar.timestamp.date() == session_date
             ]
             if not valid:
-                missing.append(f"{symbol} has no 1-minute bars for {session_date}")
+                missing.append(
+                    f"{symbol} has no 1-minute bars for {session_date}"
+                )
                 continue
             last = max(valid, key=lambda bar: bar.timestamp)
             market[symbol] = {
@@ -251,13 +285,17 @@ def generate_review(
     ):
         account_record = {
             **account_record,
-            "classification": "user-entered account snapshot; not broker-verified",
+            "classification": (
+                "user-entered account snapshot; not broker-verified"
+            ),
         }
     else:
         account_record = {
             **account_record,
             "source": "user-entered; not broker-verified",
-            "classification": ("account snapshot; not recommendation, order, or fill"),
+            "classification": (
+                "account snapshot; not recommendation, order, or fill"
+            ),
         }
     return PostMarketReview(
         session_date.isoformat(),
@@ -282,7 +320,9 @@ def review_json(review: PostMarketReview) -> str:
 def _symbols(
     plan: dict[str, object] | None, triggers: list[dict[str, object]]
 ) -> tuple[str, ...]:
-    symbols: set[str] = {str(item["symbol"]) for item in triggers if item.get("symbol")}
+    symbols: set[str] = {
+        str(item["symbol"]) for item in triggers if item.get("symbol")
+    }
     if plan:
         suggestions = cast(Iterable[object], plan.get("suggestions", []))
         for suggestion in suggestions:

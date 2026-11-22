@@ -168,7 +168,9 @@ def main() -> None:
             queue = f"market.consumer.{purpose}.tgw"
             while True:
                 try:
-                    connection.channel().queue_declare(queue=queue, passive=True)
+                    connection.channel().queue_declare(
+                        queue=queue, passive=True
+                    )
                     break
                 except ChannelClosedByBroker as error:
                     if time.monotonic() >= deadline:

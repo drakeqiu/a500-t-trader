@@ -49,7 +49,10 @@ def test_manual_fill_cli_persists_user_record_separately(
     )
     assert result == 0
     saved = json.loads(capsys.readouterr().out)
-    assert saved["classification"] == "user-entered manual fill; not broker-verified"
+    assert (
+        saved["classification"]
+        == "user-entered manual fill; not broker-verified"
+    )
 
     assert main(["account-ledger", "--database", str(database)]) == 0
     ledger = json.loads(capsys.readouterr().out)
@@ -99,7 +102,16 @@ def test_galaxy_import_preview_confirmation_and_postmarket_provenance(
     )
 
     assert (
-        main(["import-fills", "--file", str(source), "--database", str(database)]) == 0
+        main(
+            [
+                "import-fills",
+                "--file",
+                str(source),
+                "--database",
+                str(database),
+            ]
+        )
+        == 0
     )
     preview = json.loads(capsys.readouterr().out)
     assert preview["valid"] == 1
@@ -246,4 +258,6 @@ def test_galaxy_import_rejects_whole_batch_without_echoing_sensitive_fields(
     assert "SECRET_BALANCE" not in output.out + output.err
     assert "SECRET_ACCOUNT" not in output.out + output.err
     with psycopg.connect(database) as db:
-        assert db.execute("SELECT to_regclass('imported_fills')").fetchone() == (None,)
+        assert db.execute(
+            "SELECT to_regclass('imported_fills')"
+        ).fetchone() == (None,)

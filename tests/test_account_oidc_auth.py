@@ -62,7 +62,8 @@ def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
     alice = {"Authorization": f"Bearer {_token(private_key, subject='alice')}"}
     admin = {
         "Authorization": (
-            f"Bearer {_token(private_key, subject='idp-admin', roles=['admin'])}"
+            "Bearer "
+            + _token(private_key, subject="idp-admin", roles=["admin"])
         )
     }
     snapshot = {
@@ -82,23 +83,32 @@ def test_identity_admin_role_does_not_grant_cross_subject_snapshot_access(
         assert created.status_code == 201
 
         # The IdP admin subject is distinct and cannot use Alice's ETag to
-        # update her snapshot; identity-management roles do not change ownership.
-        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
+        # update her snapshot; identity-management roles do not change
+        # ownership.
+        assert (
+            client.get("/v1/account-snapshot", headers=admin).status_code
+            == 404
+        )
         admin_write = client.put(
             "/v1/account-snapshot",
             json={**snapshot, "holdings": {"510300": 999}},
             headers={**admin, "If-Match": created.headers["ETag"]},
         )
         assert admin_write.status_code == 412
-        assert client.get("/v1/account-snapshot", headers=admin).status_code == 404
-        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
-            "510300": 100
-        }
+        assert (
+            client.get("/v1/account-snapshot", headers=admin).status_code
+            == 404
+        )
+        assert client.get("/v1/account-snapshot", headers=alice).json()[
+            "holdings"
+        ] == {"510300": 100}
 
 
 @pytest.fixture
 def signing_keys() -> tuple[Any, Any]:
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_key = rsa.generate_private_key(
+        public_exponent=65537, key_size=2048
+    )
     return private_key, private_key.public_key()
 
 
@@ -112,7 +122,9 @@ def _client(
         "PyJWKClient",
         lambda jwks_uri: StaticJwks(jwks_uri, key),
     )
-    authenticator = OIDCAuthenticator(ISSUER, SHARED_AUDIENCE, "https://jwks.test")
+    authenticator = OIDCAuthenticator(
+        ISSUER, SHARED_AUDIENCE, "https://jwks.test"
+    )
     return TestClient(create_app(postgres_url, authenticator))
 
 
@@ -141,7 +153,9 @@ def test_oidc_issuer_preserves_trailing_slash(
         lambda jwks_uri: StaticJwks(jwks_uri, public_key),
     )
     issuer = f"{ISSUER}/auth/v1/"
-    authenticator = OIDCAuthenticator(issuer, SHARED_AUDIENCE, "https://jwks.test")
+    authenticator = OIDCAuthenticator(
+        issuer, SHARED_AUDIENCE, "https://jwks.test"
+    )
 
     assert authenticator(_token(private_key, issuer=issuer)) == "alice"
     with pytest.raises(jwt.InvalidTokenError):
@@ -171,8 +185,12 @@ def test_account_snapshot_ownership_uses_verified_subject(
             headers={**alice, "If-None-Match": "*"},
         )
         assert created.status_code == 201
-        assert client.get("/v1/account-snapshot", headers=bob).status_code == 404
-        alice_snapshot = client.get("/v1/account-snapshot", headers=alice).json()
+        assert (
+            client.get("/v1/account-snapshot", headers=bob).status_code == 404
+        )
+        alice_snapshot = client.get(
+            "/v1/account-snapshot", headers=alice
+        ).json()
         assert alice_snapshot["holdings"] == {"510300": 100}
         bob_snapshot = {
             **snapshot,
@@ -185,12 +203,12 @@ def test_account_snapshot_ownership_uses_verified_subject(
             headers={**bob, "If-None-Match": "*"},
         )
         assert bob_created.status_code == 201
-        assert client.get("/v1/account-snapshot", headers=alice).json()["holdings"] == {
-            "510300": 100
-        }
-        assert client.get("/v1/account-snapshot", headers=bob).json()["holdings"] == {
-            "510300": 900
-        }
+        assert client.get("/v1/account-snapshot", headers=alice).json()[
+            "holdings"
+        ] == {"510300": 100}
+        assert client.get("/v1/account-snapshot", headers=bob).json()[
+            "holdings"
+        ] == {"510300": 900}
 
 
 @pytest.mark.parametrize(
@@ -212,7 +230,9 @@ def test_account_api_rejects_invalid_oidc_claims(
     with _client(postgres_url, monkeypatch, public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
-            headers={"Authorization": f"Bearer {_token(private_key, **claims)}"},
+            headers={
+                "Authorization": f"Bearer {_token(private_key, **claims)}"
+            },
         )
     assert response.status_code == 401
 
@@ -229,7 +249,9 @@ def test_account_api_rejects_invalid_signature(
     with _client(postgres_url, monkeypatch, trusted_public_key) as client:
         response = client.get(
             "/v1/account-snapshot",
-            headers={"Authorization": f"Bearer {_token(untrusted_private_key)}"},
+            headers={
+                "Authorization": f"Bearer {_token(untrusted_private_key)}"
+            },
         )
     assert response.status_code == 401
 
@@ -296,7 +318,10 @@ def test_account_api_documentation_requires_valid_bearer_credentials(
         )
         assert authenticated.status_code == 200
         if path == "/openapi.json":
-            assert authenticated.json()["info"]["title"] == "A500 account snapshot API"
+            assert (
+                authenticated.json()["info"]["title"]
+                == "A500 account snapshot API"
+            )
 
 
 def test_account_api_starts_without_optional_market_data_credentials(
@@ -312,10 +337,14 @@ def test_account_api_starts_without_optional_market_data_credentials(
         account_api,
         "create_app",
         lambda *, market_data: type(
-            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+            "TestApp",
+            (),
+            {"state": type("State", (), {"market_data": market_data})()},
         )(),
     )
-    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    module = importlib.reload(
+        importlib.import_module("a500_t_trader.account_api")
+    )
     assert module.app.state.market_data is None
 
 
@@ -339,7 +368,9 @@ def test_account_api_preserves_dotenv_market_data_provider(
     calls: list[tuple[str, str, str, int]] = []
 
     class Provider:
-        def __init__(self, username: str, password: str, host: str, port: int) -> None:
+        def __init__(
+            self, username: str, password: str, host: str, port: int
+        ) -> None:
             calls.append((username, password, host, port))
 
     monkeypatch.setattr(runtime, "AmazingDataProvider", Provider)
@@ -347,10 +378,14 @@ def test_account_api_preserves_dotenv_market_data_provider(
         account_api,
         "create_app",
         lambda *, market_data: type(
-            "TestApp", (), {"state": type("State", (), {"market_data": market_data})()}
+            "TestApp",
+            (),
+            {"state": type("State", (), {"market_data": market_data})()},
         )(),
     )
-    module = importlib.reload(importlib.import_module("a500_t_trader.account_api"))
+    module = importlib.reload(
+        importlib.import_module("a500_t_trader.account_api")
+    )
     assert module.app.state.market_data is not None
     assert calls == [("dotenv-user", "dotenv-secret", "market.example", 9876)]
     assert "dotenv-secret" not in repr(module.app.state.market_data)

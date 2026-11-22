@@ -53,7 +53,9 @@ def trade() -> Trade:
     )
 
 
-def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> None:
+def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> (
+    None
+):
 
     class Broker:
         available = False
@@ -82,7 +84,7 @@ def test_broker_failure_keeps_only_latest_snapshot_and_bar_then_flushes() -> Non
     assert publisher.pending_count == 0
 
 
-def test_recovery_state_is_bounded_by_configured_symbols_and_process_lifetime() -> None:
+def test_recovery_state_is_bounded_by_symbols_and_process_lifetime() -> None:
 
     class Broker:
         def publish(self, event: MarketEvent) -> None:
@@ -98,4 +100,6 @@ def test_recovery_state_is_bounded_by_configured_symbols_and_process_lifetime() 
     except ValueError:
         pass
     else:
-        raise AssertionError("events outside configured symbols must be rejected")
+        raise AssertionError(
+            "events outside configured symbols must be rejected"
+        )

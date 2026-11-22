@@ -30,8 +30,11 @@ class RabbitMQPublisher:
             rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
                 raise ValueError("RABBITMQ_URL is required")
-            self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
+            self._connection = pika.BlockingConnection(
+                pika.URLParameters(rabbit_url)
+            )
             channel = self._connection.channel()
+            assert channel is not None
             channel.exchange_declare(
                 exchange=exchange, exchange_type="topic", durable=True
             )
@@ -39,7 +42,8 @@ class RabbitMQPublisher:
                 content_type="application/json",
                 delivery_mode=2,
             )
-        self._channel = channel
+        assert channel is not None
+        self._channel: Any = channel
         confirm_delivery = getattr(channel, "confirm_delivery", None)
         if callable(confirm_delivery):
             confirm_delivery()
@@ -48,14 +52,17 @@ class RabbitMQPublisher:
         self, event: MarketEvent, *, replay: bool = False, warmup: bool = False
     ) -> None:
         encoded = encode_market_event(event)
-        encoded["source"] = "replay" if replay else getattr(event, "source", None)
+        encoded["source"] = (
+            "replay" if replay else getattr(event, "source", None)
+        )
         if replay:
             encoded["replay_time"] = datetime.now().astimezone().isoformat()
             encoded["warmup"] = warmup
         self._channel.basic_publish(
             exchange=self._exchange,
             routing_key=(
-                f"{encoded['event_type']}.{quote(str(encoded['symbol']), safe='')}"
+                f"{encoded['event_type']}."
+                f"{quote(str(encoded['symbol']), safe='')}"
             ),
             body=json.dumps(
                 encoded, separators=(",", ":"), ensure_ascii=False

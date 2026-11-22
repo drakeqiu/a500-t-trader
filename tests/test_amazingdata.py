@@ -1,15 +1,16 @@
-import sys
 from datetime import date, datetime
 from decimal import Decimal
 from importlib import import_module
-from types import ModuleType
 from zoneinfo import ZoneInfo
 
 import pandas as pd  # type: ignore[import-untyped]
 import pytest
 
 from a500_t_trader.cli.runtime import _error_category
-from a500_t_trader.market_data import CapabilityUnavailableError, MarketDataService
+from a500_t_trader.market_data import (
+    CapabilityUnavailableError,
+    MarketDataService,
+)
 from a500_t_trader.market_data.providers.amazingdata import AmazingDataProvider
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -78,12 +79,15 @@ def _row(at: str, close: float) -> dict[str, object]:
     }
 
 
-def test_service_queries_intraday_bars_without_filling_gaps_and_marks_current_bar() -> (
-    None
-):
+def test_intraday_query_marks_current_bar() -> None:
     api = VendorAPI()
-    api.kline_rows = [_row("202611020930", 1.23), _row("202611020932", 1.25)]
-    provider = _provider(api, datetime(2026, 11, 2, 9, 32, 30, tzinfo=SHANGHAI))
+    api.kline_rows = [
+        _row("202611020930", 1.2),
+        _row("202611020932", 1.234),
+    ]
+    provider = _provider(
+        api, datetime(2026, 11, 2, 9, 32, 30, tzinfo=SHANGHAI)
+    )
     service = MarketDataService(provider)
 
     bars = service.get_intraday_bars(interval_minutes=1)
@@ -131,7 +135,9 @@ def test_daily_history_validates_bars() -> None:
     service = MarketDataService(
         _provider(api, datetime(2026, 11, 5, 12, tzinfo=SHANGHAI))
     )
-    bars = service.get_daily_history("563360", date(2026, 11, 1), date(2026, 11, 3))
+    bars = service.get_daily_history(
+        "563360", date(2026, 11, 1), date(2026, 11, 3)
+    )
     assert len(bars) == 1
     assert bars[0].timestamp == datetime(2026, 11, 2, tzinfo=SHANGHAI)
     assert bars[0].close == Decimal("1.23")
@@ -146,10 +152,14 @@ def test_daily_history_permission_error_is_classified_as_permission() -> None:
         ) -> dict[str, object]:
             raise RuntimeError("permission denied")
 
-    provider = _provider(PermissionDenied(), datetime(2026, 11, 5, 12, tzinfo=SHANGHAI))
+    provider = _provider(
+        PermissionDenied(), datetime(2026, 11, 5, 12, tzinfo=SHANGHAI)
+    )
 
     with pytest.raises(CapabilityUnavailableError) as error:
-        provider.get_daily_history("563360", date(2026, 11, 1), date(2026, 11, 3))
+        provider.get_daily_history(
+            "563360", date(2026, 11, 1), date(2026, 11, 3)
+        )
 
     assert _error_category(error.value) == "permission"
 
@@ -169,7 +179,10 @@ def test_bar_query_rejects_timestamps_misaligned_to_interval() -> None:
     ("rows", "message"),
     [
         ([_row("202611020931", 1.23), _row("202611020930", 1.24)], "ordered"),
-        ([_row("202611020930", 1.23), _row("202611020930", 1.24)], "duplicate"),
+        (
+            [_row("202611020930", 1.23), _row("202611020930", 1.24)],
+            "duplicate",
+        ),
         ([_row("202611020930", 1.23) | {"high": 1.0}], "OHLC"),
     ],
 )
@@ -193,12 +206,16 @@ def test_empty_query_and_unavailable_capability_are_distinct() -> None:
     assert MarketDataService(provider).get_intraday_bars() == ()
 
     class Unauthorized(VendorAPI):
-        def query_kline(self, *args: object, **kwargs: object) -> dict[str, object]:
+        def query_kline(
+            self, *args: object, **kwargs: object
+        ) -> dict[str, object]:
             raise RuntimeError("permission denied")
 
     with pytest.raises(CapabilityUnavailableError, match="permission denied"):
         MarketDataService(
-            _provider(Unauthorized(), datetime(2026, 11, 2, 10, tzinfo=SHANGHAI))
+            _provider(
+                Unauthorized(), datetime(2026, 11, 2, 10, tzinfo=SHANGHAI)
+            )
         ).get_intraday_bars()
 
 
@@ -231,7 +248,9 @@ def test_snapshot_query_without_data_is_unavailable() -> None:
             self.calls.append(("snapshot", codes, start, end))
             return {}
 
-    provider = _provider(EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI))
+    provider = _provider(
+        EmptySnapshot(), datetime(2026, 11, 2, 9, 32, tzinfo=SHANGHAI)
+    )
     with pytest.raises(CapabilityUnavailableError, match="returned no data"):
         MarketDataService(provider).get_snapshot()
 
@@ -251,13 +270,11 @@ def test_rejected_login_is_not_reported_as_an_empty_query() -> None:
 def test_vendor_login_false_after_successful_forced_retry_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import_module("AmazingData.login.tgw_login")
+    tgw_login = import_module("AmazingData.login.tgw_login")
 
     import a500_t_trader.market_data.providers.amazingdata as provider_module
 
-    login_module = ModuleType("AmazingData.login.tgw_login")
-    login_module.login = lambda *_args, **_kwargs: False  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "AmazingData.login.tgw_login", login_module)
+    monkeypatch.setattr(tgw_login, "login", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(provider_module, "_make_market_data", VendorAPI)
 
     AmazingDataProvider("trader", "secret", "localhost", 9876)

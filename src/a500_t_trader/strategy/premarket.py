@@ -20,7 +20,9 @@ MAX_INPUT_AGE = timedelta(minutes=30)
 class PlanMarketData(Protocol):
     def get_snapshot(self, symbol: str) -> Snapshot | None: ...
 
-    def session_status(self, session_date: date) -> tuple[SessionState, bool]: ...
+    def session_status(
+        self, session_date: date
+    ) -> tuple[SessionState, bool]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,11 +81,16 @@ class AccountSnapshot:
 
     def __post_init__(self) -> None:
         if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
-            raise ValueError("account snapshot timestamp must include a timezone")
+            raise ValueError(
+                "account snapshot timestamp must include a timezone"
+            )
         if self.available_cash < 0 or any(
-            value < 0 for value in (*self.holdings.values(), *self.sellable.values())
+            value < 0
+            for value in (*self.holdings.values(), *self.sellable.values())
         ):
-            raise ValueError("account quantities and available cash cannot be negative")
+            raise ValueError(
+                "account quantities and available cash cannot be negative"
+            )
         if any(value < 0 for value in self.cost_basis.values()):
             raise ValueError("cost basis cannot be negative")
 
@@ -123,7 +130,9 @@ def generate_plan(
     try:
         session, calendar_stale = market_data.session_status(plan_time.date())
         calendar_ok = not calendar_stale and session is SessionState.TRADING
-        calendar_status = "available" if calendar_ok else "unavailable or not trading"
+        calendar_status = (
+            "available" if calendar_ok else "unavailable or not trading"
+        )
     except CapabilityUnavailableError:
         calendar_ok = False
         calendar_status = "unavailable"
@@ -153,7 +162,9 @@ def generate_plan(
                     "or older than 30 minutes"
                 )
         if not calendar_ok:
-            reasons.append("trading calendar unavailable or not an active session")
+            reasons.append(
+                "trading calendar unavailable or not an active session"
+            )
         safe_price = cast(Decimal, price)
         direction = "none" if reasons else rule.triggered_direction(safe_price)
         quantity: int | None = None
@@ -180,24 +191,34 @@ def generate_plan(
                 account_unavailable = True
                 direction, quantity = "none", None
                 reasons.append(
-                    "account fields unavailable: position or sellable quantity missing"
+                    "account fields unavailable: position or sellable "
+                    "quantity missing"
                 )
             elif quantity == 0:
                 direction, quantity = "none", None
                 reasons.append(
-                    "available cash is below one board lot or max_buy_cash is zero"
+                    "available cash is below one board lot or "
+                    "max_buy_cash is zero"
                 )
         elif direction == "sell":
             threshold = rule.sell_above
             condition = f"price >= {threshold} CNY"
-            reason = f"last price {price} CNY meets sell-above rule {threshold} CNY"
+            reason = (
+                f"last price {price} CNY meets sell-above rule {threshold} CNY"
+            )
             permitted = max(
                 0, account.holdings.get(rule.symbol, 0) - rule.minimum_holding
             )
-            quantity = min(account.sellable.get(rule.symbol, 0), permitted) // 100 * 100
+            quantity = (
+                min(account.sellable.get(rule.symbol, 0), permitted)
+                // 100
+                * 100
+            )
             if quantity == 0:
                 direction, quantity = "none", None
-                reasons.append("no sellable board lot remains above minimum holding")
+                reasons.append(
+                    "no sellable board lot remains above minimum holding"
+                )
         elif reasons:
             reason = "; ".join(reasons)
         risk = (
@@ -218,14 +239,20 @@ def generate_plan(
                 reason,
                 risk,
                 None,
-                "No signal score is defined; threshold rules are binary, not scored.",
+                "No signal score is defined; threshold rules are "
+                "binary, not scored.",
             )
         )
     status = f"{calendar_status}; market data "
-    status += "unavailable: stale/missing" if market_unavailable else "available"
+    status += (
+        "unavailable: stale/missing" if market_unavailable else "available"
+    )
     status += "; account fields unavailable" if account_unavailable else ""
     return Plan(
-        plan_time, "user-entered; not broker-verified", status, tuple(suggestions)
+        plan_time,
+        "user-entered; not broker-verified",
+        status,
+        tuple(suggestions),
     )
 
 
@@ -234,11 +261,22 @@ def load_config(path: str | Path) -> PlanConfig:
     if set(data) != {"etfs"} or not isinstance(data["etfs"], list):
         raise ValueError("configuration must contain only an 'etfs' list")
     rules = []
-    fields = {"symbol", "buy_below", "sell_above", "max_buy_cash", "minimum_holding"}
+    fields = {
+        "symbol",
+        "buy_below",
+        "sell_above",
+        "max_buy_cash",
+        "minimum_holding",
+    }
     for item in data["etfs"]:
-        if not isinstance(item, dict) or "symbol" not in item or set(item) - fields:
+        if (
+            not isinstance(item, dict)
+            or "symbol" not in item
+            or set(item) - fields
+        ):
             raise ValueError(
-                "ETF entries require symbol and only documented price/limit fields"
+                "ETF entries require symbol and only documented "
+                "price/limit fields"
             )
         rules.append(
             EtfRule(
@@ -254,7 +292,13 @@ def load_config(path: str | Path) -> PlanConfig:
 
 def load_account(path: str | Path) -> AccountSnapshot:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if set(data) != {"as_of", "holdings", "cost_basis", "sellable", "available_cash"}:
+    if set(data) != {
+        "as_of",
+        "holdings",
+        "cost_basis",
+        "sellable",
+        "available_cash",
+    }:
         raise ValueError(
             "account snapshot requires as_of, holdings, cost_basis, sellable, "
             "and available_cash"
@@ -262,14 +306,19 @@ def load_account(path: str | Path) -> AccountSnapshot:
     return AccountSnapshot(
         datetime.fromisoformat(data["as_of"]),
         {key: int(value) for key, value in data["holdings"].items()},
-        {key: Decimal(str(value)) for key, value in data["cost_basis"].items()},
+        {
+            key: Decimal(str(value))
+            for key, value in data["cost_basis"].items()
+        },
         {key: int(value) for key, value in data["sellable"].items()},
         Decimal(str(data["available_cash"])),
     )
 
 
 def plan_json(plan: Plan) -> str:
-    return json.dumps(asdict(plan), ensure_ascii=False, default=_json_default, indent=2)
+    return json.dumps(
+        asdict(plan), ensure_ascii=False, default=_json_default, indent=2
+    )
 
 
 def _optional_decimal(value: object) -> Decimal | None:

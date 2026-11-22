@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from a500_t_trader.market_data.consumer import MarketEventConsumer, RabbitMQConsumer
+from a500_t_trader.market_data.consumer import (
+    MarketEventConsumer,
+    RabbitMQConsumer,
+)
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -31,7 +34,10 @@ def test_consumer_acknowledges_fresh_json_and_nacks_handler_failure() -> None:
 
     observed: list[dict[str, object]] = []
     consumer = MarketEventConsumer(
-        "signals", observed.append, max_age=timedelta(seconds=5), clock=lambda: now
+        "signals",
+        observed.append,
+        max_age=timedelta(seconds=5),
+        clock=lambda: now,
     )
     channel = Channel()
     consumer.handle_delivery(channel, 1, event)
@@ -62,7 +68,10 @@ def test_consumer_drops_stale_message_and_configures_queue() -> None:
     }
     observed: list[dict[str, object]] = []
     consumer = MarketEventConsumer(
-        "trades", observed.append, max_age=timedelta(seconds=5), clock=lambda: now
+        "trades",
+        observed.append,
+        max_age=timedelta(seconds=5),
+        clock=lambda: now,
     )
 
     class Channel:
@@ -88,7 +97,9 @@ def test_consumer_drops_stale_message_and_configures_queue() -> None:
         def queue_declare(self, *, queue: str, durable: bool) -> None:
             self.declared.append((queue, durable))
 
-        def queue_bind(self, *, queue: str, exchange: str, routing_key: str) -> None:
+        def queue_bind(
+            self, *, queue: str, exchange: str, routing_key: str
+        ) -> None:
             self.bindings.append((queue, routing_key))
 
         def basic_qos(self, *, prefetch_count: int) -> None:

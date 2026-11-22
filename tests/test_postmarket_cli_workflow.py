@@ -63,7 +63,9 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
 ) -> None:
     fixture = json.loads(
         (
-            Path(__file__).parent / "fixtures" / "amazingdata_563360_20261102.json"
+            Path(__file__).parent
+            / "fixtures"
+            / "amazingdata_563360_20261102.json"
         ).read_text(encoding="utf-8")
     )
     history = json.loads(
@@ -119,7 +121,9 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
             assert symbol == snapshot.symbol
             return snapshot
 
-        def session_status(self, session_date: date) -> tuple[SessionState, bool]:
+        def session_status(
+            self, session_date: date
+        ) -> tuple[SessionState, bool]:
             assert session_date == snapshot_time.date()
             return SessionState.TRADING, False
 
@@ -203,12 +207,15 @@ def test_recorded_fixture_premarket_then_postmarket_is_advisory(
         closing_bar.timestamp.isoformat()
     )
     assert review["market_data"]["563360"]["is_completed"] is True
-    assert review["simulated_fills"] == {"status": "not recorded", "records": []}
+    assert review["simulated_fills"] == {
+        "status": "not recorded",
+        "records": [],
+    }
     assert "order" in review["recommendations"]["classification"].lower()
     assert "not orders" in review["recommendations"]["classification"]
 
 
-def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_trades(
+def test_cli_daily_workflow_saves_plan_and_reviews_without_inventing_trades(
     tmp_path: Path, capsys: Any, postgres_url: str
 ) -> None:
     config = tmp_path / "rules.json"
@@ -309,13 +316,19 @@ def test_cli_daily_workflow_saves_plan_triggers_and_reviews_without_inventing_tr
     assert review["account_snapshot"]["holdings"]["510300"] == 1200
     assert review["triggers"][0]["related_recommendation_indices"] == [0]
     assert review["market_data"]["510300"]["close"] == "3.80"
-    assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
+    assert (
+        review["account_snapshot"]["source"]
+        == "user-entered; not broker-verified"
+    )
     assert review["manual_fills"]["status"] == "recorded"
     assert review["manual_fills"]["records"][0]["quantity"] == 100
     assert review["manual_fills"]["records"][0]["classification"] == (
         "user-entered manual fill; not broker-verified"
     )
-    assert review["simulated_fills"] == {"status": "not recorded", "records": []}
+    assert review["simulated_fills"] == {
+        "status": "not recorded",
+        "records": [],
+    }
     assert "order" in review["recommendations"]["classification"].lower()
 
 
@@ -433,5 +446,8 @@ def test_postmarket_reads_snapshot_and_manual_fill_from_postgres(
     )
     review = json.loads(capsys.readouterr().out)
     assert review["account_snapshot"]["available_cash"] == "5000"
-    assert review["account_snapshot"]["source"] == "user-entered; not broker-verified"
+    assert (
+        review["account_snapshot"]["source"]
+        == "user-entered; not broker-verified"
+    )
     assert review["manual_fills"]["records"][0]["side"] == "sell"

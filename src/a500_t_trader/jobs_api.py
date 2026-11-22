@@ -46,7 +46,8 @@ def create_app(
     permitted = (
         persistence_permitted
         if persistence_permitted is not None
-        else os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower() == "true"
+        else os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower()
+        == "true"
     )
     app = FastAPI(
         title="A500 jobs API", docs_url=None, redoc_url=None, openapi_url=None
@@ -68,7 +69,9 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        return respond(store.list_for_subject(subject, limit=limit, offset=offset))
+        return respond(
+            store.list_for_subject(subject, limit=limit, offset=offset)
+        )
 
     @app.get("/v1/history/daily/symbols")
     def list_daily_history_symbols(
@@ -102,7 +105,9 @@ def create_app(
                 "ranges": [
                     {"start_date": start, "end_date": end}
                     for start, end in (
-                        daily_history.list_shared_daily_history_ranges(normalized)
+                        daily_history.list_shared_daily_history_ranges(
+                            normalized
+                        )
                     )
                 ],
             }
@@ -168,7 +173,9 @@ def create_app(
                         "low": str(bar.low),
                         "close": str(bar.close),
                         "volume": bar.volume,
-                        "amount": None if bar.amount is None else str(bar.amount),
+                        "amount": None
+                        if bar.amount is None
+                        else str(bar.amount),
                     }
                     for bar in bars
                 ],
@@ -189,11 +196,14 @@ def create_app(
 
     @app.post("/v1/jobs")
     def submit(
-        request: DailyHistoryRequest, authorization: str | None = Header(default=None)
+        request: DailyHistoryRequest,
+        authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
         if not permitted:
-            raise HTTPException(503, "Historical data persistence is not authorized")
+            raise HTTPException(
+                503, "Historical data persistence is not authorized"
+            )
         try:
             symbol = normalize_symbol(request.symbol)
         except ValueError as exc:
@@ -201,8 +211,12 @@ def create_app(
         if request.start_date > request.end_date:
             raise HTTPException(422, "start_date must not follow end_date")
         if request.end_date >= datetime.now(ZoneInfo("Asia/Shanghai")).date():
-            raise HTTPException(422, "end_date must be before today in Asia/Shanghai")
-        job = store.create(subject, symbol, request.start_date, request.end_date)
+            raise HTTPException(
+                422, "end_date must be before today in Asia/Shanghai"
+            )
+        job = store.create(
+            subject, symbol, request.start_date, request.end_date
+        )
         return respond(job, 202)
 
     @app.get("/v1/jobs/{job_id}")

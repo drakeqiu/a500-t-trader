@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn, cast
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -19,7 +19,9 @@ from .market_data import normalize_symbol
 from .strategy.premarket import AccountSnapshot
 
 GALAXY_SOURCE = "galaxy-securities-csv"
-GALAXY_CLASSIFICATION = "user-provided Galaxy Securities file; not system-verified"
+GALAXY_CLASSIFICATION = (
+    "user-provided Galaxy Securities file; not system-verified"
+)
 GALAXY_HEADER = (
     "成交日期",
     "成交时间",
@@ -55,7 +57,8 @@ class AccountLedger:
         record = asdict(snapshot)
         with psycopg.connect(self.path) as db:
             cursor = db.execute(
-                "INSERT INTO account_snapshots(as_of,record_json,classification) "
+                "INSERT INTO account_snapshots"
+                "(as_of,record_json,classification) "
                 "VALUES(%s,%s,%s) RETURNING id",
                 (
                     snapshot.as_of.isoformat(),
@@ -87,7 +90,8 @@ class AccountLedger:
         code = normalize_symbol(symbol)
         with psycopg.connect(self.path) as db:
             cursor = db.execute(
-                "INSERT INTO manual_fills(timestamp,symbol,side,quantity,price,notes,"
+                "INSERT INTO manual_fills"
+                "(timestamp,symbol,side,quantity,price,notes,"
                 "classification) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                 (
                     timestamp.isoformat(),
@@ -104,20 +108,35 @@ class AccountLedger:
             return int(row[0])
 
     def snapshots(self) -> list[dict[str, object]]:
-        with psycopg.connect(self.path, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.path, row_factory=cast(Any, dict_row)),
+        ) as db:
             return [
                 dict(row)
-                for row in db.execute("SELECT * FROM account_snapshots ORDER BY id")
+                for row in db.execute(
+                    "SELECT * FROM account_snapshots ORDER BY id"
+                )
             ]
 
-    def fills(self, session_date: str | None = None) -> list[dict[str, object]]:
-        with psycopg.connect(self.path, row_factory=dict_row) as db:
+    def fills(
+        self, session_date: str | None = None
+    ) -> list[dict[str, object]]:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.path, row_factory=cast(Any, dict_row)),
+        ) as db:
             if session_date is None:
-                rows = db.execute("SELECT * FROM manual_fills ORDER BY timestamp,id")
+                rows = db.execute(
+                    "SELECT * FROM manual_fills ORDER BY timestamp,id"
+                )
             else:
                 rows = db.execute(
-                    "SELECT * FROM manual_fills WHERE substr(timestamp, 1, 10) = %s "
-                    "ORDER BY timestamp,id",
+                    (
+                        "SELECT * FROM manual_fills "
+                        "WHERE substr(timestamp, 1, 10) = %s "
+                        "ORDER BY timestamp,id"
+                    ),
                     (session_date,),
                 )
             return [dict(row) for row in rows]
@@ -125,13 +144,21 @@ class AccountLedger:
     def imported_fills(
         self, session_date: str | None = None
     ) -> list[dict[str, object]]:
-        with psycopg.connect(self.path, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.path, row_factory=cast(Any, dict_row)),
+        ) as db:
             if session_date is None:
-                rows = db.execute("SELECT * FROM imported_fills ORDER BY timestamp,id")
+                rows = db.execute(
+                    "SELECT * FROM imported_fills ORDER BY timestamp,id"
+                )
             else:
                 rows = db.execute(
-                    "SELECT * FROM imported_fills WHERE substr(timestamp,1,10)=%s "
-                    "ORDER BY timestamp,id",
+                    (
+                        "SELECT * FROM imported_fills "
+                        "WHERE substr(timestamp,1,10)=%s "
+                        "ORDER BY timestamp,id"
+                    ),
                     (session_date,),
                 )
             return [dict(row) for row in rows]
@@ -158,7 +185,8 @@ def preview_galaxy_fills(
     owner: str,
     max_rows: int = 10_000,
 ) -> dict[str, object]:
-    """Validate uploaded CSV bytes and classify against one authenticated owner."""
+    """Validate uploaded CSV bytes and classify against one authenticated
+    owner."""
     records, errors = _parse_galaxy_fills_bytes(content, max_rows=max_rows)
     result = _classify_galaxy_fills(database, records, errors, owner=owner)
     result["_records"] = records
@@ -195,7 +223,8 @@ def _classify_galaxy_fills(
                             "row": record["_row"],
                             "field": "成交编号",
                             "reason": (
-                                "conflicts with another record using this trade number"
+                                "conflicts with another record using "
+                                "this trade number"
                             ),
                         }
                     )
@@ -209,7 +238,10 @@ def _classify_galaxy_fills(
     if not errors:
         initialize_database(database)
     if not errors and confirm:
-        with psycopg.connect(database, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(database, row_factory=cast(Any, dict_row)),
+        ) as db:
             _lock_imports(db, owner)
             existing = {
                 str(row["trade_number"]): dict(row)
@@ -223,7 +255,8 @@ def _classify_galaxy_fills(
             for record in candidates:
                 cursor = db.execute(
                     """INSERT INTO imported_fills(
-                        owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
+                        owner,timestamp,symbol,side,quantity,price,
+                        trade_amount,fees,
                         stamp_duty,other_charges,occurrence_amount,source,
                         trade_number,contract_number,classification
                     ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -253,7 +286,10 @@ def _classify_galaxy_fills(
                 assert row is not None
                 inserted_ids.append(int(row["id"]))
     elif not errors:
-        with psycopg.connect(database, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(database, row_factory=cast(Any, dict_row)),
+        ) as db:
             preview_existing = {
                 str(row["trade_number"]): dict(row)
                 for row in db.execute(
@@ -282,7 +318,11 @@ def _read_galaxy_fills(
         content = Path(csv_file).read_bytes()
     except OSError:
         return [], [
-            {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
+            {
+                "row": 0,
+                "field": "file",
+                "reason": "cannot read strict GB18030 CSV",
+            }
         ]
     return _parse_galaxy_fills_bytes(content)
 
@@ -294,7 +334,11 @@ def _parse_galaxy_fills_bytes(
         text = content.decode("gb18030", errors="strict")
     except UnicodeError:
         return [], [
-            {"row": 0, "field": "file", "reason": "cannot read strict GB18030 CSV"}
+            {
+                "row": 0,
+                "field": "file",
+                "reason": "cannot read strict GB18030 CSV",
+            }
         ]
     rows = csv.reader(text.splitlines(), strict=True)
     try:
@@ -311,7 +355,11 @@ def _parse_galaxy_fills_bytes(
         ]
     if header != list(GALAXY_HEADER):
         return [], [
-            {"row": 1, "field": "header", "reason": "unsupported Galaxy CSV header"}
+            {
+                "row": 1,
+                "field": "header",
+                "reason": "unsupported Galaxy CSV header",
+            }
         ]
 
     parsed: list[dict[str, object]] = []
@@ -343,7 +391,9 @@ def _parse_galaxy_fills_bytes(
                 parsed.append(_galaxy_record(row, row_number))
             except ValueError as error:
                 field, reason = str(error).split(":", 1)
-                errors.append({"row": row_number, "field": field, "reason": reason})
+                errors.append(
+                    {"row": row_number, "field": field, "reason": reason}
+                )
     except csv.Error:
         errors.append(
             {
@@ -356,7 +406,7 @@ def _parse_galaxy_fills_bytes(
 
 
 def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
-    def fail(field: str, reason: str) -> None:
+    def fail(field: str, reason: str) -> NoReturn:
         raise ValueError(f"{field}:{reason}")
 
     def decimal(index: int, field: str, *, positive: bool = False) -> Decimal:
@@ -371,7 +421,8 @@ def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
         ):
             fail(
                 field,
-                "must be finite and " + ("positive" if positive else "non-negative"),
+                "must be finite and "
+                + ("positive" if positive else "non-negative"),
             )
         return value
 
@@ -391,7 +442,10 @@ def _galaxy_record(row: list[str], row_number: int) -> dict[str, object]:
             f"{trade_date} {trade_time}", "%Y%m%d %H:%M:%S"
         ).replace(tzinfo=ZoneInfo("Asia/Shanghai"))
     except ValueError:
-        fail("成交日期/成交时间", "must be a valid YYYYMMDD date and HH:MM:SS time")
+        fail(
+            "成交日期/成交时间",
+            "must be a valid YYYYMMDD date and HH:MM:SS time",
+        )
     side = {"买入": "buy", "卖出": "sell"}.get(row[4].strip())
     if side is None:
         fail("操作", "only 买入 and 卖出 are supported")
@@ -450,8 +504,11 @@ def _same_trade(left: dict[str, object], right: dict[str, object]) -> bool:
         "quantity",
         "contract_number",
     )
-    return all(str(left[key]) == str(right[key]) for key in exact_fields) and all(
-        Decimal(str(left[key])) == Decimal(str(right[key])) for key in decimal_fields
+    return all(
+        str(left[key]) == str(right[key]) for key in exact_fields
+    ) and all(
+        Decimal(str(left[key])) == Decimal(str(right[key]))
+        for key in decimal_fields
     )
 
 

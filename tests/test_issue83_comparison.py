@@ -87,7 +87,11 @@ def test_account_simulation_tracks_lot_cash_position_and_minimum_fee() -> None:
         _bar(datetime(2024, 10, 18, 14, 10), 5, 10000),
     )
     account = AccountSnapshot(
-        datetime(2024, 10, 18, 13, 55, tzinfo=SHANGHAI), {}, {}, {}, Decimal(500000)
+        datetime(2024, 10, 18, 13, 55, tzinfo=SHANGHAI),
+        {},
+        {},
+        {},
+        Decimal(500000),
     )
 
     result = run_intraday_backtest(
@@ -120,7 +124,9 @@ def _bars() -> tuple[MinuteBar, ...]:
         if (
             current.time() >= time(9, 30)
             and current.time() <= time(11, 30)
-            or (current.time() >= time(13, 5) and current.time() <= time(15, 0))
+            or (
+                current.time() >= time(13, 5) and current.time() <= time(15, 0)
+            )
         ):
             bars.append(_bar(current, 5, 10000))
         current += timedelta(minutes=5)
@@ -135,7 +141,9 @@ def _bar(timestamp: datetime, price: int, volume: int) -> MinuteBar:
     value = Decimal(str(price))
     return MinuteBar(
         "563360",
-        timestamp.replace(tzinfo=SHANGHAI) if timestamp.tzinfo is None else timestamp,
+        timestamp.replace(tzinfo=SHANGHAI)
+        if timestamp.tzinfo is None
+        else timestamp,
         5,
         value,
         value,
@@ -150,7 +158,8 @@ def test_average_daily_turnover_requires_20_complete_amount_sessions() -> None:
     def session(day: int) -> tuple[MinuteBar, ...]:
         start = datetime(2024, 10, day, 9, 30)
         morning = tuple(
-            _bar(start + timedelta(minutes=5 * index), 5, 1) for index in range(24)
+            _bar(start + timedelta(minutes=5 * index), 5, 1)
+            for index in range(24)
         )
         afternoon_start = datetime(2024, 10, day, 13, 0)
         afternoon = tuple(
@@ -232,7 +241,9 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     assert cast(int, result["closed_exit_trades"]) > 0
     assert result["realized_exit_net_pnl"] is not None
     assert result["average_exit_net_pnl"] is not None
-    submitted_signals = cast(list[dict[str, object]], result["submitted_signals"])
+    submitted_signals = cast(
+        list[dict[str, object]], result["submitted_signals"]
+    )
     assert any(signal["direction"] == "sell" for signal in submitted_signals)
     for replay in (result, small_cash_result):
         initial_cash = Decimal(str(replay["initial_cash"]))
@@ -297,16 +308,20 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         "value": "2.0000",
         "unit": "bps per side",
         "source": "modeled cost-grid assumption in the Issue 85 replay",
-        "context": "used to estimate candidate cost only; not applied again to "
-        "simulated fill prices",
+        "context": (
+            "used to estimate candidate cost only; not applied again to "
+            "simulated fill prices"
+        ),
         "observed": False,
     }
     assert assumptions["cost_multiplier"] == {
         "value": "1",
         "unit": "x",
         "source": "registered baseline or stress replay configuration",
-        "context": "multiplies modeled fees, minimum commission, slippage, and "
-        "impact inputs",
+        "context": (
+            "multiplies modeled fees, minimum commission, slippage, and "
+            "impact inputs"
+        ),
     }
     assert assumptions["zero_slippage_assumption"] == {
         "bps_per_side": "0",
@@ -326,7 +341,9 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
         assert quantity % 100 == 0
     crossover_notional = Decimal("0.1") / Decimal("0.00005")
 
-    def eligible_buy_examples(replay: dict[str, object]) -> list[dict[str, object]]:
+    def eligible_buy_examples(
+        replay: dict[str, object],
+    ) -> list[dict[str, object]]:
         examples = replay["cost_grid_examples"]
         assert isinstance(examples, list)
         buys = [
@@ -358,7 +375,9 @@ def test_issue85_public_replay_audits_cost_across_commission_regimes() -> None:
     ]
     assert proportional_examples
     for example in proportional_examples:
-        assert Decimal(str(example["quantity_cost_rate"])) == Decimal("0.00050")
+        assert Decimal(str(example["quantity_cost_rate"])) == Decimal(
+            "0.00050"
+        )
 
     minimum_commission_examples = [
         example

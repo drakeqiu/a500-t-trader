@@ -14,7 +14,8 @@ Handler = Callable[[dict[str, Any]], None]
 
 
 class MarketEventConsumer:
-    """Handle one use's events; duplicates are permitted by at-least-once delivery."""
+    """Handle one use's events; duplicates are permitted by at-least-once
+    delivery."""
 
     def __init__(
         self,
@@ -24,9 +25,13 @@ class MarketEventConsumer:
         max_age: timedelta = timedelta(seconds=30),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        allowed = (
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        )
         if not purpose or any(char not in allowed for char in purpose):
-            raise ValueError("purpose must contain only letters, digits, '-' or '_'")
+            raise ValueError(
+                "purpose must contain only letters, digits, '-' or '_'"
+            )
         if max_age < timedelta(0):
             raise ValueError("max_age must not be negative")
         self.purpose = purpose
@@ -35,10 +40,17 @@ class MarketEventConsumer:
         self.clock = clock or (lambda: datetime.now().astimezone())
 
     def handle_delivery(
-        self, channel: Any, delivery_tag: int, body: bytes | str | Mapping[str, Any]
+        self,
+        channel: Any,
+        delivery_tag: int,
+        body: bytes | str | Mapping[str, Any],
     ) -> None:
         try:
-            event = json.loads(body) if isinstance(body, (bytes, str)) else dict(body)
+            event = (
+                json.loads(body)
+                if isinstance(body, (bytes, str))
+                else dict(body)
+            )
             if not isinstance(event, dict):
                 raise ValueError("market event must be a JSON object")
             _validate_event(event)
@@ -103,9 +115,12 @@ class RabbitMQConsumer:
             rabbit_url = url or os.environ.get("RABBITMQ_URL")
             if not rabbit_url:
                 raise ValueError("RABBITMQ_URL is required")
-            self._connection = pika.BlockingConnection(pika.URLParameters(rabbit_url))
+            self._connection = pika.BlockingConnection(
+                pika.URLParameters(rabbit_url)
+            )
             channel = self._connection.channel()
-        self._channel = channel
+        assert channel is not None
+        self._channel: Any = channel
 
     def configure(self) -> None:
         self._channel.exchange_declare(
@@ -114,7 +129,9 @@ class RabbitMQConsumer:
         self._channel.queue_declare(queue=self.queue, durable=True)
         for routing_key in ("snapshot.*", "minute_bar.*", "trade.*"):
             self._channel.queue_bind(
-                queue=self.queue, exchange=self.exchange, routing_key=routing_key
+                queue=self.queue,
+                exchange=self.exchange,
+                routing_key=routing_key,
             )
         self._channel.basic_qos(prefetch_count=1)
 
@@ -123,7 +140,9 @@ class RabbitMQConsumer:
         self._channel.basic_consume(
             queue=self.queue,
             on_message_callback=lambda channel, method, properties, body: (
-                self.consumer.handle_delivery(channel, method.delivery_tag, body)
+                self.consumer.handle_delivery(
+                    channel, method.delivery_tag, body
+                )
             ),
             auto_ack=False,
         )

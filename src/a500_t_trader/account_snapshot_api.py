@@ -52,7 +52,8 @@ class OIDCAuthenticator:
     def __init__(self, issuer: str, audience: str, jwks_uri: str) -> None:
         if audience != SHARED_OIDC_AUDIENCE:
             raise ValueError(
-                f"OIDC audience must be the shared audience {SHARED_OIDC_AUDIENCE!r}"
+                "OIDC audience must be the shared audience "
+                f"{SHARED_OIDC_AUDIENCE!r}"
             )
         self.issuer = issuer
         self.audience = audience
@@ -64,7 +65,9 @@ class OIDCAuthenticator:
         audience = os.environ.get("OIDC_AUDIENCE")
         jwks_uri = os.environ.get("OIDC_JWKS_URI")
         if not issuer or not audience or not jwks_uri:
-            raise RuntimeError("OIDC issuer, audience, and JWKS URI must be configured")
+            raise RuntimeError(
+                "OIDC issuer, audience, and JWKS URI must be configured"
+            )
         return cls(issuer, audience, jwks_uri)
 
     def __call__(self, token: str) -> str:
@@ -93,7 +96,8 @@ class AccountSnapshotStore:
     def get_snapshot(self, subject: str) -> dict[str, object] | None:
         with psycopg.connect(self.path) as db:
             row = db.execute(
-                "SELECT snapshot_json, updated_at FROM account_snapshot_current "
+                "SELECT snapshot_json, updated_at "
+                "FROM account_snapshot_current "
                 "WHERE subject = %s",
                 (subject,),
             ).fetchone()
@@ -106,7 +110,10 @@ class AccountSnapshotStore:
 
     def history_for_subject(self, subject: str) -> list[dict[str, object]]:
         """Return retained audit records for persistence-boundary consumers."""
-        with psycopg.connect(self.path, row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.path, row_factory=cast(Any, dict_row)),
+        ) as db:
             rows = db.execute(
                 "SELECT snapshot_json,updated_at,classification FROM "
                 "account_snapshot_history WHERE subject=%s ORDER BY id",
@@ -139,8 +146,13 @@ class AccountSnapshotStore:
                 "INSERT INTO account_snapshot_current("
                 "subject,snapshot_json,updated_at) "
                 "VALUES(%s,%s,%s) ON CONFLICT(subject) DO UPDATE SET "
-                "snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at",
-                (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
+                "snapshot_json=excluded.snapshot_json, "
+                "updated_at=excluded.updated_at",
+                (
+                    subject,
+                    json.dumps(snapshot, separators=(",", ":")),
+                    written_at,
+                ),
             )
 
     def put_snapshot(
@@ -152,7 +164,8 @@ class AccountSnapshotStore:
         if_none_match: str | None,
         updated_at: str | None = None,
     ) -> tuple[bool, dict[str, object], str]:
-        """Conditionally replace the current snapshot and append its audit record."""
+        """Conditionally replace the current snapshot and append its audit
+        record."""
         written_at = updated_at or datetime.now(UTC).isoformat()
         with psycopg.connect(self.path) as db:
             db.execute(
@@ -173,13 +186,18 @@ class AccountSnapshotStore:
             if exists:
                 assert current is not None
                 if if_match is None:
-                    raise HTTPException(status_code=428, detail="If-Match required")
+                    raise HTTPException(
+                        status_code=428, detail="If-Match required"
+                    )
                 if if_match != _etag(current):
-                    raise HTTPException(status_code=412, detail="ETag does not match")
+                    raise HTTPException(
+                        status_code=412, detail="ETag does not match"
+                    )
             else:
                 if if_match is not None:
                     raise HTTPException(
-                        status_code=412, detail="Account snapshot does not exist"
+                        status_code=412,
+                        detail="Account snapshot does not exist",
                     )
                 if if_none_match is None:
                     raise HTTPException(
@@ -193,8 +211,13 @@ class AccountSnapshotStore:
                 "INSERT INTO account_snapshot_current("
                 "subject,snapshot_json,updated_at) "
                 "VALUES(%s,%s,%s) ON CONFLICT(subject) DO UPDATE SET "
-                "snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at",
-                (subject, json.dumps(snapshot, separators=(",", ":")), written_at),
+                "snapshot_json=excluded.snapshot_json,"
+                "updated_at=excluded.updated_at",
+                (
+                    subject,
+                    json.dumps(snapshot, separators=(",", ":")),
+                    written_at,
+                ),
             )
             db.execute(
                 "INSERT INTO account_snapshot_history("
@@ -362,13 +385,17 @@ def _validate_snapshot(value: object) -> dict[str, object]:
                     f"{name}.{symbol}", "invalid_security"
                 ) from exc
             if code in normalized:
-                raise _SnapshotValidationError(f"{name}.{symbol}", "symbol_collision")
+                raise _SnapshotValidationError(
+                    f"{name}.{symbol}", "symbol_collision"
+                )
             if (
                 not isinstance(quantity, int)
                 or isinstance(quantity, bool)
                 or quantity < 0
             ):
-                raise _SnapshotValidationError(f"{name}.{symbol}", "invalid_quantity")
+                raise _SnapshotValidationError(
+                    f"{name}.{symbol}", "invalid_quantity"
+                )
             normalized[code] = quantity
         return normalized
 
@@ -389,7 +416,9 @@ def _validate_snapshot(value: object) -> dict[str, object]:
                 f"cost_basis.{symbol}", "invalid_security"
             ) from exc
         if code in normalized_cost:
-            raise _SnapshotValidationError(f"cost_basis.{symbol}", "symbol_collision")
+            raise _SnapshotValidationError(
+                f"cost_basis.{symbol}", "symbol_collision"
+            )
         if code not in holdings:
             raise _SnapshotValidationError(
                 f"cost_basis.{symbol}", "invalid_cost_basis_key"
@@ -400,21 +429,27 @@ def _validate_snapshot(value: object) -> dict[str, object]:
             missing_code = min(set(holdings) - set(mapping), default=None)
             extra_code = min(set(mapping) - set(holdings), default=None)
             symbol = missing_code if missing_code is not None else extra_code
-            raise _SnapshotValidationError(f"{name}.{symbol}", "quantity_key_mismatch")
+            raise _SnapshotValidationError(
+                f"{name}.{symbol}", "quantity_key_mismatch"
+            )
     for code, holding in holdings.items():
         if floor[code] > holding:
             raise _SnapshotValidationError(
                 f"protected_floor.{code}", "quantity_inconsistent"
             )
         if sellable[code] > holding - floor[code]:
-            raise _SnapshotValidationError(f"sellable.{code}", "quantity_inconsistent")
+            raise _SnapshotValidationError(
+                f"sellable.{code}", "quantity_inconsistent"
+            )
     return {
         "as_of": as_of,
         "holdings": holdings,
         "protected_floor": floor,
         "sellable": sellable,
         "cost_basis": normalized_cost,
-        "available_cash": decimal_string("available_cash", value["available_cash"]),
+        "available_cash": decimal_string(
+            "available_cash", value["available_cash"]
+        ),
     }
 
 
@@ -424,7 +459,9 @@ def _json_default(value: object) -> str:
     raise TypeError(f"unsupported JSON value: {type(value).__name__}")
 
 
-def _authenticated_subject(auth: Authenticator, authorization: str | None) -> str:
+def _authenticated_subject(
+    auth: Authenticator, authorization: str | None
+) -> str:
     if authorization is None:
         raise HTTPException(
             status_code=401,
@@ -461,7 +498,8 @@ def create_app(
     *,
     market_data: MarketDataService | None = None,
 ) -> FastAPI:
-    """Create the account read API with replaceable auth and isolated storage."""
+    """Create the account read API with replaceable auth and isolated
+    storage."""
     path = database or database_url()
     auth = authenticator or OIDCAuthenticator.from_environment()
     store = AccountSnapshotStore(path)
@@ -511,15 +549,21 @@ def create_app(
         subject = _authenticated_subject(auth, authorization)
         content = await file.read(MAX_TRADE_IMPORT_BYTES + 1)
         if len(content) > MAX_TRADE_IMPORT_BYTES:
-            raise HTTPException(status_code=413, detail="Upload exceeds 5 MiB limit")
+            raise HTTPException(
+                status_code=413, detail="Upload exceeds 5 MiB limit"
+            )
         result = preview_galaxy_fills(
             path, content, owner=subject, max_rows=MAX_TRADE_IMPORT_ROWS
         )
         error_details = cast(list[dict[str, object]], result["error_details"])
         if any(error["field"] == "limit" for error in error_details):
-            raise HTTPException(status_code=413, detail="CSV exceeds 10,000 row limit")
+            raise HTTPException(
+                status_code=413, detail="CSV exceeds 10,000 row limit"
+            )
         if any(error["field"] == "header" for error in error_details):
-            raise HTTPException(status_code=422, detail="Unsupported Galaxy CSV format")
+            raise HTTPException(
+                status_code=422, detail="Unsupported Galaxy CSV format"
+            )
         records = result.pop("_records")
         batch_id = str(uuid.uuid4())
         now = time.time()
@@ -566,14 +610,18 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        with psycopg.connect(str(path), row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(str(path), row_factory=cast(Any, dict_row)),
+        ) as db:
             batch = db.execute(
                 """SELECT summary_json,errors_json,confirmed_json,expires_at
                    FROM trade_import_batches WHERE batch_id=%s AND owner=%s""",
                 (batch_id, subject),
             ).fetchone()
         if batch is None or (
-            batch["confirmed_json"] is None and batch["expires_at"] <= time.time()
+            batch["confirmed_json"] is None
+            and batch["expires_at"] <= time.time()
         ):
             raise HTTPException(status_code=404, detail="Preview not found")
         summary = json.loads(batch["summary_json"])
@@ -596,7 +644,10 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
-        with psycopg.connect(str(path), row_factory=dict_row) as db:
+        with cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(str(path), row_factory=cast(Any, dict_row)),
+        ) as db:
             batch = db.execute(
                 """SELECT records_json,errors_json,expires_at,confirmed_json
                    FROM trade_import_batches
@@ -604,21 +655,27 @@ def create_app(
                 (batch_id, subject),
             ).fetchone()
             if batch is None:
-                raise HTTPException(status_code=404, detail="Preview not found")
+                raise HTTPException(
+                    status_code=404, detail="Preview not found"
+                )
             if batch["confirmed_json"] is not None:
                 return JSONResponse(json.loads(batch["confirmed_json"]))
             if batch["expires_at"] <= time.time():
-                raise HTTPException(status_code=404, detail="Preview not found")
+                raise HTTPException(
+                    status_code=404, detail="Preview not found"
+                )
             if json.loads(batch["errors_json"]):
                 raise HTTPException(
-                    status_code=409, detail="Preview contains validation errors"
+                    status_code=409,
+                    detail="Preview contains validation errors",
                 )
             result = _confirm_trade_import_records(
                 db, json.loads(batch["records_json"]), subject
             )
             db.execute(
                 """UPDATE trade_import_batches
-                   SET confirmed_json=%s,records_json='[]' WHERE batch_id=%s""",
+                   SET confirmed_json=%s,records_json='[]'
+                   WHERE batch_id=%s""",
                 (json.dumps(result), batch_id),
             )
         return JSONResponse(result)
@@ -683,7 +740,9 @@ def create_app(
                     break
                 with localcontext() as context:
                     context.prec = (
-                        len(quote.last_price.as_tuple().digits) + len(str(quantity)) + 1
+                        len(quote.last_price.as_tuple().digits)
+                        + len(str(quantity))
+                        + 1
                     )
                     market_value = Decimal(quantity) * quote.last_price
                 market_values.append(market_value)
@@ -704,7 +763,9 @@ def create_app(
             )
             max_adjusted = max(amount.adjusted() for amount in amounts)
             with localcontext() as context:
-                context.prec = max_adjusted - min_exponent + len(str(len(amounts))) + 2
+                context.prec = (
+                    max_adjusted - min_exponent + len(str(len(amounts))) + 2
+                )
                 total = sum(amounts, Decimal(0))
 
         if unavailable is not None:
@@ -739,7 +800,9 @@ def create_app(
         subject = _authenticated_subject(auth, authorization)
         snapshot = store.get_snapshot(subject)
         if snapshot is None:
-            raise HTTPException(status_code=404, detail="Account snapshot not found")
+            raise HTTPException(
+                status_code=404, detail="Account snapshot not found"
+            )
         return JSONResponse(snapshot, headers={"ETag": _etag(snapshot)})
 
     @app.put("/v1/account-snapshot")
@@ -747,7 +810,9 @@ def create_app(
         request: Request,
         authorization: str | None = Header(default=None),
         if_match: str | None = Header(default=None, alias="If-Match"),
-        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        if_none_match: str | None = Header(
+            default=None, alias="If-None-Match"
+        ),
     ) -> JSONResponse:
         subject = _authenticated_subject(auth, authorization)
         try:
@@ -764,7 +829,9 @@ def create_app(
         try:
             validated = _validate_snapshot(snapshot)
         except _SnapshotValidationError as exc:
-            return _problem(422, "Invalid account snapshot", exc.path, exc.code)
+            return _problem(
+                422, "Invalid account snapshot", exc.path, exc.code
+            )
         created, saved, etag = store.put_snapshot(
             subject, validated, if_match=if_match, if_none_match=if_none_match
         )
@@ -776,7 +843,9 @@ def create_app(
 
 
 def _confirm_trade_import_records(
-    db: psycopg.Connection[dict[str, Any]], records: list[dict[str, object]], owner: str
+    db: psycopg.Connection[dict[str, Any]],
+    records: list[dict[str, object]],
+    owner: str,
 ) -> dict[str, object]:
     _lock_imports(db, owner)
     existing = {
@@ -795,7 +864,8 @@ def _confirm_trade_import_records(
         if previous is not None:
             if not _same_trade(previous, record):
                 raise HTTPException(
-                    status_code=409, detail="Preview conflicts with existing trade"
+                    status_code=409,
+                    detail="Preview conflicts with existing trade",
                 )
             duplicates += 1
             continue
@@ -808,7 +878,8 @@ def _confirm_trade_import_records(
                 owner,timestamp,symbol,side,quantity,price,trade_amount,fees,
                 stamp_duty,other_charges,occurrence_amount,source,trade_number,
                 contract_number,classification
-            ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id""",
             (owner,)
             + tuple(
                 record[key]

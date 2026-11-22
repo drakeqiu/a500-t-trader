@@ -68,7 +68,11 @@ HUNDRED = Decimal(100)
 
 class BacktestMarketData(Protocol):
     def get_history_bars(
-        self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int,
     ) -> tuple[MinuteBar, ...]: ...
 
 
@@ -113,7 +117,9 @@ class BacktestResult:
     baseline: dict[str, Decimal]
     initial_account_snapshot: dict[str, object]
     run_id: int = 0
-    provenance: str = "minute-history snapshot; simulated fills are not actual trades"
+    provenance: str = (
+        "minute-history snapshot; simulated fills are not actual trades"
+    )
 
 
 def run_backtest(
@@ -135,7 +141,9 @@ def run_backtest(
     if interval_minutes not in (1, 5):
         raise ValueError("interval_minutes must be 1 or 5")
     if cost_bps < 0 or slippage_bps < 0 or minimum_commission < 0:
-        raise ValueError("costs, slippage, and minimum commission cannot be negative")
+        raise ValueError(
+            "costs, slippage, and minimum commission cannot be negative"
+        )
     if not implementation_version.strip():
         raise ValueError("implementation_version must not be empty")
     symbols = {rule.symbol for rule in config.rules}
@@ -147,7 +155,8 @@ def run_backtest(
             (
                 bar
                 for bar in bars
-                if start_date <= bar.timestamp.date() <= end_date and bar.is_completed
+                if start_date <= bar.timestamp.date() <= end_date
+                and bar.is_completed
             ),
             key=lambda bar: bar.timestamp,
         )
@@ -168,7 +177,8 @@ def run_backtest(
     first_timestamp = selected[0].timestamp
     if account.as_of.tzinfo is None or first_timestamp.tzinfo is None:
         raise ValueError(
-            "initial account and minute history timestamps must include time zones"
+            "initial account and minute history timestamps must "
+            "include time zones"
         )
     if account.as_of > first_timestamp:
         raise ValueError(
@@ -191,7 +201,9 @@ def run_backtest(
         )
         immediately_sellable += newly_sellable
         acquired = [
-            (day, qty) for day, qty in acquired if day >= current.timestamp.date()
+            (day, qty)
+            for day, qty in acquired
+            if day >= current.timestamp.date()
         ]
         signal: str | None = None
         if rule.buy_below is not None and previous.close <= rule.buy_below:
@@ -199,7 +211,9 @@ def run_backtest(
         elif rule.sell_above is not None and previous.close >= rule.sell_above:
             signal = "sell"
         if signal == "buy":
-            market_price = current.open * (Decimal(1) + slippage_bps / Decimal(10000))
+            market_price = current.open * (
+                Decimal(1) + slippage_bps / Decimal(10000)
+            )
             cash_limit = min(cash, rule.max_buy_cash or cash)
             unit_cost = market_price * (1 + cost_bps / Decimal(10000))
             quantity = int(
@@ -210,7 +224,9 @@ def run_backtest(
             )
             if quantity:
                 notional = market_price * quantity
-                costs = max(notional * cost_bps / Decimal(10000), minimum_commission)
+                costs = max(
+                    notional * cost_bps / Decimal(10000), minimum_commission
+                )
                 if notional + costs > cash_limit:
                     quantity = int(
                         (
@@ -222,7 +238,8 @@ def run_backtest(
                     )
                     notional = market_price * quantity
                     costs = max(
-                        notional * cost_bps / Decimal(10000), minimum_commission
+                        notional * cost_bps / Decimal(10000),
+                        minimum_commission,
                     )
                 if quantity and notional + costs <= cash_limit:
                     cash -= notional + costs
@@ -250,7 +267,9 @@ def run_backtest(
                     Decimal(1) - slippage_bps / Decimal(10000)
                 )
                 notional = market_price * quantity
-                costs = max(notional * cost_bps / Decimal(10000), minimum_commission)
+                costs = max(
+                    notional * cost_bps / Decimal(10000), minimum_commission
+                )
                 slippage = (current.open - market_price) * quantity
                 cash += notional - costs
                 holdings -= quantity
@@ -337,14 +356,16 @@ class BacktestRepository:
         content = _bars_json(bars)
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if digest != result.snapshot_id:
-            raise ValueError("result snapshot does not match supplied minute bars")
+            raise ValueError(
+                "result snapshot does not match supplied minute bars"
+            )
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
                 db.execute(
                     "INSERT INTO shared_bars VALUES (%s, %s, %s, %s) "
-                    "ON CONFLICT(symbol, interval_minutes, timestamp) DO UPDATE SET "
-                    "bar_json=excluded.bar_json",
+                    "ON CONFLICT(symbol, interval_minutes, timestamp) "
+                    "DO UPDATE SET bar_json=excluded.bar_json",
                     (
                         bar.symbol,
                         bar.interval_minutes,
@@ -363,7 +384,10 @@ class BacktestRepository:
                 ),
             )
             db.execute(
-                "INSERT INTO minute_snapshots VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (
+                    "INSERT INTO minute_snapshots VALUES (%s, %s) "
+                    "ON CONFLICT DO NOTHING"
+                ),
                 (digest, content),
             )
             cursor = db.execute(
@@ -381,7 +405,11 @@ class BacktestRepository:
         return result
 
     def get_shared_history(
-        self, symbol: str, start_date: date, end_date: date, interval_minutes: int
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval_minutes: int,
     ) -> tuple[MinuteBar, ...] | None:
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
@@ -405,7 +433,9 @@ class BacktestRepository:
                     symbol,
                     interval_minutes,
                     start_date.isoformat(),
-                    datetime.combine(end_date, datetime.max.time()).isoformat(),
+                    datetime.combine(
+                        end_date, datetime.max.time()
+                    ).isoformat(),
                 ),
             ).fetchall()
         return tuple(_bar_from_json(row[0]) for row in rows)
@@ -423,16 +453,23 @@ class BacktestRepository:
         if bars:
             symbol = bars[0].symbol if symbol is None else symbol
             if any(bar.symbol != symbol for bar in bars):
-                raise ValueError("all bars must match the shared history symbol")
+                raise ValueError(
+                    "all bars must match the shared history symbol"
+                )
         if symbol is None:
-            raise ValueError("symbol is required when saving empty daily history")
+            raise ValueError(
+                "symbol is required when saving empty daily history"
+            )
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock(500001)")
             for bar in bars:
-                trading_date = bar.timestamp.astimezone(SHANGHAI).date().isoformat()
+                trading_date = (
+                    bar.timestamp.astimezone(SHANGHAI).date().isoformat()
+                )
                 db.execute(
                     "INSERT INTO shared_daily_bars "
-                    "(symbol,timestamp,bar_json,trading_date) VALUES (%s,%s,%s,%s) "
+                    "(symbol,timestamp,bar_json,trading_date) "
+                    "VALUES (%s,%s,%s,%s) "
                     "ON CONFLICT (symbol,trading_date) DO UPDATE SET "
                     "timestamp=excluded.timestamp,bar_json=excluded.bar_json",
                     (
@@ -448,14 +485,20 @@ class BacktestRepository:
                 (symbol, start_date.isoformat(), end_date.isoformat()),
             )
 
-    def list_shared_daily_history_symbols(self) -> tuple[tuple[str, str, str], ...]:
-        """Return instruments and the outer dates of their downloaded coverage."""
+    def list_shared_daily_history_symbols(
+        self,
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Return instruments and the outer dates of their downloaded
+        coverage."""
         with self._connect() as db:
             rows = db.execute(
                 "SELECT symbol, min(start_date), max(end_date) "
-                "FROM shared_daily_history_ranges GROUP BY symbol ORDER BY symbol"
+                "FROM shared_daily_history_ranges GROUP BY symbol "
+                "ORDER BY symbol"
             ).fetchall()
-        return tuple((str(symbol), str(start), str(end)) for symbol, start, end in rows)
+        return tuple(
+            (str(symbol), str(start), str(end)) for symbol, start, end in rows
+        )
 
     def list_shared_daily_history_ranges(
         self, symbol: str
@@ -497,7 +540,9 @@ class BacktestRepository:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
         if offset < 0 or (limit is not None and limit < 1):
-            raise ValueError("limit must be positive and offset must not be negative")
+            raise ValueError(
+                "limit must be positive and offset must not be negative"
+            )
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock_shared(500001)")
             ranges = db.execute(
@@ -517,7 +562,9 @@ class BacktestRepository:
                     if range_end >= end_date:
                         complete = True
                         break
-                    next_uncovered = range_end.fromordinal(range_end.toordinal() + 1)
+                    next_uncovered = range_end.fromordinal(
+                        range_end.toordinal() + 1
+                    )
             if not complete:
                 return None
             total_row = db.execute(
@@ -529,7 +576,8 @@ class BacktestRepository:
             total = int(total_row[0])
             query = (
                 "SELECT bar_json FROM shared_daily_bars WHERE symbol=%s "
-                "AND trading_date>=%s AND trading_date<=%s ORDER BY trading_date"
+                "AND trading_date>=%s AND trading_date<=%s "
+                "ORDER BY trading_date"
             )
             params: tuple[object, ...] = (
                 symbol,
@@ -549,7 +597,9 @@ class BacktestRepository:
     def cleanup_shared_history(self) -> int:
         with self._connect() as db:
             db.execute("SELECT pg_advisory_xact_lock(500001)")
-            minute_count = db.execute("SELECT count(*) FROM shared_bars").fetchone()
+            minute_count = db.execute(
+                "SELECT count(*) FROM shared_bars"
+            ).fetchone()
             daily_count = db.execute(
                 "SELECT count(*) FROM shared_daily_bars"
             ).fetchone()
@@ -569,7 +619,8 @@ class BacktestRepository:
             if run_id is None:
                 row = db.execute(
                     "SELECT result_json, bars_json FROM backtests "
-                    "JOIN minute_snapshots USING(snapshot_id) ORDER BY id DESC LIMIT 1"
+                    "JOIN minute_snapshots USING(snapshot_id) "
+                    "ORDER BY id DESC LIMIT 1"
                 ).fetchone()
             else:
                 row = db.execute(

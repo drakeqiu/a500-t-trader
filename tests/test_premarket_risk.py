@@ -22,9 +22,13 @@ class Data:
         return SessionState.TRADING, False
 
 
-def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding() -> None:
+def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding() -> (
+    None
+):
     plan = generate_plan(
-        PlanConfig((EtfRule("510300", None, Decimal("4.10"), Decimal(0), 500),)),
+        PlanConfig(
+            (EtfRule("510300", None, Decimal("4.10"), Decimal(0), 500),)
+        ),
         AccountSnapshot(
             NOW,
             {"510300": 1200},
@@ -44,7 +48,9 @@ def test_sell_quantity_respects_user_sellable_shares_and_minimum_holding() -> No
 
 def test_missing_account_position_fields_veto_tradable_quantity() -> None:
     plan = generate_plan(
-        PlanConfig((EtfRule("510300", Decimal("4.30"), None, Decimal("1000"), 0),)),
+        PlanConfig(
+            (EtfRule("510300", Decimal("4.30"), None, Decimal("1000"), 0),)
+        ),
         AccountSnapshot(NOW, {}, {}, {}, Decimal("1000")),
         Data(),
         as_of=NOW,
@@ -52,5 +58,8 @@ def test_missing_account_position_fields_veto_tradable_quantity() -> None:
 
     assert plan.suggestions[0].direction == "none"
     assert plan.suggestions[0].quantity is None
-    assert "account fields unavailable" in plan.suggestions[0].risk_or_invalidation
+    assert (
+        "account fields unavailable"
+        in plan.suggestions[0].risk_or_invalidation
+    )
     assert "unavailable" in plan.capability_status

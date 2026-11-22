@@ -1,7 +1,9 @@
-"""Deterministic in-memory OIDC and API fixtures for frontend development and tests.
+"""Deterministic in-memory OIDC and API fixtures for frontend development
+and tests.
 
-Run with ``uv run python scripts/frontend-api-mock.py --test-mode --port 38100``.
-The fixture never starts application API services or connects to data stores.
+Run with ``uv run python scripts/frontend-api-mock.py --test-mode --port
+38100``. The fixture never starts application API services or connects to
+data stores.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import os
 import re
 import secrets
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from types import AsyncGeneratorType
 from typing import Annotated, Any
@@ -35,14 +37,15 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import (
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import (
+    Content,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
 )
-from starlette.middleware.base import RequestResponseEndpoint
 
 
 def create_fixture(port: int) -> FastAPI:
@@ -55,14 +58,20 @@ def create_fixture(port: int) -> FastAPI:
     imported_subjects: set[str] = set()
     signal_states: dict[str, dict[str, object]] = {}
     signal_events: list[tuple[str, dict[str, object]]] = []
-    signal_subscribers: set[asyncio.Queue[tuple[str, dict[str, object]] | None]] = set()
+    signal_subscribers: set[
+        asyncio.Queue[tuple[str, dict[str, object]] | None]
+    ] = set()
     signal_event_sequence = 0
     stream_generation = 0
-    issuer = os.getenv("FIXTURE_ISSUER", f"http://127.0.0.1:{port}/fixture-idp")
+    issuer = os.getenv(
+        "FIXTURE_ISSUER", f"http://127.0.0.1:{port}/fixture-idp"
+    )
     app = FastAPI(title="Frontend API mock fixture")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}"],
+        allow_origins=[
+            f"http://127.0.0.1:{os.getenv('E2E_WEB_PORT', '3100')}"
+        ],
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
@@ -88,7 +97,9 @@ def create_fixture(port: int) -> FastAPI:
                 headers={"WWW-Authenticate": "Bearer"},
             ) from error
 
-    def make_signal_state(status: str, symbol: str = "563360") -> dict[str, object]:
+    def make_signal_state(
+        status: str, symbol: str = "563360"
+    ) -> dict[str, object]:
         return {
             "schema_version": 1,
             "symbol": symbol,
@@ -143,7 +154,7 @@ def create_fixture(port: int) -> FastAPI:
         if not isinstance(original, AsyncGeneratorType):
             raise TypeError("Signal stream body must be an async generator")
 
-        async def disconnectable() -> AsyncIterator[bytes]:
+        async def disconnectable() -> AsyncGenerator[Content]:
             pending = asyncio.create_task(anext(original))
             try:
                 while generation == stream_generation:
@@ -158,7 +169,9 @@ def create_fixture(port: int) -> FastAPI:
                     pending = asyncio.create_task(anext(original))
             finally:
                 pending.cancel()
-                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                with contextlib.suppress(
+                    asyncio.CancelledError, StopAsyncIteration
+                ):
                     await pending
                 await original.aclose()
 
@@ -248,11 +261,13 @@ def create_fixture(port: int) -> FastAPI:
             for name, value in values.items()
         )
         return (
-            "<!doctype html><html lang='en'><title>Fixture authorization</title>"
+            "<!doctype html><html lang='en'>"
+            "<title>Fixture authorization</title>"
             "<h1>Deterministic test identity provider</h1>"
             f"<form method='post'>{hidden}"
             "<label>Fixture account<input name='subject' required></label>"
-            "<button type='submit'>Authorize fixture account</button></form></html>"
+            "<button type='submit'>Authorize fixture account</button>"
+            "</form></html>"
         )
 
     @app.post("/fixture-idp/authorize")
@@ -313,13 +328,21 @@ def create_fixture(port: int) -> FastAPI:
             or grant_type != "authorization_code"
             or authorization is None
             or redirect_uri != authorization["redirect_uri"]
-            or not secrets.compare_digest(challenge, authorization["challenge"])
+            or not secrets.compare_digest(
+                challenge, authorization["challenge"]
+            )
         ):
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
         subject = authorization["subject"]
-        access_token = subject_tokens.setdefault(subject, secrets.token_urlsafe(32))
+        access_token = subject_tokens.setdefault(
+            subject, secrets.token_urlsafe(32)
+        )
         tokens[access_token] = subject
-        return {"access_token": access_token, "token_type": "Bearer", "expires_in": 300}
+        return {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": 300,
+        }
 
     @app.get("/v1/signals")
     async def get_signals(
@@ -330,7 +353,9 @@ def create_fixture(port: int) -> FastAPI:
         selected = symbols or ["510300", "563360"]
         return {
             "signals": [
-                signal_states.get(symbol, make_signal_state("UNAVAILABLE", symbol))
+                signal_states.get(
+                    symbol, make_signal_state("UNAVAILABLE", symbol)
+                )
                 for symbol in selected
             ],
             "strategy": "intraday-etf-t-v1-rsi",
@@ -347,10 +372,12 @@ def create_fixture(port: int) -> FastAPI:
         require_subject(authorization)
         generation = stream_generation
         cursor = last_event_id or request.headers.get("last-event-id")
-        queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = asyncio.Queue()
+        queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = (
+            asyncio.Queue()
+        )
         signal_subscribers.add(queue)
 
-        async def events() -> AsyncIterator[str]:
+        async def events() -> AsyncGenerator[str]:
             try:
                 replay = []
                 if cursor:
@@ -366,7 +393,8 @@ def create_fixture(port: int) -> FastAPI:
                         yield sse("reset", {"reason": "cursor unavailable"})
                         for symbol in symbols:
                             state = signal_states.get(
-                                symbol, make_signal_state("UNAVAILABLE", symbol)
+                                symbol,
+                                make_signal_state("UNAVAILABLE", symbol),
                             )
                             yield sse("snapshot", state)
                 else:
@@ -377,20 +405,26 @@ def create_fixture(port: int) -> FastAPI:
                         yield sse("snapshot", state)
                 for event_id, state in replay:
                     if state["symbol"] in symbols:
-                        yield sse(str(state["status"]).lower(), state, event_id)
+                        yield sse(
+                            str(state["status"]).lower(), state, event_id
+                        )
                 while (
                     not await request.is_disconnected()
                     and generation == stream_generation
                 ):
                     try:
-                        event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        event = await asyncio.wait_for(
+                            queue.get(), timeout=0.1
+                        )
                         if event is None:
                             break
                         event_id, state = event
                     except TimeoutError:
                         continue
                     if state["symbol"] in symbols:
-                        yield sse(str(state["status"]).lower(), state, event_id)
+                        yield sse(
+                            str(state["status"]).lower(), state, event_id
+                        )
             finally:
                 signal_subscribers.discard(queue)
 
@@ -401,7 +435,9 @@ def create_fixture(port: int) -> FastAPI:
         request: Request,
         authorization: str | None = Header(default=None),
         if_match: str | None = Header(default=None, alias="If-Match"),
-        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+        if_none_match: str | None = Header(
+            default=None, alias="If-None-Match"
+        ),
     ) -> JSONResponse:
         subject = require_subject(authorization)
         existing = snapshots.get(subject)
@@ -424,7 +460,9 @@ def create_fixture(port: int) -> FastAPI:
         }
         snapshots[subject] = (saved, version)
         return JSONResponse(
-            saved, status_code=status, headers={"ETag": f'"snapshot-{version}"'}
+            saved,
+            status_code=status,
+            headers={"ETag": f'"snapshot-{version}"'},
         )
 
     @app.get("/v1/account-snapshot")
@@ -436,7 +474,9 @@ def create_fixture(port: int) -> FastAPI:
         if saved is None:
             raise HTTPException(404, "Account snapshot not found")
         snapshot, version = saved
-        return JSONResponse(snapshot, headers={"ETag": f'"snapshot-{version}"'})
+        return JSONResponse(
+            snapshot, headers={"ETag": f'"snapshot-{version}"'}
+        )
 
     @app.get("/v1/account-nav")
     async def get_nav(
@@ -472,7 +512,9 @@ def create_fixture(port: int) -> FastAPI:
             "batch_id": batch_id,
             "valid": 1,
             "new": 0 if invalid or subject in imported_subjects else 1,
-            "duplicates": 0 if invalid or subject not in imported_subjects else 1,
+            "duplicates": 0
+            if invalid or subject not in imported_subjects
+            else 1,
             "errors": 1 if invalid else 0,
             "error_details": (
                 [{"row": 3, "field": "成交数量", "reason": "must be positive"}]
@@ -482,7 +524,9 @@ def create_fixture(port: int) -> FastAPI:
             "confirmed": None,
         }
         batches[(subject, batch_id)] = preview
-        return {key: value for key, value in preview.items() if key != "confirmed"}
+        return {
+            key: value for key, value in preview.items() if key != "confirmed"
+        }
 
     @app.get("/v1/trade-imports/previews/{batch_id}")
     async def get_trade_preview(

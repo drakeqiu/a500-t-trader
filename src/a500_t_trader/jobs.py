@@ -76,7 +76,11 @@ def _bar_date(timestamp: str) -> date:
 
 def _json_value(value: Any) -> Any:
     if isinstance(value, (date, datetime, uuid.UUID)):
-        return value.isoformat() if not isinstance(value, uuid.UUID) else str(value)
+        return (
+            value.isoformat()
+            if not isinstance(value, uuid.UUID)
+            else str(value)
+        )
     return value
 
 
@@ -98,21 +102,26 @@ _RECENT_JOB_LIMIT = 30
 
 
 class JobRepository:
-    """PostgreSQL task store; all public reads and mutations are subject-scoped."""
+    """PostgreSQL task store; all public reads and mutations are
+    subject-scoped."""
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
         initialize_database(dsn)
         with self._connect() as db:
-            # Serialize concurrent startup migrations, including first deployment.
+            # Serialize concurrent startup migrations, including first
+            # deployment.
             db.execute("SELECT pg_advisory_xact_lock(500004)")
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_jobs (
-                id UUID PRIMARY KEY, subject TEXT NOT NULL, symbol TEXT NOT NULL,
-                start_date DATE NOT NULL, end_date DATE NOT NULL, status TEXT NOT NULL,
+                id UUID PRIMARY KEY, subject TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                start_date DATE NOT NULL, end_date DATE NOT NULL,
+                status TEXT NOT NULL,
                 total_chunks INTEGER NOT NULL,
                 completed_chunks INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at TIMESTAMPTZ,
                 error TEXT, lease_token UUID, lease_until TIMESTAMPTZ,
                 cancel_requested BOOLEAN NOT NULL DEFAULT false
             )""")
@@ -122,15 +131,20 @@ class JobRepository:
                 )"""
             )
             migration = db.execute(
-                "SELECT version FROM daily_history_job_migrations WHERE version=1"
+                "SELECT version FROM daily_history_job_migrations "
+                "WHERE version=1"
             ).fetchone()
             if migration is None:
                 legacy_jobs = db.execute(
-                    """SELECT id, start_date, end_date, completed_chunks, status
+                    """SELECT id, start_date, end_date, completed_chunks,
+                    status
                     FROM daily_history_jobs FOR UPDATE"""
                 ).fetchall()
                 for legacy_job in legacy_jobs:
-                    start, end = legacy_job["start_date"], legacy_job["end_date"]
+                    start, end = (
+                        legacy_job["start_date"],
+                        legacy_job["end_date"],
+                    )
                     db.execute(
                         """UPDATE daily_history_jobs SET total_chunks=%s,
                             completed_chunks=%s,
@@ -148,7 +162,8 @@ class JobRepository:
                         ),
                     )
                 db.execute(
-                    "INSERT INTO daily_history_job_migrations (version) VALUES (1)"
+                    "INSERT INTO daily_history_job_migrations "
+                    "(version) VALUES (1)"
                 )
             constraint = db.execute(
                 """SELECT 1 FROM pg_constraint
@@ -178,8 +193,10 @@ class JobRepository:
                 last_error TEXT
             )""")
             db.execute("""ALTER TABLE daily_history_jobs
-                ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'queued'""")
-            db.execute("""CREATE INDEX IF NOT EXISTS daily_history_jobs_claim_idx
+                ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL
+                DEFAULT 'queued'""")
+            db.execute("""CREATE INDEX IF NOT EXISTS
+                daily_history_jobs_claim_idx
                 ON daily_history_jobs (status, lease_until, created_at)""")
             db.execute(
                 """CREATE INDEX IF NOT EXISTS
@@ -188,9 +205,11 @@ class JobRepository:
                 WHERE published_at IS NULL"""
             )
             db.execute("DROP TABLE IF EXISTS daily_history_job_bars")
-            # Separate from the CLI cache: its legacy ranges have no acquisition time.
+            # Separate from the CLI cache: its legacy ranges have no
+            # acquisition time.
             db.execute("""CREATE TABLE IF NOT EXISTS daily_history_job_cache (
-                symbol TEXT NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL,
+                symbol TEXT NOT NULL, start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
                 fetched_at TIMESTAMPTZ NOT NULL, bars JSONB NOT NULL,
                 PRIMARY KEY (symbol, start_date, end_date)
             )""")
@@ -208,14 +227,22 @@ class JobRepository:
             )
             db.execute(
                 "ALTER TABLE daily_history_job_fetched_bars "
-                "ADD COLUMN IF NOT EXISTS fetched BOOLEAN NOT NULL DEFAULT true"
+                "ADD COLUMN IF NOT EXISTS fetched BOOLEAN NOT NULL "
+                "DEFAULT true"
             )
 
-    def _connect(self) -> psycopg.Connection[Any]:
-        return psycopg.connect(self.dsn, row_factory=dict_row)
+    def _connect(self) -> psycopg.Connection[dict[str, Any]]:
+        return cast(
+            psycopg.Connection[dict[str, Any]],
+            psycopg.connect(self.dsn, row_factory=cast(Any, dict_row)),
+        )
 
     def create(
-        self, subject: str, symbol: str, start_date: date | str, end_date: date | str
+        self,
+        subject: str,
+        symbol: str,
+        start_date: date | str,
+        end_date: date | str,
     ) -> dict[str, Any]:
         start, end = _date(start_date), _date(end_date)
         if not subject:
@@ -243,7 +270,8 @@ class JobRepository:
                 ),
             ).fetchone()
             db.execute(
-                "INSERT INTO daily_history_job_outbox (id, job_id) VALUES (%s, %s)",
+                "INSERT INTO daily_history_job_outbox "
+                "(id, job_id) VALUES (%s, %s)",
                 (uuid.uuid4(), identifier),
             )
         assert row is not None
@@ -253,7 +281,9 @@ class JobRepository:
         self, subject: str, *, limit: int = _RECENT_JOB_LIMIT, offset: int = 0
     ) -> dict[str, Any]:
         if limit < 1 or offset < 0:
-            raise ValueError("limit must be positive and offset must not be negative")
+            raise ValueError(
+                "limit must be positive and offset must not be negative"
+            )
         with self._connect() as db:
             total_row = db.execute(
                 "SELECT count(*) FROM daily_history_jobs WHERE subject=%s",
@@ -297,7 +327,8 @@ class JobRepository:
             if deleted is not None:
                 return True
             existing = db.execute(
-                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs "
+                "WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return False if existing is not None else None
@@ -309,7 +340,8 @@ class JobRepository:
             return None
         with self._connect() as db:
             row = db.execute(
-                f"SELECT {_COLUMNS} FROM daily_history_jobs WHERE subject=%s AND id=%s",
+                f"SELECT {_COLUMNS} FROM daily_history_jobs "
+                "WHERE subject=%s AND id=%s",
                 (subject, identifier),
             ).fetchone()
         return _job(row)
@@ -322,7 +354,8 @@ class JobRepository:
             return None
         with self._connect() as db:
             row = db.execute(
-                "SELECT status FROM daily_history_jobs WHERE id=%s", (identifier,)
+                "SELECT status FROM daily_history_jobs WHERE id=%s",
+                (identifier,),
             ).fetchone()
         return None if row is None else row["status"]
 
@@ -416,7 +449,9 @@ class JobRepository:
             "oldest_created_at": row["oldest_created_at"],
         }
 
-    def claim(self, job_id: str | uuid.UUID | None = None) -> dict[str, Any] | None:
+    def claim(
+        self, job_id: str | uuid.UUID | None = None
+    ) -> dict[str, Any] | None:
         started = time.monotonic()
         _LOG.info("History claim started job_id=%s", job_id)
         token = uuid.uuid4()
@@ -438,10 +473,13 @@ class JobRepository:
             ).fetchall()
             for cancelled_row in cancelled:
                 db.execute(
-                    "DELETE FROM daily_history_job_fetched_bars WHERE job_id=%s",
+                    "DELETE FROM daily_history_job_fetched_bars "
+                    "WHERE job_id=%s",
                     (cancelled_row["id"],),
                 )
-            _LOG.info("History claim candidate query starting job_id=%s", job_id)
+            _LOG.info(
+                "History claim candidate query starting job_id=%s", job_id
+            )
             row = db.execute(
                 """WITH candidate AS (
                 SELECT id FROM daily_history_jobs
@@ -491,7 +529,9 @@ class JobRepository:
             ).fetchone()
         return row is not None
 
-    def set_stage(self, job_id: uuid.UUID, token: uuid.UUID, stage: str) -> bool:
+    def set_stage(
+        self, job_id: uuid.UUID, token: uuid.UUID, stage: str
+    ) -> bool:
         with self._connect() as db:
             row = db.execute(
                 """UPDATE daily_history_jobs SET stage=%s, updated_at=now()
@@ -784,12 +824,22 @@ def _run_job(
                             type(error).__name__,
                             category,
                         )
-                        if category != "network" or attempt + 1 == _MAX_ATTEMPTS:
+                        if (
+                            category != "network"
+                            or attempt + 1 == _MAX_ATTEMPTS
+                        ):
                             message = {
-                                "network": "Daily history provider network unavailable",
-                                "authentication": ("Provider authentication failed"),
+                                "network": (
+                                    "Daily history provider "
+                                    "network unavailable"
+                                ),
+                                "authentication": (
+                                    "Provider authentication failed"
+                                ),
                                 "permission": "Provider permission denied",
-                                "configuration": ("Provider configuration invalid"),
+                                "configuration": (
+                                    "Provider configuration invalid"
+                                ),
                             }.get(category, "Daily history retrieval failed")
                             repository.finish(job_id, token, message)
                             return
@@ -828,7 +878,7 @@ def _run_job(
 
 def process_one(
     repository: JobRepository,
-    provider_factory: Callable[[], DailyHistoryProvider] = create_provider_from_env,
+    provider_factory: Callable[[], DailyHistoryProvider] | None = None,
 ) -> bool:
     """Claim and process one job, returning False when the queue is empty."""
     job = repository.claim()
@@ -845,7 +895,7 @@ def process_one(
 def process_job(
     repository: JobRepository,
     job_id: str | uuid.UUID,
-    provider_factory: Callable[[], DailyHistoryProvider] = create_provider_from_env,
+    provider_factory: Callable[[], DailyHistoryProvider] | None = None,
 ) -> bool:
     """按通知中的任务 ID 领取并处理任务。"""
     job = repository.claim(job_id)
@@ -876,7 +926,9 @@ def worker_main() -> None:
         logger.propagate = False
 
     if os.environ.get("HISTORY_PERSISTENCE_PERMITTED", "").lower() != "true":
-        _LOG.info("History worker disabled: persistence permission not configured")
+        _LOG.info(
+            "History worker disabled: persistence permission not configured"
+        )
         return
     from .history_dispatch import HistoryConsumer
 
@@ -885,7 +937,9 @@ def worker_main() -> None:
         if retention_days < 1:
             raise ValueError
     except ValueError:
-        raise SystemExit("JOB_RETENTION_DAYS must be a positive integer") from None
+        raise SystemExit(
+            "JOB_RETENTION_DAYS must be a positive integer"
+        ) from None
     repository = JobRepository(database_url())
     _LOG.info("History worker starting with boundary instrumentation enabled")
     HistoryConsumer(repository, retention_days=retention_days).run()

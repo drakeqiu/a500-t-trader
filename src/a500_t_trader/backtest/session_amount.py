@@ -10,7 +10,8 @@ from ..market_data import SHANGHAI, MinuteBar
 
 
 def complete_session_amount(bars: Sequence[MinuteBar]) -> Decimal | None:
-    """Return the amount for a complete 48-bar session, if all bars are valid."""
+    """Return the amount for a complete 48-bar session, if all bars are
+    valid."""
     local_times = {bar.timestamp.astimezone(SHANGHAI).time() for bar in bars}
     if (
         len(bars) != 48
@@ -19,4 +20,6 @@ def complete_session_amount(bars: Sequence[MinuteBar]) -> Decimal | None:
         or any(bar.amount is None for bar in bars)
     ):
         return None
-    return sum((bar.amount for bar in bars if bar.amount is not None), Decimal(0))
+    return sum(
+        (bar.amount for bar in bars if bar.amount is not None), Decimal(0)
+    )

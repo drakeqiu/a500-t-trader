@@ -87,7 +87,7 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path]:
     return config, account
 
 
-def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidence(
+def test_user_monitor_persists_completed_and_open_bar_evidence(
     tmp_path: Path, capsys: CaptureFixture[str], postgres_url: str
 ) -> None:
     config, account = _inputs(tmp_path)
@@ -118,7 +118,8 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
     with psycopg.connect(database) as connection:
         rows = connection.execute(
             "SELECT symbol, direction, condition, bar_timestamp, bar_close, "
-            "bar_completed, risk_or_invalidation, account_as_of, account_source "
+            "bar_completed, risk_or_invalidation, account_as_of, "
+            "account_source "
             "FROM trigger_evidence ORDER BY bar_timestamp"
         ).fetchall()
     assert rows == [
@@ -129,7 +130,8 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
             "2026-10-30T10:00:00+08:00",
             "3.84",
             1,
-            "expires if a later price rises above 3.85 CNY; user review required",
+            "expires if a later price rises above 3.85 CNY; "
+            "user review required",
             "2026-10-30T10:00:00+08:00",
             "user-entered; not broker-verified",
         ),
@@ -140,7 +142,8 @@ def test_user_started_monitor_alerts_and_persists_completed_and_open_bar_evidenc
             "2026-10-30T10:01:00+08:00",
             "3.84",
             0,
-            "provisional while the minute bar is unfinished; user review required",
+            "provisional while the minute bar is unfinished; "
+            "user review required",
             "2026-10-30T10:00:00+08:00",
             "user-entered; not broker-verified",
         ),
@@ -200,7 +203,9 @@ def test_monitor_requery_does_not_duplicate_a_trigger(
     assert "No new trigger" in capsys.readouterr().out
 
     with psycopg.connect(database) as connection:
-        row = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()
+        row = connection.execute(
+            "SELECT count(*) FROM trigger_evidence"
+        ).fetchone()
         assert row is not None
         count = row[0]
     assert count == 2
@@ -214,7 +219,9 @@ def test_monitor_stops_in_the_invoking_process_on_keyboard_interrupt(
 ) -> None:
 
     class LiveBars(Bars):
-        def session_status(self, session_date: date) -> tuple[SessionState, bool]:
+        def session_status(
+            self, session_date: date
+        ) -> tuple[SessionState, bool]:
             return SessionState.TRADING, False
 
     def stop(_seconds: float) -> None:
@@ -264,6 +271,8 @@ def test_monitor_reports_stale_bars_without_creating_trigger_evidence(
     assert "stale or future-dated" in result.err
     assert "SUGGESTION" not in result.out
     with psycopg.connect(database) as connection:
-        row = connection.execute("SELECT count(*) FROM trigger_evidence").fetchone()
+        row = connection.execute(
+            "SELECT count(*) FROM trigger_evidence"
+        ).fetchone()
         assert row is not None
         assert row[0] == 0

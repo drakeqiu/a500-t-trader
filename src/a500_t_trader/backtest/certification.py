@@ -69,7 +69,8 @@ def certify_intraday_backtest(
     binding: Mapping[str, object],
     config: Mapping[str, object],
 ) -> CertificationResult:
-    """Evaluate supplied metrics and bind passes to exact certification inputs."""
+    """Evaluate supplied metrics and bind passes to exact certification
+    inputs."""
     blockers: list[str] = []
     thresholds = _thresholds(config, blockers)
     if not isinstance(binding, Mapping):
@@ -97,7 +98,9 @@ def certify_intraday_backtest(
                 blockers.append(f"binding.{name} must be non-empty text")
         assumptions = binding.get("execution_assumptions")
         if not isinstance(assumptions, Mapping) or not assumptions:
-            blockers.append("binding.execution_assumptions must be a non-empty object")
+            blockers.append(
+                "binding.execution_assumptions must be a non-empty object"
+            )
     if thresholds is not None:
         _evaluate(evidence, thresholds, blockers)
     blockers = list(dict.fromkeys(blockers))
@@ -107,7 +110,8 @@ def certify_intraday_backtest(
             fingerprint = _fingerprint(binding, config)
         except TypeError, ValueError:
             blockers.append(
-                "binding and certification configuration must be JSON serializable"
+                "binding and certification configuration must be JSON "
+                "serializable"
             )
     certified = not blockers
     if not certified:
@@ -123,7 +127,8 @@ def certification_is_current(
     binding: Mapping[str, object],
     config: Mapping[str, object],
 ) -> bool:
-    """A pass authorizes only the exact inputs that produced its fingerprint."""
+    """A pass authorizes only the exact inputs that produced its
+    fingerprint."""
     if not result.certified or result.fingerprint is None:
         return False
     blockers: list[str] = []
@@ -170,7 +175,9 @@ def _thresholds(
             raise InvalidOperation
         values["cost_slippage_stress_multiplier"] = stress
     except InvalidOperation, ValueError, TypeError:
-        blockers.append("cost_slippage_stress_multiplier must explicitly equal 1.5")
+        blockers.append(
+            "cost_slippage_stress_multiplier must explicitly equal 1.5"
+        )
 
     walk = config.get("walk_forward")
     if not isinstance(walk, Mapping):
@@ -182,14 +189,17 @@ def _thresholds(
             blockers.append("walk_forward.splits must be a positive integer")
         if type(minimum_passing) is not int or minimum_passing < 1:
             blockers.append(
-                "walk_forward.minimum_passing_splits must be a positive integer"
+                "walk_forward.minimum_passing_splits must be a positive "
+                "integer"
             )
         if (
             type(split_count) is int
             and type(minimum_passing) is int
             and minimum_passing > split_count
         ):
-            blockers.append("walk_forward.minimum_passing_splits exceeds splits")
+            blockers.append(
+                "walk_forward.minimum_passing_splits exceeds splits"
+            )
         else:
             values["walk_forward"] = dict(walk)
 
@@ -214,7 +224,9 @@ def _thresholds(
                 )
         values["neighbor_parameter_perturbation"] = dict(perturbation)
     profit_factor_minimum = thresholds.get("profit_factor_minimum")
-    if profit_factor_minimum is not None and profit_factor_minimum < Decimal("1.25"):
+    if profit_factor_minimum is not None and profit_factor_minimum < Decimal(
+        "1.25"
+    ):
         blockers.append("profit_factor_minimum must be at least 1.25")
     for name in (
         "in_sample_profit_factor_minimum",
@@ -233,14 +245,18 @@ def _thresholds(
             blockers.append(f"{name} cannot be negative")
     maximum_drawdown = thresholds.get("maximum_drawdown")
     if maximum_drawdown is not None and maximum_drawdown > 1:
-        blockers.append("maximum_drawdown must be a fraction no greater than 1")
+        blockers.append(
+            "maximum_drawdown must be a fraction no greater than 1"
+        )
     if any(key.startswith("walk_forward.") for key in blockers):
         values.pop("walk_forward", None)
     return None if blockers else values
 
 
 def _evaluate(
-    evidence: CertificationEvidence, thresholds: dict[str, object], blockers: list[str]
+    evidence: CertificationEvidence,
+    thresholds: dict[str, object],
+    blockers: list[str],
 ) -> None:
     def metric(value: Decimal | None, name: str) -> Decimal | None:
         if not isinstance(value, Decimal) or not value.is_finite():
@@ -253,12 +269,15 @@ def _evaluate(
     paired_average_minimum = cast(
         Decimal, thresholds["paired_trade_average_net_profit_minimum"]
     )
-    if net_return is not None and (net_return <= 0 or net_return < net_return_minimum):
+    if net_return is not None and (
+        net_return <= 0 or net_return < net_return_minimum
+    ):
         blockers.append("net_return")
 
     profits = evidence.paired_trade_net_profits
     if not profits or any(
-        not isinstance(value, Decimal) or not value.is_finite() for value in profits
+        not isinstance(value, Decimal) or not value.is_finite()
+        for value in profits
     ):
         blockers.append("paired_trade_net_profits are missing or incomplete")
     else:
@@ -290,7 +309,9 @@ def _evaluate(
         blockers.append("sample_count")
 
     stress_return = metric(evidence.stressed_net_return, "stressed_net_return")
-    stress_pf = metric(evidence.stressed_profit_factor, "stressed_profit_factor")
+    stress_pf = metric(
+        evidence.stressed_profit_factor, "stressed_profit_factor"
+    )
     stress_multiplier = metric(
         evidence.stressed_cost_slippage_multiplier,
         "stressed_cost_slippage_multiplier",
@@ -329,13 +350,17 @@ def _evaluate(
                 or neighbor_return <= 0
                 or neighbor_return < net_return_minimum
             ):
-                blockers.append(f"neighbor_parameter_metrics[{index}].net_return")
+                blockers.append(
+                    f"neighbor_parameter_metrics[{index}].net_return"
+                )
             if (
                 not isinstance(neighbor_pf, Decimal)
                 or not neighbor_pf.is_finite()
                 or neighbor_pf < max(Decimal("1.25"), profit_factor_minimum)
             ):
-                blockers.append(f"neighbor_parameter_metrics[{index}].profit_factor")
+                blockers.append(
+                    f"neighbor_parameter_metrics[{index}].profit_factor"
+                )
     walk = cast(Mapping[str, object], thresholds["walk_forward"])
     expected_splits = cast(int, walk["splits"])
     minimum_passing_splits = cast(int, walk["minimum_passing_splits"])
@@ -366,7 +391,9 @@ def _evaluate(
             blockers.append("walk_forward")
 
 
-def _fingerprint(binding: Mapping[str, object], config: Mapping[str, object]) -> str:
+def _fingerprint(
+    binding: Mapping[str, object], config: Mapping[str, object]
+) -> str:
     payload = {"binding": binding, "certification_config": config}
     canonical = json.dumps(
         _canonical_value(payload),
@@ -426,7 +453,9 @@ def _report(
         "sample_count": evidence.sample_count,
         "stressed_net_return": evidence.stressed_net_return,
         "stressed_profit_factor": evidence.stressed_profit_factor,
-        "stressed_cost_slippage_multiplier": evidence.stressed_cost_slippage_multiplier,
+        "stressed_cost_slippage_multiplier": (
+            evidence.stressed_cost_slippage_multiplier
+        ),
         "neighbor_net_returns": evidence.neighbor_net_returns,
         "neighbor_profit_factors": evidence.neighbor_profit_factors,
         "walk_forward_net_returns": evidence.walk_forward_net_returns,
@@ -436,13 +465,16 @@ def _report(
         "certified": certified,
         "binding_fingerprint": fingerprint,
         "binding": value(binding) if isinstance(binding, Mapping) else {},
-        "certification_config": value(config) if isinstance(config, Mapping) else {},
+        "certification_config": value(config)
+        if isinstance(config, Mapping)
+        else {},
         "thresholds": {}
         if thresholds is None
         else {key: value(item) for key, item in thresholds.items()},
         "metrics": {key: value(item) for key, item in metrics.items()},
         "blockers": blockers.copy(),
         "disclaimer": (
-            "Historical certification is not a guarantee of future profitability."
+            "Historical certification is not a guarantee of future "
+            "profitability."
         ),
     }

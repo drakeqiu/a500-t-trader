@@ -39,7 +39,10 @@ class PushConnection(Protocol):
     connected: bool
 
     def subscribe(
-        self, symbol: str, event_type: str, callback: Callable[[MarketEvent], None]
+        self,
+        symbol: str,
+        event_type: str,
+        callback: Callable[[MarketEvent], None],
     ) -> Any: ...
 
     def close(self) -> None: ...
@@ -61,7 +64,9 @@ class MarketDataCollector:
         config: CollectorConfig,
         publisher: Publisher,
         *,
-        wait: Callable[[Event, float], bool] = lambda stop, seconds: stop.wait(seconds),
+        wait: Callable[[Event, float], bool] = lambda stop, seconds: stop.wait(
+            seconds
+        ),
         on_status: StatusCallback | None = None,
     ) -> None:
         self._connection_factory = connection_factory
@@ -74,7 +79,8 @@ class MarketDataCollector:
         self.last_error: str | None = None
 
     def run(self, stop: Event) -> None:
-        """Connect, subscribe, and recover until the caller requests shutdown."""
+        """Connect, subscribe, and recover until the caller requests
+        shutdown."""
         retry_delay = self._config.retry_initial_seconds
         while not stop.is_set():
             connection: PushConnection | None = None
@@ -83,7 +89,8 @@ class MarketDataCollector:
                 connection = self._connection_factory(self._config)
                 if not _is_connected(connection):
                     raise ConnectionError(
-                        "connection factory returned without confirmed connection"
+                        "connection factory returned without "
+                        "confirmed connection"
                     )
                 self._set_status("connected", "idle")
                 self.last_error = None
@@ -100,7 +107,9 @@ class MarketDataCollector:
                 while not stop.is_set():
                     if not _is_connected(connection):
                         self._set_status("disconnected", "failed")
-                        self.last_error = "tgw connection reported disconnected"
+                        self.last_error = (
+                            "tgw connection reported disconnected"
+                        )
                         break
                     failed = next(
                         (
@@ -134,7 +143,9 @@ class MarketDataCollector:
                 if not stop.is_set():
                     self._set_status("disconnected", self.subscription_state)
                     self._wait(stop, retry_delay)
-                    retry_delay = min(retry_delay * 2, self._config.retry_max_seconds)
+                    retry_delay = min(
+                        retry_delay * 2, self._config.retry_max_seconds
+                    )
         self._set_status("stopped", "stopped")
 
     def _set_status(

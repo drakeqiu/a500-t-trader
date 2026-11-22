@@ -15,7 +15,10 @@ import psycopg
 from ..market_data import MinuteBar
 from .intraday_execution import calculate_intraday_execution
 from .intraday_state import IntradayStrategyStateStore, StrategyRecommendation
-from .intraday_technical import IntradayTechnicalAnalysis, analyze_intraday_technical
+from .intraday_technical import (
+    IntradayTechnicalAnalysis,
+    analyze_intraday_technical,
+)
 from .intraday_v1_config import IntradayV1Config
 from .premarket import MAX_INPUT_AGE
 
@@ -40,7 +43,8 @@ def evaluate_intraday_strategy(
     The technical grid context is explicit because its cost rate is
     quantity-specific. Missing context blocks a candidate in the analyzer.
     ``paired_state`` is a per-symbol mapping with optional ``take_profit`` and
-    ``buyback`` records; missing or malformed pair data never creates an intent.
+    ``buyback`` records; missing or malformed pair data never creates an
+    intent.
     ``risk_exit_required`` carries an explicit upstream risk decision and
     bypasses only the RSI momentum gate, not execution constraints.
     """
@@ -51,7 +55,9 @@ def evaluate_intraday_strategy(
     account = {} if config is None else config.account
     positions = account.get("positions")
     account_symbols = positions if isinstance(positions, dict) else {}
-    symbols = sorted(set(bars_by_symbol) | set(securities) | set(account_symbols))
+    symbols = sorted(
+        set(bars_by_symbol) | set(securities) | set(account_symbols)
+    )
     analyses: dict[str, IntradayTechnicalAnalysis] = {}
     analyzer_error: str | None = None
     if config is not None:
@@ -74,10 +80,13 @@ def evaluate_intraday_strategy(
                 for symbol, analysis in analyses.items()
             }
         except (ValueError, TypeError, ArithmeticError) as error:
-            analyzer_error = f"source-exact technical analysis unavailable: {error}"
+            analyzer_error = (
+                f"source-exact technical analysis unavailable: {error}"
+            )
     else:
         analyzer_error = (
-            "source-exact technical analysis unavailable without V1 configuration"
+            "source-exact technical analysis unavailable without V1 "
+            "configuration"
         )
 
     results: dict[str, dict[str, object]] = {}
@@ -94,10 +103,14 @@ def evaluate_intraday_strategy(
         else:
             account_stamp = _timestamp(account.get("as_of"))
             if account_stamp is None:
-                reasons.append("account snapshot timestamp unavailable or invalid")
+                reasons.append(
+                    "account snapshot timestamp unavailable or invalid"
+                )
             elif _stale(account_stamp, now):
                 reasons.append("account snapshot is stale or future-dated")
-            position = positions.get(symbol) if isinstance(positions, dict) else None
+            position = (
+                positions.get(symbol) if isinstance(positions, dict) else None
+            )
             if not isinstance(position, dict):
                 reasons.append(f"account position unavailable for {symbol}")
             else:
@@ -110,7 +123,8 @@ def evaluate_intraday_strategy(
                 ):
                     if position.get(field) is None:
                         reasons.append(
-                            f"account position {field} unavailable for {symbol}"
+                            f"account position {field} unavailable for "
+                            f"{symbol}"
                         )
             rule = securities.get(symbol)
             if rule is None:
@@ -118,7 +132,9 @@ def evaluate_intraday_strategy(
             else:
                 stamp = _timestamp(rule.get("as_of"))
                 if stamp is None:
-                    reasons.append(f"trading rules for {symbol} have invalid timestamp")
+                    reasons.append(
+                        f"trading rules for {symbol} have invalid timestamp"
+                    )
                 elif _stale(stamp, now):
                     reasons.append(
                         f"trading rules for {symbol} are stale or future-dated"
@@ -149,10 +165,15 @@ def evaluate_intraday_strategy(
         )
         pair_trade_pair_id: str | None = None
         pair_max_quantity = 0
-        if analysis is not None and analysis.candidate in {"TAKE_PROFIT", "BUYBACK"}:
+        if analysis is not None and analysis.candidate in {
+            "TAKE_PROFIT",
+            "BUYBACK",
+        }:
             pair_context = (paired_state or {}).get(symbol)
             pair_key = (
-                "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+                "take_profit"
+                if analysis.candidate == "TAKE_PROFIT"
+                else "buyback"
             )
             pair_record = (
                 pair_context.get(pair_key)
@@ -184,12 +205,14 @@ def evaluate_intraday_strategy(
                 sell_quantity = persisted_pair.get("sell_quantity")
                 buy_outstanding = (
                     buy_quantity - sell_quantity
-                    if isinstance(buy_quantity, int) and isinstance(sell_quantity, int)
+                    if isinstance(buy_quantity, int)
+                    and isinstance(sell_quantity, int)
                     else 0
                 )
                 sell_outstanding = (
                     sell_quantity - buy_quantity
-                    if isinstance(buy_quantity, int) and isinstance(sell_quantity, int)
+                    if isinstance(buy_quantity, int)
+                    and isinstance(sell_quantity, int)
                     else 0
                 )
                 if (
@@ -216,7 +239,9 @@ def evaluate_intraday_strategy(
         state_parameters = _state_parameters(config)
         state_reasons: tuple[str, ...] = ()
         if state_store is None or state_parameters is None:
-            state_reasons = ("persistent strategy state unavailable or unconfigured",)
+            state_reasons = (
+                "persistent strategy state unavailable or unconfigured",
+            )
         elif side in ("buy", "sell"):
             try:
                 (
@@ -252,9 +277,12 @@ def evaluate_intraday_strategy(
         if latest is None:
             reasons.append(f"market data unavailable for {symbol}")
         elif _stale(latest.timestamp.astimezone(SHANGHAI), now):
-            reasons.append(f"market data for {symbol} is stale or future-dated")
+            reasons.append(
+                f"market data for {symbol} is stale or future-dated"
+            )
 
-        # Never size a technical WAIT or a candidate blocked by an upstream gate.
+        # Never size a technical WAIT or a candidate blocked by an upstream
+        # gate.
         eligible = (
             analysis is not None
             and side in ("buy", "sell")
@@ -288,7 +316,9 @@ def evaluate_intraday_strategy(
             execution_reasons: tuple[str, ...] = ()
         else:
             reasons.extend(execution.reasons)
-            quantity = execution.quantity if execution.allowed and not reasons else 0
+            quantity = (
+                execution.quantity if execution.allowed and not reasons else 0
+            )
             if (
                 quantity
                 and analysis is not None
@@ -296,30 +326,52 @@ def evaluate_intraday_strategy(
             ):
                 context = (paired_state or {}).get(symbol, {})
                 key = (
-                    "take_profit" if analysis.candidate == "TAKE_PROFIT" else "buyback"
+                    "take_profit"
+                    if analysis.candidate == "TAKE_PROFIT"
+                    else "buyback"
                 )
-                pair = context.get(key) if isinstance(context, Mapping) else None
+                pair = (
+                    context.get(key) if isinstance(context, Mapping) else None
+                )
                 pair_quantity = (
                     pair.get("quantity") if isinstance(pair, Mapping) else None
                 )
                 security = securities.get(symbol)
                 lot_value = (
-                    security.get("lot_size") if isinstance(security, dict) else None
+                    security.get("lot_size")
+                    if isinstance(security, dict)
+                    else None
                 )
-                lot = lot_value if type(lot_value) is int and lot_value > 0 else None
-                if type(pair_quantity) is not int or pair_quantity <= 0 or lot is None:
+                lot = (
+                    lot_value
+                    if type(lot_value) is int and lot_value > 0
+                    else None
+                )
+                if (
+                    type(pair_quantity) is not int
+                    or pair_quantity <= 0
+                    or lot is None
+                ):
                     quantity = 0
                     reasons.append("paired quantity or lot size unavailable")
                 else:
                     quantity = (
-                        min(quantity, pair_quantity, pair_max_quantity) // lot * lot
+                        min(quantity, pair_quantity, pair_max_quantity)
+                        // lot
+                        * lot
                     )
-                    if analysis.candidate == "BUYBACK" and analysis.trend == "BEAR":
-                        quantity = min(quantity, (pair_max_quantity // 4) // lot * lot)
+                    if (
+                        analysis.candidate == "BUYBACK"
+                        and analysis.trend == "BEAR"
+                    ):
+                        quantity = min(
+                            quantity, (pair_max_quantity // 4) // lot * lot
+                        )
                     if quantity < lot:
                         quantity = 0
                         reasons.append(
-                            "eligible paired quantity is below one trading unit"
+                            "eligible paired quantity is below one "
+                            "trading unit"
                         )
             allowed = execution.allowed and quantity > 0 and not reasons
             execution_reasons = execution.reasons
@@ -379,7 +431,9 @@ def evaluate_intraday_strategy(
             "risk": {
                 "status": "READY" if allowed else "BLOCKED",
                 "vetoed": not allowed,
-                "constraints": _constraints(account, symbol, securities.get(symbol)),
+                "constraints": _constraints(
+                    account, symbol, securities.get(symbol)
+                ),
             },
             "reasons": reasons,
         }
@@ -391,10 +445,13 @@ def _route_forced_risk_exit(
     analysis: IntradayTechnicalAnalysis,
     required: bool,
 ) -> IntradayTechnicalAnalysis:
-    """Route an explicit upstream risk decision without applying RSI momentum."""
+    """Route an explicit upstream risk decision without applying RSI
+    momentum."""
     if required is not True or analysis.risk_status != "READY":
         return analysis
-    reasons = [reason for reason in analysis.reasons if not reason.startswith("RSI_")]
+    reasons = [
+        reason for reason in analysis.reasons if not reason.startswith("RSI_")
+    ]
     if (
         _rsi_value(analysis.indicators.get("rsi_14")) is None
         or _rsi_value(analysis.indicators.get("rsi_14_previous")) is None
@@ -410,7 +467,8 @@ def _route_forced_risk_exit(
 def _filter_rsi_momentum(
     analysis: IntradayTechnicalAnalysis,
 ) -> IntradayTechnicalAnalysis:
-    """Apply the RSI hard gate after price/KDJ analysis has formed a candidate."""
+    """Apply the RSI hard gate after price/KDJ analysis has formed a
+    candidate."""
     if analysis.candidate not in {"BUY", "BUYBACK", "SELL"}:
         return analysis
 
@@ -506,7 +564,9 @@ def _timestamp(value: object) -> datetime | None:
     else:
         return None
     return (
-        parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+        parsed
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None
+        else None
     )
 
 
@@ -520,7 +580,10 @@ def _position(account: Mapping[str, object], symbol: str) -> dict[str, object]:
         "cost_basis": position.get("cost_basis"),
         "available_cash": account.get("cash"),
         "constraints": [
-            "position sizing is unavailable while any V1 execution gate is blocked"
+            (
+                "position sizing is unavailable while any V1 execution gate "
+                "is blocked"
+            )
         ],
     }
 

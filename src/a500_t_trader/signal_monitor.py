@@ -1,4 +1,5 @@
-"""Shared Redis-backed signal state, ordered event history, and async HTTP/SSE API."""
+"""Shared Redis-backed signal state, ordered event history, and async
+HTTP/SSE API."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ import os
 import time
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -32,7 +33,8 @@ UPDATES_CHANNEL = "a500:signals:updates"
 
 
 class SignalStore:
-    """Redis contract shared by the producer and API, independent of process memory."""
+    """Redis contract shared by the producer and API, independent of process
+    memory."""
 
     def __init__(self, redis: Redis) -> None:
         self.redis = redis
@@ -46,8 +48,11 @@ class SignalStore:
             return None
         return cast(dict[str, Any], json.loads(value))
 
-    async def publish(self, state: dict[str, Any], event_type: str) -> str | None:
-        """Persist latest state; retain only distinct directional events in stream."""
+    async def publish(
+        self, state: dict[str, Any], event_type: str
+    ) -> str | None:
+        """Persist latest state; retain only distinct directional events in
+        stream."""
         symbol = str(state["symbol"])
         pipe = self.redis.pipeline(transaction=True)
         pipe.set(
@@ -69,7 +74,11 @@ class SignalStore:
         results = await pipe.execute()
         if directional:
             event_id = results[1]
-            return event_id.decode() if isinstance(event_id, bytes) else str(event_id)
+            return (
+                event_id.decode()
+                if isinstance(event_id, bytes)
+                else str(event_id)
+            )
         await self.redis.publish(
             UPDATES_CHANNEL,
             json.dumps(state, ensure_ascii=False, default=str),
@@ -107,7 +116,9 @@ class SignalStore:
             (
                 _text(event_id),
                 json.loads(
-                    _text((fields or {}).get(b"data", (fields or {}).get("data")))
+                    _text(
+                        (fields or {}).get(b"data", (fields or {}).get("data"))
+                    )
                 ),
             )
             for event_id, fields in rows or []
@@ -115,12 +126,16 @@ class SignalStore:
 
     async def latest_id(self) -> str:
         await self.trim()
-        rows = await self.redis.xrevrange(STREAM_KEY, max="+", min="-", count=1)
+        rows = await self.redis.xrevrange(
+            STREAM_KEY, max="+", min="-", count=1
+        )
         return "0-0" if not rows else _text(rows[0][0])
 
     async def trim(self) -> None:
         cutoff = int((datetime.now(UTC) - RETENTION).timestamp() * 1000)
-        await self.redis.xtrim(STREAM_KEY, minid=f"{cutoff}-0", approximate=False)
+        await self.redis.xtrim(
+            STREAM_KEY, minid=f"{cutoff}-0", approximate=False
+        )
 
 
 def _id_key(value: str) -> tuple[int, int]:
@@ -135,7 +150,8 @@ def create_app(
     freshness: timedelta = timedelta(minutes=15),
     authenticator: Authenticator | None = None,
 ) -> FastAPI:
-    """Construct read-only web service; it never connects to a market/broker source."""
+    """Construct read-only web service; it never connects to a market/broker
+    source."""
     if redis is None:
         redis = Redis.from_url(
             os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
@@ -148,7 +164,6 @@ def create_app(
         if authenticator is not None
         else OIDCAuthenticator.from_environment()
     )
-    bearer = HTTPBearer(auto_error=False)
     app = FastAPI(
         title="A500 signal monitor",
         docs_url=None,
@@ -161,7 +176,10 @@ def create_app(
     app.state.redis = redis
 
     async def require_auth(
-        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),  # noqa: B008
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(HTTPBearer(auto_error=False)),
+        ],
     ) -> None:
         if credentials is None:
             raise HTTPException(
@@ -172,7 +190,9 @@ def create_app(
         try:
             auth(credentials.credentials)
         except Exception as error:
-            _LOG.warning("OIDC bearer authentication failed: %s", type(error).__name__)
+            _LOG.warning(
+                "OIDC bearer authentication failed: %s", type(error).__name__
+            )
             raise HTTPException(
                 status_code=401,
                 detail="Invalid bearer credentials",
@@ -197,14 +217,18 @@ def create_app(
     async def openapi_schema() -> JSONResponse:
         return JSONResponse(app.openapi())
 
-    @app.get("/docs", include_in_schema=False, dependencies=[Depends(require_auth)])
+    @app.get(
+        "/docs", include_in_schema=False, dependencies=[Depends(require_auth)]
+    )
     async def swagger_ui() -> HTMLResponse:
         return get_swagger_ui_html(
             openapi_url="/openapi.json",
             title=f"{app.title} - Swagger UI",
         )
 
-    @app.get("/redoc", include_in_schema=False, dependencies=[Depends(require_auth)])
+    @app.get(
+        "/redoc", include_in_schema=False, dependencies=[Depends(require_auth)]
+    )
     async def redoc() -> HTMLResponse:
         return get_redoc_html(
             openapi_url="/openapi.json",
@@ -215,11 +239,14 @@ def create_app(
     async def signals(
         symbols: list[str] | None = Query(default=None),  # noqa: B008
     ) -> dict[str, Any]:
-        selected = config.etfs if symbols is None else tuple(dict.fromkeys(symbols))
+        selected = (
+            config.etfs if symbols is None else tuple(dict.fromkeys(symbols))
+        )
         _validate_symbols(selected, config)
         try:
             states = [
-                await _current(store, symbol, freshness, config) for symbol in selected
+                await _current(store, symbol, freshness, config)
+                for symbol in selected
             ]
         except Exception as error:
             raise HTTPException(
@@ -348,7 +375,9 @@ async def _events(
             for event_id, state in replay:
                 if state.get("symbol") in symbols:
                     yield _sse(
-                        str(state.get("status", "signal")).lower(), state, event_id
+                        str(state.get("status", "signal")).lower(),
+                        state,
+                        event_id,
                     )
             next_id = replay[-1][0] if replay else cursor
     if cursor is None or reset_required:
@@ -389,7 +418,10 @@ async def _events(
                         if state != last_status.get(str(symbol)):
                             last_status[str(symbol)] = state
                             yield _sse(
-                                str(state.get("status", "unavailable")).lower(), state
+                                str(
+                                    state.get("status", "unavailable")
+                                ).lower(),
+                                state,
                             )
 
             now = time.monotonic()
@@ -397,7 +429,9 @@ async def _events(
                 last_status_check = now
                 for symbol in symbols:
                     try:
-                        state = await _current(store, symbol, freshness, config)
+                        state = await _current(
+                            store, symbol, freshness, config
+                        )
                     except Exception:
                         state = _unavailable_state(symbol)
                     previous = last_status.get(symbol)
@@ -405,14 +439,18 @@ async def _events(
                     if previous is not None and state != previous:
                         received_update = True
                         yield _sse(
-                            str(state.get("status", "unavailable")).lower(), state
+                            str(state.get("status", "unavailable")).lower(),
+                            state,
                         )
             try:
                 events = await store.after(next_id)
             except Exception:
                 yield _sse(
                     "unavailable",
-                    {"status": "UNAVAILABLE", "reasons": ["signal store unavailable"]},
+                    {
+                        "status": "UNAVAILABLE",
+                        "reasons": ["signal store unavailable"],
+                    },
                 )
                 await asyncio.sleep(1)
                 continue
@@ -420,7 +458,9 @@ async def _events(
                 next_id = event_id
                 if state.get("symbol") in symbols:
                     yield _sse(
-                        str(state.get("status", "signal")).lower(), state, event_id
+                        str(state.get("status", "signal")).lower(),
+                        state,
+                        event_id,
                     )
             if not events and not received_update:
                 await asyncio.sleep(0.5)
@@ -431,14 +471,20 @@ async def _events(
 
 def _sse(event: str, data: dict[str, Any], event_id: str | None = None) -> str:
     identifier = "" if event_id is None else f"id: {event_id}\n"
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+    payload = json.dumps(
+        data, ensure_ascii=False, separators=(",", ":"), default=str
+    )
     return f"{identifier}event: {event}\ndata: {payload}\n\n"
 
 
-def _validate_symbols(symbols: Iterable[str], config: LiveSignalConfig) -> None:
+def _validate_symbols(
+    symbols: Iterable[str], config: LiveSignalConfig
+) -> None:
     invalid = sorted(set(symbols) - set(config.etfs))
     if invalid:
-        raise HTTPException(status_code=422, detail={"unconfigured_symbols": invalid})
+        raise HTTPException(
+            status_code=422, detail={"unconfigured_symbols": invalid}
+        )
 
 
 def _valid_cursor(value: str) -> bool:
