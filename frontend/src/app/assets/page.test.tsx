@@ -60,13 +60,21 @@ describe("assets route", () => {
     render(<AssetsPage />);
     expect(await screen.findByText("¥125.5000")).toBeTruthy();
     expect(screen.getByText("净资产估值与账户快照。")).toBeTruthy();
-    expect(screen.queryByText("按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。")).toBeNull();
-    expect(screen.getByRole("note", { name: "净资产估值说明" }).getAttribute("title")).toBe(
-      "按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。",
+    expect(
+      screen.queryByText("净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。"),
+    ).toBeNull();
+    const navHelp = screen.getByRole("note", { name: "净资产估值说明" });
+    expect(navHelp.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(navHelp.textContent).toBe("");
+    expect(navHelp.getAttribute("title")).toBeNull();
+    expect(navHelp.getAttribute("aria-description")).toBe(
+      "净资产按账户现金和持仓行情估算，不包含保护底仓、可卖数量及持仓成本。",
     );
-    expect(screen.queryByText("编辑后将完整替换账户快照。")).toBeNull();
-    expect(screen.getByRole("note", { name: "账户快照说明" }).getAttribute("title")).toBe(
-      "编辑后将完整替换账户快照。",
+    expect(screen.queryByText("保存后会用当前内容完整替换现有账户快照。")).toBeNull();
+    const snapshotHelp = screen.getByRole("note", { name: "账户快照说明" });
+    expect(snapshotHelp.getAttribute("title")).toBeNull();
+    expect(snapshotHelp.getAttribute("aria-description")).toBe(
+      "保存后会用当前内容完整替换现有账户快照。",
     );
     const table = screen.getByRole("table", { name: "证券持仓" });
     expect(table).toBeTruthy();
