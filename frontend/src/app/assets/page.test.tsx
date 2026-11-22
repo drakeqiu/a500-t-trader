@@ -35,7 +35,7 @@ beforeEach(() => {
   getNav.mockResolvedValue({
     status: "unavailable",
     nav: null,
-    reason: "quote_stale",
+    reason: "quote_future",
     holdings: [],
   });
   getSnapshot.mockResolvedValue(null);
@@ -59,6 +59,15 @@ describe("assets route", () => {
     getSnapshot.mockResolvedValue(stored);
     render(<AssetsPage />);
     expect(await screen.findByText("¥125.5000")).toBeTruthy();
+    expect(screen.getByText("净资产估值与账户快照。")).toBeTruthy();
+    expect(screen.queryByText("按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。")).toBeNull();
+    expect(screen.getByRole("note", { name: "净资产估值说明" }).getAttribute("title")).toBe(
+      "按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。",
+    );
+    expect(screen.queryByText("编辑后将完整替换账户快照。")).toBeNull();
+    expect(screen.getByRole("note", { name: "账户快照说明" }).getAttribute("title")).toBe(
+      "编辑后将完整替换账户快照。",
+    );
     const table = screen.getByRole("table", { name: "证券持仓" });
     expect(table).toBeTruthy();
     expect(screen.getByRole("row", { name: /510300/ })).toBeTruthy();

@@ -763,6 +763,58 @@ code {
   font-weight: 620;
   letter-spacing: -0.02em;
 }
+.asset-help {
+  position: relative;
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  place-items: center;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+}
+.asset-help::after {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgb(23 32 29 / 12%);
+  color: var(--ink);
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+.asset-help:hover::after,
+.asset-help:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.asset-help:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .asset-section-heading p {
   max-width: 720px;
   font-size: 13px;

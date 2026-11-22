@@ -218,6 +218,24 @@ test("authenticates on /assets and creates an account snapshot through the API",
   await expect(positions.getByRole("cell", { name: "3.8500" })).toBeVisible();
 });
 
+test("shows asset explanations when their help markers are hovered", async ({ page }) => {
+  await page.goto("/assets");
+  await connect(page, `assets-help-${randomUUID()}`, "账户资产");
+
+  const help = page.getByRole("note", { name: "净资产估值说明" });
+  await help.hover();
+  await expect
+    .poll(() =>
+      help.evaluate((element) => ({
+        content: getComputedStyle(element, "::after").content,
+        opacity: getComputedStyle(element, "::after").opacity,
+      })),
+    )
+    .toEqual({
+      content: '"按现金与持仓行情估值；保护底仓、可卖数量与成本不计入。"',
+      opacity: "1",
+    });
+});
 test("validates snapshot amounts and preserves oversized decimal precision on repeat submits", async ({
   page,
 }) => {

@@ -10,7 +10,7 @@ import re
 import time
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Annotated, Any, Protocol, cast
 
@@ -703,8 +703,6 @@ def create_app(
         unavailable: str | None = None
         if as_of > now:
             unavailable = "account_snapshot_future"
-        elif now - as_of > timedelta(minutes=30):
-            unavailable = "account_snapshot_stale"
 
         valued_holdings: list[dict[str, object]] = []
         cash = Decimal(str(snapshot["available_cash"]))
@@ -734,9 +732,6 @@ def create_app(
                 quote_as_of = quote.timestamp.astimezone(UTC)
                 if quote_as_of > now:
                     unavailable = "quote_future"
-                    break
-                if now - quote_as_of > timedelta(minutes=30):
-                    unavailable = "quote_stale"
                     break
                 with localcontext() as context:
                     context.prec = (
