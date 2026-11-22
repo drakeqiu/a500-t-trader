@@ -243,8 +243,10 @@ test("shows asset explanations on hover and keyboard focus", async ({ page }) =>
           markerWidth: getComputedStyle(element).width,
           iconWidth: icon?.getAttribute("width"),
           iconAriaHidden: icon?.getAttribute("aria-hidden"),
-          markerAboveTitle: Boolean(heading && marker.bottom < heading.top + heading.height / 2),
-          markerRightOfTitle: Boolean(heading && marker.left > heading.right),
+          markerAboveTitle: Boolean(heading && marker.top < heading.top + heading.height / 2),
+          markerWithinTitle: Boolean(
+            heading && marker.left > heading.left && marker.right <= heading.right,
+          ),
         };
       }),
     )
@@ -257,7 +259,7 @@ test("shows asset explanations on hover and keyboard focus", async ({ page }) =>
       iconWidth: "16",
       iconAriaHidden: "true",
       markerAboveTitle: true,
-      markerRightOfTitle: true,
+      markerWithinTitle: true,
     });
   await help.focus();
   await expect
