@@ -4,24 +4,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { CircleHelp } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PageHeading } from "@/components/page-heading";
-import {
-  ApiError,
-  getNav,
-  getSnapshot,
-  saveSnapshot,
-  type AccountNav,
-  type SnapshotResult,
-} from "@/lib/a500-client";
+import { ApiError, getNav, type AccountNav, type SnapshotResult } from "@/lib/a500-client";
 import { beginAuthorization, configurationReady } from "@/lib/oidc";
 import { clearAccessToken, getAccessToken, subscribeSession } from "@/lib/session";
-import {
-  parseSnapshotDraft,
-  snapshotDraft,
-  snapshotDraftWithPositions,
-  snapshotPositions,
-  type PositionDraft,
-  type SnapshotDraft,
-} from "@/lib/snapshot-draft";
+import { useAccountSnapshotEditor } from "@/lib/use-account-snapshot-editor";
 
 const amount = (value: string | null | undefined, currency = "CNY") =>
   value === null || value === undefined
@@ -66,44 +52,9 @@ function AssetsDashboard({ token }: { token: string | null }) {
   const [nav, setNav] = useState<AccountNav | null>(null);
   const [navError, setNavError] = useState<string | null>(null);
   const [navBusy, setNavBusy] = useState(false);
-  const [snapshot, setSnapshot] = useState<SnapshotResult | null>(null);
-  const [snapshotKnown, setSnapshotKnown] = useState(false);
-  const [snapshotError, setSnapshotError] = useState<string | null>(null);
-  const [snapshotBusy, setSnapshotBusy] = useState(false);
-  const [draft, setDraft] = useState<SnapshotDraft>(snapshotDraft());
-  const [positions, setPositions] = useState<PositionDraft[]>([]);
-  const [draftDirty, setDraftDirty] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [latest, setLatest] = useState<SnapshotResult | null | undefined>(undefined);
-  const [conflict, setConflict] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
-  const snapshotOperationRef = useRef(false);
-  const snapshotRequestRef = useRef(0);
   const navRequestRef = useRef(0);
-  function replaceDraft(value: SnapshotDraft) {
-    setDraft(value);
-    setPositions(snapshotPositions(value));
-  }
-
-  function updatePosition(index: number, field: keyof PositionDraft, value: string) {
-    const next = positions.map((position, row) =>
-      row === index ? { ...position, [field]: value } : position,
-    );
-    setPositions(next);
-    setDraft((current) => snapshotDraftWithPositions(current, next));
-    setDraftDirty(true);
-    setSnapshotError(null);
-  }
-
-  function setPositionsAndDraft(next: PositionDraft[]) {
-    setPositions(next);
-    setDraft((current) => snapshotDraftWithPositions(current, next));
-    setDraftDirty(true);
-    setSnapshotError(null);
-  }
 
   const refreshNav = useCallback(async (accessToken: string, signal?: AbortSignal) => {
     const request = ++navRequestRef.current;
@@ -121,6 +72,41 @@ function AssetsDashboard({ token }: { token: string | null }) {
     }
   }, []);
 
+  const editor = useAccountSnapshotEditor({
+    token,
+    onUnauthorized: clearAccessToken,
+    refreshNav,
+  });
+  const {
+    snapshot,
+    known: snapshotKnown,
+    error: snapshotError,
+    busy: snapshotBusy,
+    draft,
+    positions,
+    dirty: draftDirty,
+    editing,
+    hasLatest,
+    conflict,
+    notice,
+    confirmDiscard,
+  } = editor.state;
+  const {
+    startEditing,
+    requestDiscard,
+    discardDraft,
+    reload: reloadSnapshot,
+    save,
+    setField,
+    updatePosition,
+    addPosition,
+    removePosition,
+    continueEditing,
+    replaceWithLatest,
+    keepDraftOnLatest,
+  } = editor.actions;
+  const busy = snapshotBusy || !snapshotKnown;
+  const hasSnapshot = snapshot !== null;
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
@@ -128,36 +114,10 @@ function AssetsDashboard({ token }: { token: string | null }) {
       await Promise.resolve();
       if (controller.signal.aborted) return;
       void refreshNav(token, controller.signal);
-      const request = ++snapshotRequestRef.current;
-      try {
-        const result = await getSnapshot(token, controller.signal);
-        if (controller.signal.aborted || request !== snapshotRequestRef.current) return;
-        setSnapshot(result);
-        setSnapshotKnown(true);
-        replaceDraft(snapshotDraft(result?.snapshot));
-      } catch (reason) {
-        if (controller.signal.aborted || request !== snapshotRequestRef.current) return;
-        if (reason instanceof ApiError && reason.status === 401) clearAccessToken();
-        setSnapshotError(reason instanceof Error ? reason.message : "读取账户快照失败。");
-      } finally {
-        if (!controller.signal.aborted) setSnapshotKnown(true);
-      }
     };
     void load();
     return () => controller.abort();
   }, [token, refreshNav]);
-
-  function discardDraft() {
-    const source = latest !== undefined ? latest : snapshot;
-    setSnapshot(source);
-    replaceDraft(snapshotDraft(source?.snapshot));
-    setDraftDirty(false);
-    setEditing(false);
-    setLatest(undefined);
-    setConflict(false);
-    setConfirmDiscard(false);
-    setSnapshotError(null);
-  }
 
   async function connect() {
     if (!configurationReady) {
@@ -175,86 +135,6 @@ function AssetsDashboard({ token }: { token: string | null }) {
       setAuthBusy(false);
     }
   }
-
-  async function reloadSnapshot() {
-    if (!token || snapshotOperationRef.current) return;
-    snapshotOperationRef.current = true;
-    const request = ++snapshotRequestRef.current;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    try {
-      const result = await getSnapshot(token);
-      if (request !== snapshotRequestRef.current) return;
-      setLatest(result);
-      if (!draftDirty) {
-        setSnapshot(result);
-        replaceDraft(snapshotDraft(result?.snapshot));
-      }
-      await refreshNav(token);
-      setNotice("已读取服务端最新快照。当前草稿保持不变；请选择如何处理版本差异。");
-    } catch (reason) {
-      if (request !== snapshotRequestRef.current) return;
-      if (reason instanceof ApiError && reason.status === 401) clearAccessToken();
-      setSnapshotError(reason instanceof Error ? reason.message : "读取最新快照失败。");
-    } finally {
-      snapshotOperationRef.current = false;
-      setSnapshotBusy(false);
-    }
-  }
-
-  async function saveAccount(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!token || !snapshotKnown || conflict || snapshotOperationRef.current) return;
-    snapshotOperationRef.current = true;
-    ++snapshotRequestRef.current;
-    setSnapshotBusy(true);
-    setSnapshotError(null);
-    setNotice(null);
-    try {
-      if (positions.some((position) => !position.symbol.trim())) {
-        throw new Error("请为每行填写证券代码，或删除空白行。");
-      }
-      if (new Set(positions.map((position) => position.symbol.trim())).size !== positions.length) {
-        throw new Error("证券代码不能重复。");
-      }
-      const payload = parseSnapshotDraft({
-        ...draft,
-        as_of: new Date().toISOString(),
-      });
-      const result = await saveSnapshot(token, payload, snapshot?.etag ?? null);
-      setSnapshot(result);
-      replaceDraft(snapshotDraft(result.snapshot));
-      setDraftDirty(false);
-      setEditing(false);
-      setLatest(undefined);
-      setConflict(false);
-      setNotice("账户快照已保存。正在从服务端重新读取完整净资产估值。");
-      await refreshNav(token);
-    } catch (reason) {
-      if (reason instanceof ApiError && (reason.status === 412 || reason.status === 428)) {
-        setConflict(true);
-        setSnapshotError(
-          "快照版本已变化，草稿仍保留，未覆盖服务端数据。请读取最新快照后明确选择处理方式。",
-        );
-      } else {
-        if (reason instanceof ApiError && reason.status === 401) clearAccessToken();
-        const message = reason instanceof Error ? reason.message : "保存快照失败";
-        setSnapshotError(`${message}。输入内容已保留。`);
-      }
-    } finally {
-      snapshotOperationRef.current = false;
-      setSnapshotBusy(false);
-    }
-  }
-
-  function setField<K extends keyof SnapshotDraft>(field: K, value: string) {
-    setDraft((current) => ({ ...current, [field]: value }));
-    setDraftDirty(true);
-    setSnapshotError(null);
-  }
-
-  const busy = snapshotBusy || !snapshotKnown;
-  const hasSnapshot = snapshot !== null;
 
   return (
     <AppShell activePath="/assets" connected={Boolean(token)} onConnect={() => void connect()}>
@@ -447,10 +327,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                       className="refresh-button primary"
                       type="button"
                       disabled={busy}
-                      onClick={() => {
-                        setEditing(true);
-                        setSnapshotError(null);
-                      }}
+                      onClick={startEditing}
                     >
                       {hasSnapshot ? "编辑快照" : "创建快照"}
                     </button>
@@ -460,13 +337,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                       className="refresh-button"
                       type="button"
                       disabled={snapshotBusy}
-                      onClick={() => {
-                        if (draftDirty) {
-                          setConfirmDiscard(true);
-                        } else {
-                          discardDraft();
-                        }
-                      }}
+                      onClick={requestDiscard}
                     >
                       取消编辑
                     </button>
@@ -498,11 +369,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                   <strong>放弃未保存的账户快照更改？</strong>
                   <p>当前输入尚未保存。</p>
                   <div className="asset-actions">
-                    <button
-                      className="refresh-button"
-                      type="button"
-                      onClick={() => setConfirmDiscard(false)}
-                    >
+                    <button className="refresh-button" type="button" onClick={continueEditing}>
                       继续编辑
                     </button>
                     <button className="refresh-button" type="button" onClick={discardDraft}>
@@ -529,7 +396,13 @@ function AssetsDashboard({ token }: { token: string | null }) {
 
               {snapshot && !editing && <SnapshotView snapshot={snapshot.snapshot} />}
               {editing && (
-                <form className="snapshot-editor" onSubmit={(event) => void saveAccount(event)}>
+                <form
+                  className="snapshot-editor"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void save();
+                  }}
+                >
                   <p className="snapshot-editor-note">
                     按照你查看账户的实际情况填写。证券持仓按行录入，不用编写
                     JSON；保存后会完整替换当前快照。
@@ -556,22 +429,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                         <h3 id="positions-title">证券持仓</h3>
                         <p>每只证券一行。没有持仓时可以留空；保护底仓和可卖数量按账户实际填写。</p>
                       </div>
-                      <button
-                        className="refresh-button"
-                        type="button"
-                        onClick={() =>
-                          setPositionsAndDraft([
-                            ...positions,
-                            {
-                              symbol: "",
-                              holdings: "0",
-                              protected_floor: "0",
-                              sellable: "0",
-                              cost_basis: "",
-                            },
-                          ])
-                        }
-                      >
+                      <button className="refresh-button" type="button" onClick={addPosition}>
                         添加证券
                       </button>
                     </div>
@@ -651,9 +509,7 @@ function AssetsDashboard({ token }: { token: string | null }) {
                             <button
                               className="text-action position-remove"
                               type="button"
-                              onClick={() =>
-                                setPositionsAndDraft(positions.filter((_, row) => row !== index))
-                              }
+                              onClick={() => removePosition(index)}
                             >
                               删除此行
                             </button>
@@ -677,34 +533,20 @@ function AssetsDashboard({ token }: { token: string | null }) {
                   {conflict && (
                     <div className="asset-conflict" role="group" aria-label="处理快照版本冲突">
                       <p>草稿内容仍保留。不会自动覆盖其他版本。</p>
-                      {latest !== undefined && (
+                      {hasLatest && (
                         <>
                           <button
                             className="refresh-button"
                             type="button"
                             disabled={snapshotBusy}
-                            onClick={() => {
-                              setSnapshot(latest);
-                              replaceDraft(snapshotDraft(latest?.snapshot));
-                              setDraftDirty(false);
-                              setEditing(false);
-                              setConflict(false);
-                              setLatest(undefined);
-                              setSnapshotError(null);
-                            }}
+                            onClick={replaceWithLatest}
                           >
                             使用最新快照替换草稿
                           </button>
                           <button
                             className="refresh-button"
                             type="button"
-                            onClick={() => {
-                              setSnapshot(latest);
-                              setConflict(false);
-                              setLatest(undefined);
-                              setSnapshotError(null);
-                              setNotice("草稿已保留；下次保存将以最新快照版本为条件进行完整替换。");
-                            }}
+                            onClick={keepDraftOnLatest}
                           >
                             保留草稿并使用最新版本
                           </button>
